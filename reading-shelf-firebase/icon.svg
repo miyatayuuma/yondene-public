@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="よんでね">
+<rect width="512" height="512" rx="108" fill="#FFF8EF"/>
+<path d="M124 161Q182 135 254 170L256 383Q194 354 126 370Q91 369 91 342V204Q91 175 124 161Z" fill="#53B9EA"/>
+<path d="M388 161Q331 135 258 170L256 383Q319 354 386 370Q422 369 422 342V204Q422 175 388 161Z" fill="#F58D9B"/>
+<path d="M256 169V380" stroke="#FFF8EF" stroke-width="12" stroke-linecap="round"/>
+<path d="M101 347Q165 330 249 385M411 347Q348 330 263 385" fill="none" stroke="#2F7B75" stroke-opacity=".25" stroke-width="9" stroke-linecap="round"/>
+<circle cx="164" cy="265" r="9" fill="#284752"/><circle cx="205" cy="265" r="9" fill="#284752"/>
+<circle cx="311" cy="265" r="9" fill="#284752"/><circle cx="352" cy="265" r="9" fill="#284752"/>
+<path d="M169 297Q185 315 202 297" fill="none" stroke="#284752" stroke-width="8" stroke-linecap="round"/>
+<path d="M314 297Q331 315 347 297" fill="none" stroke="#284752" stroke-width="8" stroke-linecap="round"/>
+<path d="M170 105L147 77" stroke="#F9CA4C" stroke-width="18" stroke-linecap="round"/>
+<path d="M254 90V56" stroke="#62BF93" stroke-width="18" stroke-linecap="round"/>
+<path d="M338 105L359 78" stroke="#F58D9B" stroke-width="18" stroke-linecap="round"/>
+</svg>

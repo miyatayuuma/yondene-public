@@ -1,0 +1,459 @@
+:root {
+  font-family: system-ui, -apple-system, "Noto Sans JP", sans-serif;
+  color: #263b47;
+  background: #fffaf3;
+  color-scheme: light;
+  line-height: 1.56;
+  --green: #287a69;
+  --ink: #263b47;
+  --line: #e8e5df;
+  --muted: #61727d;
+  --cream: #fffaf3;
+  --blue: #e6f5fe;
+  --pink: #ffe9ef;
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+button, input, select, textarea { font: inherit; }
+button {
+  cursor: pointer; color: var(--ink); font-weight: 650;
+  background: #fff; border: 1px solid #dfdfdd; border-radius: 999px;
+  padding: 10px 15px; transition: background .15s, transform .15s;
+}
+button:hover:not(:disabled) { background: #f2f8fb; }
+button:active:not(:disabled) { transform: translateY(1px); }
+button:disabled { opacity: .5; cursor: not-allowed; }
+button.primary { background: var(--green); color: white; border-color: var(--green); }
+button.primary:hover { background: #216554; }
+button.danger { color: #a13a46; border-color: #eacbd0; }
+.ghost { border: none; background: transparent; font-size: 23px; padding: 1px 8px; }
+
+header {
+  position: sticky; top: 0; z-index: 4; background: #fffaf5f5;
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(12px);
+}
+.top {
+  max-width: 1120px; margin: auto; min-height: 76px; padding: 12px 26px;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+}
+.logo { display: flex; align-items: center; gap: 10px; font-weight: 850; font-size: 24px; letter-spacing: .01em; color: #348dc4; }
+.logoIcon { width: 49px; height: 49px; border-radius: 14px; flex: none; }
+.logo small { display: block; color: #64737c; font-size: 10px; font-weight: 550; letter-spacing: .09em; }
+.headerActions { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 12px; }
+#identity { overflow-wrap: anywhere; }
+main { max-width: 1120px; padding: 0 26px 68px; margin: auto; }
+.hero {
+  background: linear-gradient(108deg, #e9f7ff 0%, #fff6f5 60%, #fff8e8 100%);
+  border: 1px solid #e4ebed; border-radius: 24px; padding: 27px 32px;
+  margin: 24px 0 19px;
+}
+.hero h1 { font-size: clamp(25px, 4vw, 37px); color: #234b64; line-height: 1.3; margin: 0 0 7px; }
+.hero p { margin: 0; color: #526b7b; font-size: 14px; }
+.panel {
+  max-width: 680px; padding: 26px; margin: 20px auto; border-radius: 22px;
+  background: #fff; border: 1px solid var(--line);
+}
+.panel.center { text-align: center; }
+.panel h2 { margin: 0 0 10px; font-size: 21px; }
+.panel label { display: block; margin: 10px 0; }
+.panel input { display: block; width: 100%; margin: 5px 0 14px; }
+.notice {
+  padding: 13px 16px; background: #fff6dc; color: #65512b;
+  border: 1px solid #f3dfaa; border-radius: 13px; margin-bottom: 14px; white-space: pre-line;
+}
+.notice.error { background: #fff3f3; color: #92323c; border-color: #f3c5cb; }
+.muted { color: var(--muted); }
+.tiny { font-size: 12px; }
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0 0 20px; }
+.stats > div { border-radius: 20px; padding: 15px 22px; min-width: 0; border: 1px solid #f1efea; background: var(--blue); }
+.stats > div:nth-child(2) { background: #e9f8ee; }
+.stats > div:nth-child(3) { background: var(--pink); }
+.stats strong { display: block; font-size: 29px; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.stats span { display: block; color: #55707a; font-size: 12px; margin-top: 5px; }
+.tabs {
+  display: flex; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid var(--line);
+  padding-bottom: 13px; margin: 10px 0;
+}
+.tabs button { padding: 10px 17px; }
+.tabs button.active { background: #ddf3e9; color: #1c654e; border-color: #b2dbc6; }
+.controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 17px 0 22px; }
+input, select, textarea {
+  min-width: 0; padding: 11px 13px; color: var(--ink);
+  background: white; border: 1px solid #d7dedf; border-radius: 12px;
+}
+#search { flex: 1; min-width: 160px; }
+.books { display: grid; grid-template-columns: repeat(auto-fill, minmax(143px,1fr)); gap: 23px 17px; }
+.book { display: block; text-align: left; min-width: 0; border: 0; border-radius: 13px; padding: 0; background: transparent; font-weight: normal; }
+.book:hover { background: transparent !important; }
+.cover {
+  position: relative; display: grid; place-items: center; aspect-ratio: 2/3;
+  border: 1px solid #e1e2dc; border-radius: 12px; overflow: hidden;
+  background: linear-gradient(130deg,#c9e8f8,#fff1e9); padding: 13px;
+  text-align: center; font: 700 16px/1.5 serif; overflow-wrap: anywhere;
+  box-shadow: 0 3px 10px #28405012;
+}
+.cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #fff; }
+.flag { position: absolute; right: 0; bottom: 0; z-index: 1; max-width: 100%; white-space: nowrap; pointer-events: none; font: 10px/1.25 system-ui; padding: 5px 7px; color: #fff; background: #21785e; border-radius: 11px 0 0 0; }
+.flag.unread { background: #85828d; }
+.flag.reading { background: #377ead; }
+.flag.paused { background: #ad773c; }
+.book strong { display: block; overflow-wrap: anywhere; font-size: 13px; line-height: 1.45; margin-top: 10px; }
+.book .sub { display: block; overflow-wrap: anywhere; margin-top: 4px; color: var(--muted); font-size: 11px; }
+.bookPublicationYear { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; line-height: 1.4; }
+.group { padding: 17px 0 29px; border-bottom: 1px solid var(--line); }
+.group h2 { margin: 0 0 5px; font-size: 21px; }
+.group p { margin: 0 0 16px; font-size: 12px; color: var(--muted); }
+.listPanel { display: grid; gap: 13px; }
+.person, .invite { padding: 15px; background: #fff; border: 1px solid var(--line); border-radius: 14px; }
+.person { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.familyActions { display: flex; align-items: end; gap: 9px; margin: 12px 0; flex-wrap: wrap; }
+.familyActions input { min-width: 170px; }
+.link { word-break: break-all; font-size: 12px; color: #237495; }
+.empty { border: 1px dashed #d4dbdd; color: var(--muted); border-radius: 14px; padding: 29px 16px; text-align: center; }
+dialog {
+  width: min(94vw,720px); max-height: 92dvh; overflow-y: auto; padding: 0;
+  color: var(--ink); background: #fffaf6; border: 0; border-radius: 21px;
+  box-shadow: 0 16px 65px #253b4b66;
+}
+dialog::backdrop { background: #172c41ad; }
+.dialogInner { padding: 23px; }
+.dialogTop { display: flex; justify-content: space-between; align-items: center; gap: 12px; border-bottom: 1px solid var(--line); margin-bottom: 16px; }
+.dialogTop h2 { margin: 0 0 13px; font-size: 22px; }
+.bookSummary { display: grid; grid-template-columns: 134px minmax(0,1fr); gap: 19px; align-items: start; }
+.bookDetailCover { width: 134px; aspect-ratio: 2/3; font-size: 13px; }
+.bibliography { display: grid; grid-template-columns: 105px minmax(0,1fr); gap: 8px 11px; font-size: 13px; }
+.bibliography dt { color: var(--muted); font-weight: 650; }
+.bibliography dd { margin: 0; overflow-wrap: anywhere; }
+.detailNote { border-top: 1px solid var(--line); padding-top: 13px; font-size: 13px; line-height: 1.85; overflow-wrap: anywhere; }
+.detailNote a { color: #246f89; font-weight: 750; }
+button:focus-visible,input:focus-visible,select:focus-visible,.book:focus-visible { outline: 3px solid #2d97bd; outline-offset: 3px; }
+@media(max-width:650px){
+  .top { padding: 10px 13px; min-height: 66px; gap: 9px; }
+  .logoIcon { width: 39px; height: 39px; }
+  .logo { font-size: 18px; gap: 6px; }
+  .logo small { font-size: 9px; }
+  .headerActions { gap: 5px; font-size: 10px; }
+  .headerActions button { padding: 8px 10px; font-size: 11px; }
+  #identity { max-width: 125px; }
+  main { padding: 0 13px 45px; }
+  .hero { margin: 13px 0; padding: 20px 18px; border-radius: 20px; }
+  .stats { gap: 8px; margin-bottom: 15px; }
+  .stats > div { padding: 12px 9px; border-radius: 14px; }
+  .stats strong { font-size: 22px; }
+  .stats span { font-size: 11px; }
+  .tabs button { font-size: 12px; padding: 9px 12px; }
+  .books { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 15px 10px; }
+  .cover { font-size: 12px; padding: 8px; }
+  .book strong { font-size: 12px; }
+  .dialogInner { padding: 17px; }
+}
+@media(max-width:440px){
+  .bookSummary { grid-template-columns: 96px minmax(0,1fr); gap: 12px; }
+  .bookDetailCover { width: 96px; }
+  .bibliography { grid-template-columns: 1fr; gap: 1px; font-size: 12px; }
+  .bibliography dd { margin-bottom: 8px; }
+  .tabs { gap: 5px; }
+}
+@media(max-width:360px){ .books { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+
+.installApp{border-color:#abd9c2;background:#e6f7ed;color:#1c6954;white-space:nowrap;font-size:12px}
+.installApp:hover{background:#d6f0e3}
+
+/* Book community — text-only, no Firebase Storage dependency */
+.community{margin-top:28px;border-top:1px solid var(--line);padding-top:18px}
+.communityHeading{margin:0 0 14px;font-size:18px}
+.communityPanel{background:#fff;border:1px solid var(--line);border-radius:18px;padding:17px;margin:15px 0}
+.communityPanel h4{margin:0 0 10px;font-size:15px}
+.communityStack{display:grid;gap:10px}
+.communityStack .muted{margin:5px 0}
+.reflectionCard{background:#f4f8f5;border-radius:14px;padding:12px 14px}
+.reflectionQuote{font-size:14px;white-space:pre-wrap;margin:0 0 5px}
+.communityReactions{display:flex;flex-wrap:wrap;gap:8px;margin:15px 0}
+.reactionButton{background:#fff;padding:9px 15px;border-color:#e4d7dc;font-size:12px}
+.reactionButton.selected{background:#ffe8ef;border-color:#edb9c8;color:#975169}
+.commentItem{padding:12px 0;border-bottom:1px solid var(--line)}
+.commentHead{display:flex;align-items:baseline;justify-content:space-between;gap:12px;font-size:13px}
+.commentText{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.65;font-size:14px;margin:7px 0}
+.commentActions{display:flex;gap:6px;flex-wrap:wrap}
+.commentActions .textAction{background:transparent;border:none;font-size:12px;color:var(--muted);padding:4px 7px}
+.commentCompose{display:grid;gap:9px;margin-top:14px}
+.commentCompose textarea,.commentEdit{width:100%;resize:vertical;min-height:70px}
+.commentCompose .primary{justify-self:end}
+.moderatedHeading{margin-top:22px!important;color:#9b5766}
+
+/* Family recommendations — separate from formal book records */
+.recommendationPage>h2{font-size:24px;margin:12px 0 5px}
+.recommendationPage>.muted{font-size:13px;margin:0 0 17px}
+.recommendationCompose{background:#fff;border:1px solid var(--line);border-radius:19px;padding:17px;display:grid;gap:9px;margin-bottom:22px}
+.recommendationCompose input,.recommendationCompose textarea{width:100%}
+.recommendationCompose .primary{justify-self:end}
+.recommendationList{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px;align-items:start}
+.recommendationCard{padding:18px;background:#fff;border:1px solid var(--line);border-radius:18px;overflow-wrap:anywhere}
+.recommendationCard h3{font-size:18px;margin:0 0 7px}
+.bookCoverEditionNote{align-self:flex-start;font-size:10px;line-height:1.35;color:var(--muted);text-align:left}
+.bookCoverWarning{font-size:12px;line-height:1.55;color:var(--muted);margin:7px 0}
+.recommendationTag{display:inline-block;border-radius:999px;background:#eaf5ed;color:#27725d;padding:3px 8px;font-size:11px}
+.recommendationCard .muted{font-size:11px}
+.recommendationOpinion{border-top:1px solid var(--line);padding:11px 0 4px;margin-top:9px}
+.recommendationOpinion strong{font-size:12px}
+.recommendationOpinion p{white-space:pre-wrap;font-size:13px;line-height:1.6;margin:6px 0}
+.recommendationLink{display:inline-block;margin:5px 0;color:#267591;font-size:12px}
+.recommendationOpinion textarea,.recommendationOpinion input{display:block;width:100%;margin:8px 0}
+.recommendationModeration{border-top:1px solid var(--line);margin-top:23px;padding-top:18px}
+@media(max-width:650px){.recommendationList{grid-template-columns:1fr}.recommendationPage>h2{font-size:21px}}
+
+.iconButton{width:40px;height:40px;border-radius:50%;font-size:20px;padding:0;background:#fff;display:grid;place-items:center}
+.iconButton.active{background:#ddf3e9;border-color:#acd9bf;color:#246550}
+
+/* A hidden attribute must win over component display rules (e.g. iconButton). */
+[hidden]{display:none!important}
+@media(max-width:650px){
+  /* Signed-in email remains available in family settings; keep controls usable. */
+  #identity{display:none}
+  .headerActions{flex-shrink:0}
+  .iconButton{width:38px;height:38px}
+}
+
+/* Book detail: family conversation first, optional catalog metadata second. */
+#bookInfoDialog .dialogTop{
+  position:sticky;top:0;z-index:3;background:#fffaf6;
+  padding-top:3px;padding-bottom:7px;margin-bottom:12px;
+}
+#bookInfoDialog .dialogTop h2{
+  line-height:1.4;font-size:18px;overflow-wrap:anywhere;
+  margin:0;max-width:calc(100% - 54px);
+}
+#bookInfoDialog .dialogTop .ghost{
+  min-width:42px;min-height:42px;flex-shrink:0;
+  border-radius:50%;
+}
+.bookSummaryCompact{align-items:start;margin-bottom:13px}
+.bookSummaryCompact .bookDetailCover{width:112px}
+.bookLead{display:flex;flex-direction:column;align-items:flex-start;gap:6px;min-width:0}
+.bookStatusPill{display:inline-flex;align-items:center;font-weight:750;font-size:12px;
+  border-radius:999px;background:#ddf3e9;color:#1c654e;padding:4px 10px}
+.bookLeadLine{font-size:13px;color:var(--muted);margin:0;overflow-wrap:anywhere}
+.bookMetadataDetails{
+  margin:22px 0 4px;padding:13px 14px;border:1px solid var(--line);
+  background:#fff;border-radius:15px;
+}
+.bookMetadataDetails>summary{
+  cursor:pointer;font-size:14px;font-weight:750;color:#31516a;
+  padding:3px 0;min-height:30px;
+}
+.bookMetadataDetails[open]>summary{margin-bottom:17px}
+.bookMetadataDetails .bibliography{margin:0}
+.bookMetadataDetails .detailNote{margin:13px 0 0}
+#bookInfoDialog .community{margin-top:13px;padding-top:15px}
+@media(max-width:440px){
+  .bookSummaryCompact{grid-template-columns:89px minmax(0,1fr);gap:13px}
+  .bookSummaryCompact .bookDetailCover{width:89px}
+  #bookInfoDialog .dialogInner{padding:15px}
+  #bookInfoDialog .communityPanel{padding:14px}
+  #bookInfoDialog .communityHeading{font-size:17px}
+}
+
+/* Two-row mobile search: one input and two native menus, without redundant order toggle. */
+#bookControls.controls{
+  display:grid;grid-template-columns:minmax(0,1fr);gap:9px;
+  align-items:stretch;margin:17px 0 22px;
+}
+#bookControls #search{width:100%;min-width:0;min-height:46px;}
+.bookSelectRow{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.33fr);gap:9px;width:100%;min-width:0}
+.fieldLabel{display:block;width:100%;min-width:0}
+.fieldLabel select{
+  display:block;width:100%;min-width:0;max-width:100%;
+  min-height:44px;padding:9px 8px;font-size:14px;
+  text-overflow:ellipsis;
+}
+.fieldLabel select:disabled{opacity:.7;background:#f5f3ed;}
+.srOnly{
+  position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+  clip:rect(0,0,0,0);white-space:nowrap;border:0;
+}
+.appVersion{margin-top:20px;border-top:1px solid var(--line);padding-top:10px}
+@media(max-width:440px){
+  #bookControls #search{min-height:44px}
+  .bookSelectRow{gap:7px;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr)}
+  .fieldLabel select{font-size:12px;padding:9px 5px;min-height:43px}
+}
+
+
+/* Restricted owner reading edit; not a general book administration editor. */
+.readingRecordEditSection{margin:0 0 14px}
+.readingEditEntry{display:flex;gap:9px;flex-wrap:wrap}
+.readingEditEntry button{min-height:44px}
+.readingEditDialog{width:min(94vw,460px);max-height:90dvh;overflow:auto;padding:20px}
+.readingEditForm{display:flex;flex-direction:column;gap:12px}
+.readingEditForm h3{margin:0}
+.readingEditForm .readingEditField{display:flex;flex-direction:column;gap:6px;font-size:14px}
+.readingEditForm input,.readingEditForm select{width:100%;box-sizing:border-box;font-size:16px;min-height:44px}
+.readingEditForm fieldset{margin:0;padding:12px;border:1px solid var(--line);border-radius:10px;min-width:0;display:flex;flex-direction:column;gap:9px}
+.readingEditForm fieldset[hidden],.readingEditForm .readingEditField[hidden]{display:none}
+.readingEditFeedback{min-height:1.2em;color:var(--muted);font-size:13px;margin:0}
+.readingEditActions{display:flex;gap:8px}
+.readingEditActions button{flex:1;min-height:44px}
+@media(max-width:440px){.readingEditDialog{padding:14px}.readingEditEntry button{flex:1}}
+/* Read-only rating badges remain above the status chip, never block taps. */
+.bookRating{position:absolute;z-index:1;right:0;bottom:27px;pointer-events:none;white-space:nowrap;font:700 12px/1.2 system-ui;letter-spacing:-.7px;color:#fff;background:#665328ed;border-radius:9px 0 0 9px;padding:3px 5px}
+.childRatingSection{margin:0 0 16px;padding:12px 14px;border:1px solid var(--line);border-radius:13px}
+.childRatingSection .ratingSummary{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.childRatingSection .ratingSummary strong{font-size:17px}
+.childRatingSection .ratingSummary button{margin-left:auto}
+.childRatingDialog{border:0;border-radius:18px;max-width:min(94vw,440px);width:100%;padding:22px;box-shadow:0 12px 45px #172c4166}
+.childRatingDialog::backdrop{background:#172c41a8}
+.ratingDialogHead{display:flex;gap:12px;align-items:center;margin-bottom:16px}
+.ratingDialogHead .ratingTitle{font-size:16px;font-weight:750;overflow-wrap:anywhere}
+.ratingDialogHead img{width:55px;aspect-ratio:2/3;object-fit:contain}
+.ratingQuestion{font-size:20px;font-weight:750;text-align:center;margin:12px 0}
+.ratingStars{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:3px}
+.ratingStars button{min-width:0;min-height:48px;font-size:31px;line-height:1.1;background:transparent;color:#999;border:1px solid transparent;border-radius:10px;padding:5px}
+.ratingStars button.selected{color:#a77e0c;background:#fff4ce}
+.ratingActions{display:flex;flex-wrap:wrap;gap:8px;margin-top:17px}
+.ratingActions button{flex:1;min-height:44px}
+.ratingDialogNotice{min-height:1.7em;text-align:center;font-size:13px}
+@media(max-width:440px){.bookRating{font-size:10px;bottom:24px;padding:3px 4px;letter-spacing:-1px}.childRatingDialog{padding:15px}.ratingStars button{min-height:48px;padding:3px}}
+@media(prefers-reduced-motion:reduce){.ratingStars button{transition:none}}
+
+/* Card cover: mode top-left and completion state/period bottom-right.
+   Overlays remain above the image (including failed image) and never intercept taps. */
+.book .cover .modeChip{
+  position:absolute;z-index:1;left:0;top:0;max-width:100%;
+  margin:0;border-radius:0 0 10px 0;padding:5px 7px;
+  font:650 10px/1.25 system-ui;white-space:nowrap;pointer-events:none;
+  color:#174f43;background:#ddf3e9;
+}
+@media(max-width:440px){
+  .book .cover .modeChip,.book .cover .flag{font-size:9px;padding:4px 5px}
+}
+
+/* High-priority reading UX: small activity stream, optional recommendation lookup. */
+.familyActivity{margin:8px 0 22px;background:#fff;border:1px solid var(--line);border-radius:18px;padding:14px 16px}
+.familyActivity h2{font-size:15px;margin:0 0 8px;color:#2e5669}
+.familyActivityList{display:grid;gap:0}
+.familyActivity .muted{margin:6px 0}
+.activityItem{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 12px;align-items:center;
+  border:0;border-bottom:1px solid var(--line);border-radius:0;padding:10px 0;text-align:left;background:none;font-weight:500;width:100%}
+.activityItem:last-child{border-bottom:0}
+.activityItem:hover{background:#f8fbfa}
+.activityTitle{grid-column:1;color:#486675;font-size:12px}
+.activityBook{grid-column:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:700}
+.activityItem>.muted{grid-column:2;grid-row:1/3;font-size:11px}
+.recommendationCover{float:right;max-width:72px;max-height:112px;object-fit:contain;margin:2px 0 9px 11px;border-radius:5px}
+@media(max-width:440px){.familyActivity{padding:12px 13px}.activityTitle{font-size:11px}.activityBook{font-size:12px}}
+
+/* Formal child reflection: available to the owner, never mixed with comments. */
+.reflectionEditorDetails{margin:12px 0 4px;border-top:1px solid var(--line);padding-top:11px}
+.reflectionEditorDetails>summary{font-size:13px;font-weight:750;color:#246d76;cursor:pointer;padding:6px 0}
+.reflectionCompose{margin-top:10px;display:grid;gap:9px}
+.reflectionCompose h5{display:none}
+.reflectionCompose textarea{width:100%;resize:vertical;min-height:80px}
+.reflectionCompose select,.reflectionCompose input{width:100%}
+.reflectionCompose .primary{justify-self:end}
+.voiceInputButton{justify-self:start;background:#e7f6f2;color:#276f6b;font-size:12px}
+
+/* Preserve the editable profile field while live membership and invite lists refresh. */
+.settingsMembers,.settingsInvites{display:grid;gap:13px;min-width:0}
+.settingsMembers h3,.settingsInvites h3{margin:7px 0 0}
+
+
+/* v14 mobile usability: controls should be readable and reliably tappable.
+   Large book cards remain full-card targets; badges are noninteractive. */
+@media (max-width:650px) {
+  button:not(.book), .bookMetadataDetails>summary, .reflectionEditorDetails>summary {
+    min-height:44px;
+  }
+  .top { flex-wrap:wrap; row-gap:8px; }
+  .headerActions { margin-left:auto; }
+  .headerActions button { min-height:44px; padding:10px 12px; font-size:13px; }
+  .iconButton, .headerActions .iconButton { width:44px; height:44px; min-width:44px; }
+  .tabs { flex-wrap:nowrap; }
+  .tabs button { flex:1 1 0; padding:10px 8px; font-size:14px; }
+  .book strong { font-size:13px; line-height:1.5; }
+  .book .sub { font-size:12px; line-height:1.5; }
+  /* Keep native form controls at least 16px to avoid unintended focus zoom. */
+  input, select, textarea, #bookControls .fieldLabel select { font-size:16px; }
+  #bookControls .fieldLabel select { min-height:44px; padding:10px 12px; }
+  .fieldLabel .srOnly {
+    position:static; display:block; width:auto; height:auto; margin:0 0 5px;
+    padding:0; overflow:visible; clip:auto; white-space:normal;
+    color:var(--muted); font-size:13px;
+  }
+  .familyActions input { min-width:0; flex:1 1 200px; }
+  .reactionButton, .voiceInputButton { font-size:14px; padding:10px 14px; }
+  .commentActions .textAction, .recommendationOpinion .textAction {
+    min-height:44px; padding:10px 12px; font-size:14px;
+  }
+  .bookMetadataDetails>summary, .reflectionEditorDetails>summary {
+    display:list-item; padding:10px 2px; line-height:1.5;
+  }
+  .activityItem { min-height:52px; padding:12px 0; }
+  .activityBook {
+    white-space:normal; overflow:hidden; overflow-wrap:anywhere;
+    display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2;
+    line-height:1.45; font-size:14px;
+  }
+  .activityTitle { font-size:13px; }
+  .activityItem>.muted { font-size:12px; }
+  .commentText { font-size:15px; }
+  .recommendationOpinion strong { font-size:14px; }
+  .recommendationOpinion p { font-size:14px; }
+  .recommendationTag { font-size:12px; }
+  dialog {
+    width:calc(100vw - 16px);
+    max-height:calc(100dvh - 24px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    overflow-x:hidden; overscroll-behavior:contain;
+  }
+  #bookInfoDialog .dialogTop .ghost { min-width:44px; min-height:44px; }
+  .recommendationLink { display:inline-flex; align-items:center; min-height:44px; font-size:14px; padding:8px 0; overflow-wrap:anywhere; }
+}
+@media (max-width:440px) {
+  /* Long Japanese sorting labels should not be compressed to 12px. */
+  .bookSelectRow { grid-template-columns:minmax(0,1fr); gap:10px; }
+  #bookControls .fieldLabel select { font-size:16px; min-height:46px; }
+  .familyActivity .activityBook { font-size:14px; }
+  .book strong { font-size:13px; }
+}
+@media (prefers-reduced-motion:reduce) {
+  button { transition:none; }
+  button:active:not(:disabled) { transform:none; }
+}
+
+textarea:focus-visible, summary:focus-visible, a:focus-visible {
+  outline:3px solid #2d97bd; outline-offset:3px;
+}
+
+/* v15 discovery: compact, acknowledgement-aware activity with optional history. */
+.familyActivityControls{display:flex;flex-wrap:wrap;gap:7px;justify-content:flex-end;margin-top:7px}
+.familyActivityControls button{background:#f0f7f6;color:#215e55;font-size:13px}
+.familyActivity.activityIsRead{padding-top:10px;padding-bottom:10px}
+.familyActivity.activityIsRead .familyActivityList .muted{margin:2px 0;font-size:12px}
+.commentFocused{background:#fff3d8;border-radius:10px;box-shadow:inset 0 0 0 2px #dca75a;padding:12px}
+.commentFocused:focus{outline:3px solid #2d97bd;outline-offset:2px}
+.commentJumpNotice{border-left:3px solid #b0c9cc;padding:8px 12px}
+/* Preserve the user's preference for two compact, side-by-side selects. */
+@media(max-width:440px){
+  .bookSelectRow{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:7px}
+  #bookControls .fieldLabel select{font-size:16px;min-height:46px;padding:9px 5px}
+  .familyActivityControls button{min-height:44px;font-size:13px}
+}
+
+/* v16 owner dashboard: opened on demand, never a shelf-wide live listener. */
+.pendingReflections{background:#fff;border:1px solid var(--line);border-radius:14px;padding:10px 15px}
+.pendingReflections>summary{cursor:pointer;color:#246d76;font-weight:750;min-height:44px;padding:10px 2px}
+.pendingReflections>p{margin:8px 0}
+.pendingReflectionsActions{display:flex;justify-content:flex-end}
+.pendingReflectionsList{display:grid;gap:8px;margin:9px 0}
+.pendingReflectionMeta{display:grid;gap:3px;min-width:0;flex:1}
+.pendingReflectionMeta strong{overflow-wrap:anywhere}
+.pendingReflectionItem button{flex-shrink:0}
+@media(max-width:440px){
+  .pendingReflectionItem button{font-size:14px;min-height:44px}
+}
+
+/* v17: explicit, reversible administrative actions for formal observations. */
+.reflectionCard .textAction{background:transparent;color:#8e4553;border:0;min-height:44px;padding:9px 10px;font-size:13px}
+.withdrawnReflections{margin:12px 0 4px;border-top:1px solid var(--line);padding-top:12px}
+.withdrawnReflections>summary{font-size:13px;font-weight:750;color:#5b6672;cursor:pointer;min-height:44px;padding:10px 2px}
+.reflectionArchived{border-left:3px solid #ba9089;padding:9px 12px;background:#faf5f1}
+.reflectionArchived .primary{font-size:13px;min-height:44px}

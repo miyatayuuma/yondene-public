@@ -114,7 +114,7 @@ function setup({mockRelease=false} = {}) {
     pending:yondeneQueuePending_, process:yondeneQueueProcess,
     apply:yondeneQueueApplyTransaction_,settings:yondeneQueueSettingsCommand_,
     processSettings:yondeneQueueProcessSettings_})`,ctx);
-  const command = {schemaVersion:1,commandId:'demo-command-001',
+  const command = {schemaVersion:1,commandId:'gas-demo-command-001',
     op:'book.patch',bookId:'demo-book',expectedTitle:'Demo Book',
     expectedUpdatedAt:DATE,patch:{status:'read',reportedAt:'2026-10-24',notes:''},
     reason:'Test an explicitly reported completion'};
@@ -146,10 +146,14 @@ test('Stage A direct invocation cannot write',()=>{
 
 test('schema and queue ID checked',()=>{
   const s=setup(), parsed=s.api.parse(s.cells);
-  assert.equal(parsed.command.commandId,'demo-command-001');
+  assert.equal(parsed.command.commandId,'gas-demo-command-001');
   assert.match(parsed.digest,/^[0-9a-f]{64}$/);
   const wrong=s.cells.slice();wrong[0]='different-id';
   assert.throws(()=>s.api.parse(wrong),/一致/);
+  const legacy=s.cells.slice();
+  legacy[0]='legacy-command';
+  legacy[3]=JSON.stringify({...s.command,commandId:'legacy-command'});
+  assert.throws(()=>s.api.parse(legacy),/gas-/);
 });
 
 test('unsafe operations and unknown fields rejected',()=>{
@@ -199,6 +203,9 @@ test('commit uses atomic target CAS plus create-only marker',()=>{
   assert.equal(writes[0].update.fields.status.stringValue,'read');
   assert.ok(writes[0].updateMask.fieldPaths.includes('status'));
   assert.equal(writes[1].update.fields.sourceDigest.stringValue,parsed.digest);
+  assert.equal(writes[1].update.fields.sourceCommandChannel.stringValue,'private-google-sheet');
+  assert.equal(writes[1].update.fields.sourceDigestScheme.stringValue,
+    'sha256-json-stringify-v1');
 });
 
 test('book identity corrections are transactionally guarded and preserve stable ID',()=>{
@@ -230,7 +237,7 @@ test('book title/author/ISBN corrections reject duplicates from other IDs',()=>{
 });
 test('series rename is uniqueness checked and revision-bound',()=>{
   const s=setup({mockRelease:true}),base={
-    schemaVersion:1,commandId:'rename-series-01',op:'series.patch',
+    schemaVersion:1,commandId:'gas-rename-series-01',op:'series.patch',
     seriesId:'demo-series',expectedName:'Demo Series',
     expectedUpdatedAt:DATE,patch:{name:'Corrected Series'},reason:'Synthetic correction'};
   assert.equal(s.api.apply('fake',s.env,withCommand(s,base)),'APPLIED');
@@ -260,7 +267,7 @@ function withCommand(s, command) {
 
 test('book.create checks title-author and ISBN duplicates and uses create preconditions',()=>{
   const s=setup({mockRelease:true});
-  const command={schemaVersion:1,commandId:'create-book-1',op:'book.create',
+  const command={schemaVersion:1,commandId:'gas-create-book-1',op:'book.create',
     bookId:'brand-new-book',
     book:{title:'Synthetic Book',author:'Test Writer',
       status:'unread',coverUrl:'https://example.invalid/cover.jpg',
@@ -288,7 +295,7 @@ test('book.create checks title-author and ISBN duplicates and uses create precon
 
 test('series.create rejects duplicates and writes create-only document',()=>{
   const s=setup({mockRelease:true});
-  const command={schemaVersion:1,commandId:'series-create-1',op:'series.create',
+  const command={schemaVersion:1,commandId:'gas-series-create-1',op:'series.create',
     seriesId:'synthetic-series',series:{name:'Synthetic Series',totalVolumes:3},
     reason:'Create synthetic series'};
   const parsed=withCommand(s,command);
@@ -307,7 +314,7 @@ test('series.create rejects duplicates and writes create-only document',()=>{
 
 test('childRating.set only creates first rating, repeat uses marker only',()=>{
   const s=setup({mockRelease:true});
-  const command={schemaVersion:1,commandId:'rating-new-1',op:'childRating.set',
+  const command={schemaVersion:1,commandId:'gas-rating-new-1',op:'childRating.set',
     bookId:'demo-book',expectedTitle:'Demo Book',stars:4,reason:'Synthetic rating'};
   const parsed=withCommand(s,command);
   const plan=s.api.preflight('fake',s.env,s.family,parsed);
@@ -334,7 +341,7 @@ test('childRating.set only creates first rating, repeat uses marker only',()=>{
 
 test('childReflection.create atomically creates reflection, activity and marker',()=>{
   const s=setup({mockRelease:true});
-  const command={schemaVersion:1,commandId:'reflection-new-1',
+  const command={schemaVersion:1,commandId:'gas-reflection-new-1',
     op:'childReflection.create',bookId:'demo-book',expectedTitle:'Demo Book',
     quote:'An invented observation',attribution:'parent-summary',
     observedAt:'2026-10-24',reason:'Synthetic reflection'};
@@ -350,13 +357,13 @@ test('childReflection.create atomically creates reflection, activity and marker'
   assert.equal(writes[1].update.fields.hidden.booleanValue,false);
   assert.match(writes[0].update.fields.createdAt.timestampValue,/^2026/);
   assert.match(writes[1].update.fields.createdAt.timestampValue,/^2026/);
-  assert.match(writes[0].update.name,/childReflections\/reflection-new-1$/);
-  assert.match(writes[1].update.name,/activity\/reflection-reflection-new-1$/);
+  assert.match(writes[0].update.name,/childReflections\/gas-reflection-new-1$/);
+  assert.match(writes[1].update.name,/activity\/reflection-gas-reflection-new-1$/);
 });
 
 test('create rejects unexpected child data, incomplete title and missing cover',()=>{
   const s=setup();
-  const base={schemaVersion:1,commandId:'create-invalid-1',op:'book.create',
+  const base={schemaVersion:1,commandId:'gas-create-invalid-1',op:'book.create',
     bookId:'new-book',book:{title:'Synthetic',status:'unread'},
     reason:'Invalid synthetic create'};
   assert.throws(()=>withCommand(s,base),/書影URL/);
@@ -379,7 +386,7 @@ test('disabled code cannot be bypassed through commit, transaction or settings',
 
 test('transaction preflight and commit share one transaction',()=>{
   const s=setup({mockRelease:true});
-  const command={schemaVersion:1,commandId:'txn-book-create',
+  const command={schemaVersion:1,commandId:'gas-txn-book-create',
     op:'book.create',bookId:'txn-book',
     book:{title:'Synthetic Title',author:'Synthetic Author',
       status:'unread',coverUrl:'https://example.invalid/book.png',isbn:'9780000000017'},
@@ -452,7 +459,7 @@ test('settings reject stale names and do not alter C2 on conflict',()=>{
 
 test('catalog audit atomically patches multiple bibliographic records',()=>{
   const s=setup({mockRelease:true});
-  const command={schemaVersion:1,commandId:'catalog-correct-01',op:'catalog.audit',
+  const command={schemaVersion:1,commandId:'gas-catalog-correct-01',op:'catalog.audit',
     entries:[
       {id:'demo-book',expectedTitle:'Demo Book',patch:{publisher:'Publisher One',
         publicationYear:2020}},
@@ -477,7 +484,7 @@ test('catalog audit atomically patches multiple bibliographic records',()=>{
 test('catalog audit rejects duplicates, identity changes, and unexpected payloads',()=>{
   const s=setup();
   const entry={id:'demo-book',expectedTitle:'Demo Book',patch:{publisher:'New'}};
-  const cmd={schemaVersion:1,commandId:'catalog-reject-01',op:'catalog.audit',
+  const cmd={schemaVersion:1,commandId:'gas-catalog-reject-01',op:'catalog.audit',
     entries:[entry],reason:'Synthetic invalid example'};
   assert.throws(()=>withCommand(s,{...cmd,entries:[entry,entry]}),/重複/);
   assert.throws(()=>withCommand(s,{...cmd,entries:[{...entry,
@@ -490,7 +497,7 @@ test('catalog audit rejects duplicates, identity changes, and unexpected payload
 test('catalog audit checks expected old value and marks no-change without patching',()=>{
   const s=setup({mockRelease:true});
   s.setPublisher('Existing Publisher');
-  const base={schemaVersion:1,commandId:'catalog-cas-01',op:'catalog.audit',
+  const base={schemaVersion:1,commandId:'gas-catalog-cas-01',op:'catalog.audit',
     entries:[{id:'demo-book',expectedTitle:'Demo Book',
       patch:{publisher:'New Publisher'},expected:{publisher:'Outdated'}}],
     reason:'Synthetic verified catalog correction'};
@@ -500,7 +507,7 @@ test('catalog audit checks expected old value and marks no-change without patchi
     expected:{publisher:'Existing Publisher'}}]};
   assert.equal(s.api.apply('fake',s.env,withCommand(s,approved)),'APPLIED');
   assert.equal(s.getCommitted().writes.length,2);
-  const noChange={...base,commandId:'catalog-same-01',
+  const noChange={...base,commandId:'gas-catalog-same-01',
     entries:[{id:'demo-book',expectedTitle:'Demo Book',
       patch:{publisher:'Existing Publisher'}}]};
   assert.equal(s.api.apply('fake',s.env,withCommand(s,noChange)),'APPLIED');

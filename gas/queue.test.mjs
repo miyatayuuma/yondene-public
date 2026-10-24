@@ -142,9 +142,11 @@ test('schema and queue ID checked',()=>{
 });
 
 test('unsafe operations and unknown fields rejected',()=>{
-  const s=setup(),del={...s.command,op:'book.delete'},cells=s.cells.slice();
-  cells[2]='book.delete';cells[3]=JSON.stringify(del);
-  assert.throws(()=>s.api.parse(cells),/未対応/);
+  const s=setup(),cells=s.cells.slice();
+  for(const op of ['book.delete','book.patchByTitle','catalog.audit','family.rename']) {
+    cells[2]=op;cells[3]=JSON.stringify({...s.command,op});
+    assert.throws(()=>s.api.parse(cells),/未対応/,op+' must not be accepted from user queue');
+  }
   cells[2]='book.patch';cells[3]=JSON.stringify({...s.command,patch:{admin:true}});
   assert.throws(()=>s.api.parse(cells),/変更不可/);
 });

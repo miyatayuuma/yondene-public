@@ -157,6 +157,27 @@ book/series/marker writes, or writer-gate enablement. This is not a test
 of two truly concurrent writers or of an actual family rename. Those and
 the writer cutover remain blocked.
 
+## Stage D independent production reconcile and cleanup (prepared, NOT RUN)
+
+At 23:34:10 JST on 2026-10-24, the owner reported PASS for the
+synthetic atomic two-document commit, duplicate rejection and fresh reads.
+The resulting random `testId` remains **PRIVATE** (in the bound Script logs
+and the owner's chat), and is never hardcoded in this public repository.
+
+`gas/ProductionCleanupProbe.gs` is a separate manual function:
+`yondeneProductionProbeReconcileAndCleanup`. The owner must replace the
+sole `REPLACE_WITH_TEST_ID` placeholder in their PRIVATE Apps Script copy.
+The default source fails closed. It independently reads and fully validates
+the **two exact synthetic documents**, their names, data marker, source,
+nonce, timestamp and server updateTime. It then opens a transaction,
+reads again and deletes **only those two** with updateTime preconditions
+in an atomic commit. Final fresh GETs must both be 404 for PASS.
+
+Any discrepancy aborts before deletion. Unknown commit outcomes never
+blindly retry. No family, book, series, mutation-marker or Sheet document is
+written, and the queue write gate remains disabled. Do not run twice.
+No actual cleanup has been executed yet.
+
 ## Future cutover (not started)
 
 1. Close the blockers, reconcile the current Firestore books, series and

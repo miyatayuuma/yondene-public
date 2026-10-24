@@ -4,86 +4,113 @@ Public, **code-only** source. Never commit a private spreadsheet ID/URL,
 family ID, owner UID, real book/series record, actual queue JSON,
 OAuth credential, deployment ID, or family-specific log.
 
-## Authority and deployment state (Stage B draft)
+## Authority and deployment state (Stage C draft)
 
 - **Production** still uses Firestore as its sole source of truth.
 - The private Sheet-bound Apps Script `Code.gs` provides read-only hourly
-  Firestore → Sheets mirroring. Preserve it: it contains private configuration.
-- The owner installed **Stage A** `Queue.gs` as a separate bound script and
-  successfully ran a dry run with 0 pending commands on 2026-10-24.
-- **Stage B source in this branch is not installed in GAS and not approved for
-  production writing.** It must not be copied into production as a writer.
-- The old private GitHub Actions single-writer remains active until an
-  separately approved cutover. **Do not allow two writers.**
-- `WRITE_ENABLED: false` is hardcoded. `yondeneQueueProcess()` refuses to
-  execute even if someone creates a trigger.
+  Firestore → Sheets mirroring. Preserve it and its private configuration.
+- The private sheet has a separate `設定` tab with `B2` (requested shelf
+  name), `C2` (last confirmed name), and `D2` (status formula). The
+  settings tab is **not** part of the hourly Firestore mirror.
+- The owner installed **Stage A** `Queue.gs` and ran an empty dry run on
+  2026-10-24. **Stage C source in this PR is not installed in GAS.**
+- The old private GitHub Actions writer remains the only authorized writer.
+  It must not overlap with a GAS writer. No Firebase Hosting migration yet.
+- `WRITE_ENABLED: false` is hardcoded. Direct `commit`, transaction apply,
+  settings processing and `yondeneQueueProcess()` all refuse to write.
 
-## Stage B implementation under review
+## Stage C implementation under review
 
-| Operation | Preflight | Planned atomic Firestore commit |
+| Operation | Transactional preflight | Planned atomic write |
 | --- | --- | --- |
-| `book.patch` | ID/title/updatedAt and allowed field audit | CAS update + create-only marker |
-| `series.patch` | ID/name/updatedAt audit; rename held | CAS update + create-only marker |
-| `book.create` | ID absent, ISBN/title+author check, series present, cover URL | Create-only book + marker |
-| `series.create` | ID absent, same name check | Create-only series + marker |
-| `childRating.set` | Book ID/title/status; conflicting stars refused | Create-only rating + marker; identical stars → marker only |
-| `childReflection.create` | Book ID/title, reflection/activity IDs absent | Create-only reflection + activity + marker |
+| `book.patch` | Family owner, ID/title/updatedAt, allowed fields | CAS update + create-only marker |
+| `series.patch` | Family owner, ID/name/updatedAt, rename held | CAS update + marker |
+| `book.create` | Family owner, ID absence, ISBN/title+author, series lookup, cover URL | Create-only book + marker |
+| `series.create` | Family owner, ID absence, duplicate-name query | Create-only series + marker |
+| `childRating.set` | Family owner, ID/title/status and existing rating | Create-only rating + marker; same stars → marker only |
+| `childReflection.create` | Family owner, ID/title, reflection/activity absence | Create-only reflection + activity + marker |
+| Internal `family.rename` | Family owner, current name equals `C2`, updateTime | Only `families/{id}.name` CAS update + marker |
 
-All commits use one Firestore REST `documents:commit` request. On an
-uncertain result, a matching marker digest is required to resolve ALREADY;
-otherwise manual review is required, never blind retry.
+Stage C begins a Firestore REST **read-write transaction**. Family,
+marker, target and logical-duplicate reads (including `:runQuery`) bind to
+the same transaction, which is included in `documents:commit`. This
+prevents relying on unrelated, pre-commit duplicate reads. The tests exercise
+the API contract with mocks; live contention testing is still pending.
 
-**Remaining blockers (before any writer cutover):**
+For the shelf setting, `yondeneQueueSettingsCommand_` validates the
+`設定!A1:C2` layout and name (1–80 characters, no leading/trailing spaces,
+no control characters). A deterministic mutation ID preserves replay safety.
+Only after the Firestore write or matching marker is independently verified
+does `設定!C2` advance to `B2`; `D2` is a formula.
 
-1. The duplicate-title/ISBN/series-name and family-owner checks are currently
-   made in **separate reads preceding commit**. A create-only document check
-   protects the ID but not logical uniqueness under concurrent requests.
-   Replace with a properly bounded Firestore transaction or equivalent
-   strong consistency design and test a simulated concurrent creation.
-2. Check parity for any legacy operations still needed
-   (`book.patchByTitle`, deletion, catalog audit, rating corrections,
-   reflection corrections), avoiding unsafe automatic deletes.
-3. Independently rehearse staged acceptance, historical-marker integrity,
-   authorization/secret isolation, rollback, and the single-writer handoff.
-4. Require explicit owner approval for production writes and initial trigger.
-   Never activate a writer by a cell toggle.
+**No editable Sheet cell can flip the writer gate.** Setting `B2` now
+only prepares a pending change; it does not alter the public app or production
+until authorized cutover. The app already displays `families/{id}.name`
+from Firestore; there is no separate hardcoded UI name to update.
 
-## Queue structure and dry-run only
+## Safety and unresolved acceptance
+
+1. **Production writes remain blocked.** Stage C source has not been copied to
+   the private bound GAS script; no write trigger is installed or enabled.
+2. Recheck parity for required legacy commands such as `book.patchByTitle`,
+   deletion, catalog audits and corrections. Never make automatic deletion
+   part of an unreviewed import.
+3. Test genuine concurrent Firestore transactions, conflicts and historical
+   marker integrity in an isolated test project. Mocks are necessary but
+   insufficient as a production acceptance substitute.
+4. Independently audit authorization, OAuth scopes, secret separation, backup
+   and rollback, and the old Action writer disablement.
+5. Require a new explicit owner approval for any production write or polling
+   trigger. Do not infer approval from a changed cell or a passing dry-run.
+
+A commit transport failure may have persisted its marker. The only permitted
+automatic resolution is a matching immutable marker digest; otherwise mark
+for manual review. No blind retry. Pre-commit exits roll back their
+transactions.
+
+## Queue structure and read-only audit
 
 `更新キュー` has 10 columns:
 
 `コマンドID, 登録時刻, 操作, コマンドJSON, 状態, 処理日時,
 結果コード, SHA256, 試行回数, エラー概要`.
 
-Keep the spreadsheet private with restricted editors. The read-only mirror
-never changes this queue; editing a mirror tab does not change Firestore.
+Keep Sheets private, with restricted editors. Mirrored records remain
+read-only, and the `設定` tab is a controlled input, not a replacement
+for Firestore authority.
 
-To audit the **already installed Stage A**, select
-`yondeneQueueDryRun` and press Run. A run with no queued commands reports:
+The **installed Stage A** can still be audited by selecting
+`yondeneQueueDryRun` and pressing Run. An empty run reports:
 
 `queue dry-run pending=0 ready=0 review=0 writeEnabled=false`
 
-No production command should be added to the queue yet. Do not run
-`yondeneQueueProcess` or install its polling trigger.
+Do not add live commands or run `yondeneQueueProcess` until cutover.
 
-## Tests
+## Automated tests
 
 ```bash
 node --test gas/queue.test.mjs
 ```
 
-Tests use fabricated IDs and in-process Google API mocks. They do not access
-production data. Source requires the private bound-script helpers
-`YONDENE`, `yondeneFirestoreRequest_`, `yondeneField_`, and
-`yondeneSha256_`; the public module is not a standalone web app.
+Tests use fabricated IDs/names and in-process Google API mocks, including
+simulated transaction begin, query, commit failure, rollback, and settings
+CAS. They never access production data. To test write paths, the harness
+temporarily changes the in-memory evaluated source gate to true. **The
+committed source remains disabled.**
 
-## Cutover sequencing (not started)
+The private bound `Code.gs` must provide `YONDENE`,
+`yondeneFirestoreRequest_`, `yondeneField_`, and `yondeneSha256_`.
+The public module intentionally carries no private identifiers.
 
-1. Close the blockers above, then review and test Stage B in isolation.
-2. Freeze command intake and reconcile existing Firestore data and mutation
-   markers; disable **every** private Action writer entry point.
-3. Execute one explicitly approved bounded production acceptance command.
-   Verify Firestore record, marker, source digest and Sheets state using an
-   independent read-only check. Stop and roll back on unexpected change.
-4. Only then enable GAS polling. Migrate Hosting from a separately verified
-   PUBLIC source; keep private Sheets and Firestore intact.
+## Future cutover (not started)
+
+1. Close the blockers, reconcile the current Firestore books, series and
+   markers, and independently validate a read-only snapshot.
+2. Stop old command intake and disable **all** private Actions writer
+   entry points before enabling GAS.
+3. Stage and authorize one bounded production command with a separate
+   reconcile after execution. Verify Firestore and private Sheet values.
+4. Only on explicit owner approval install/enable GAS polling. Keep the
+   `Code.gs` mirror, Sheets and Firestore private.
+5. Migrate Firebase Hosting to verified PUBLIC code in a separate release,
+   with a rollback path and real-device acceptance.

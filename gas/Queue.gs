@@ -13,12 +13,13 @@
  */
 const YONDENE_QUEUE = Object.freeze({
   sheet: '更新キュー',
+  settingsSheet: '設定',
   headers: ['コマンドID','登録時刻','操作','コマンドJSON','状態','処理日時',
     '結果コード','SHA256','試行回数','エラー概要'],
   maxRows: 3000,
   maxPendingPerRun: 10,
   maxCommandChars: 30000,
-  WRITE_ENABLED: false, // Stage B draft: read-only until independent cutover review.
+  WRITE_ENABLED: false, // Stage C draft: write gate remains disabled.
   ops: ['book.patch','series.patch','book.create','series.create',
     'childRating.set','childReflection.create'],
   bookFields: [
@@ -59,6 +60,17 @@ function yondeneQueueDryRun() {
         Logger.log('row=' + item.row + ' REVIEW ' + String(err.message || err).slice(0,300));
       }
     });
+    const setting=yondeneQueueSettingsCommand_(env);
+    if(setting) {
+      try {
+        const plan=yondeneQueuePreflight_(token,env,family,setting.parsed);
+        Logger.log('settings dry-run '+(plan.already?'ALREADY':'READY')+
+          ' name change (write disabled)');
+      } catch(err) {
+        conflicts++;
+        Logger.log('settings dry-run REVIEW: '+String(err.message||err).slice(0,300));
+      }
+    }
     Logger.log('queue dry-run pending=' + pending.length + ' ready=' + ready +
       ' review=' + conflicts + ' writeEnabled=' + YONDENE_QUEUE.WRITE_ENABLED);
     return {pending: pending.length, ready: ready, review: conflicts, writeEnabled: false};
@@ -84,20 +96,15 @@ function yondeneQueueProcess() {
       try {
         const cmd = yondeneQueueParse_(item.cells);
         digest = cmd.digest;
-        const plan = yondeneQueuePreflight_(token, env, family, cmd);
-        if (plan.already) {
-          state = 'ALREADY'; code = 'MARKER_MATCH'; already++;
+        const result = yondeneQueueApplyTransaction_(token,env,cmd);
+        if(result==='APPLIED') {
+          state='APPLIED';code='COMMIT_OK';applied++;
         } else {
-          const result = yondeneQueueCommit_(token, env, cmd, plan);
-          if (result === 'APPLIED') {
-            state = 'APPLIED'; code = 'COMMIT_OK'; applied++;
-          } else {
-            state = 'ALREADY'; code = 'MARKER_MATCH_AFTER_COMMIT'; already++;
-          }
+          state='ALREADY';code='MARKER_MATCH';already++;
         }
       } catch (err) {
         review++;
-        code = /^競合:/.test(String(err.message || err)) ? 'PRECONDITION_CONFLICT' : 'MANUAL_REVIEW';
+        code = /^(競合:|Firestore commit HTTP (409|412))/.test(String(err.message || err)) ? 'PRECONDITION_CONFLICT' : 'MANUAL_REVIEW';
         if (code === 'PRECONDITION_CONFLICT') state = 'CONFLICT';
         detail = String(err.message || err).slice(0,280);
         // A timed-out commit may have succeeded: never retry blind.
@@ -107,10 +114,61 @@ function yondeneQueueProcess() {
       ]]);
       SpreadsheetApp.flush();
     });
-    return {applied: applied, already: already, review: review};
+    let settingsResult='NO_CHANGE';
+    try {settingsResult=yondeneQueueProcessSettings_(token,env);}
+    catch(err) {
+      settingsResult='REVIEW';
+      Logger.log('settings write REVIEW: '+String(err.message||err).slice(0,300));
+    }
+    return {applied:applied,already:already,review:review,settings:settingsResult};
   } finally {
     lock.releaseLock();
   }
+}
+
+function yondeneQueueSettingsCommand_(env) {
+  const ss=SpreadsheetApp.openById(YONDENE.spreadsheetId);
+  const sheet=ss.getSheetByName(YONDENE_QUEUE.settingsSheet);
+  if(!sheet) throw new Error('設定シートが存在しません。');
+  const rows=sheet.getRange(1,1,2,3).getDisplayValues();
+  if(JSON.stringify(rows[0])!==JSON.stringify([
+    '項目','変更後の名前（入力）','確認済みの名前'
+  ]) || rows[1][0]!=='本棚名') throw new Error('設定シートの構造が不正です。');
+  const desired=String(rows[1][1]||''),current=String(rows[1][2]||'');
+  function valid(s){return s.trim()===s&&s.length>=1&&s.length<=80&&
+    !/[\u0000-\u001f\u007f]/.test(s);}
+  if(!valid(desired)||!valid(current))
+    throw new Error('本棚名は1〜80文字、前後空白・制御文字なしで入力してください。');
+  if(desired===current) return null;
+  const fingerprint=yondeneSha256_(JSON.stringify([
+    env.familyId,current,desired
+  ]));
+  const command={
+    schemaVersion:1,commandId:'shelf-name-'+fingerprint.slice(0,40),
+    op:'family.rename',expectedName:current,newName:desired,
+    reason:'非公開の設定シートから本棚名を変更'
+  };
+  return {sheet:sheet,desired:desired,
+    parsed:{command:command,
+      digest:yondeneSha256_(JSON.stringify(command)),targetId:env.familyId}};
+}
+
+function yondeneQueueProcessSettings_(token,env) {
+  if(!YONDENE_QUEUE.WRITE_ENABLED)
+    throw new Error('GAS書き込みは未承認・無効です。');
+  const setting=yondeneQueueSettingsCommand_(env);
+  if(!setting) return 'NO_CHANGE';
+  // The setting's original value must agree with Firestore inside the transaction.
+  // A matching immutable marker safely completes a Sheet update after a crash.
+  const result=yondeneQueueApplyTransaction_(token,env,setting.parsed);
+  if(result==='APPLIED'||result==='ALREADY') {
+    const verified=yondeneQueueDocument_(token,env.familyPath);
+    if(!verified||yondeneField_(verified,'name')!==setting.desired)
+      throw new Error('本棚名の永続化を検証できません。設定の確認済み値は更新しません。');
+    setting.sheet.getRange('C2').setValue(setting.desired);
+    SpreadsheetApp.flush();
+  }
+  return result;
 }
 
 function yondeneQueueEnvironment_() {
@@ -300,6 +358,54 @@ function yondeneQueueWithoutStaleProgressNotes_(value) {
   return pieces.filter(function(part){return !progress.test(part.trim());}).join('').trim();
 }
 
+function yondeneQueueDatabaseUrl_() {
+  return 'https://firestore.googleapis.com/v1/projects/' +
+    encodeURIComponent(YONDENE.project)+'/databases/(default)/documents';
+}
+
+function yondeneQueueBeginTransaction_(token) {
+  const response=UrlFetchApp.fetch(yondeneQueueDatabaseUrl_()+':beginTransaction',{
+    method:'post',contentType:'application/json',payload:'{}',
+    headers:{Authorization:'Bearer '+token},muteHttpExceptions:true
+  });
+  if(response.getResponseCode()!==200)
+    throw new Error('Firestore beginTransaction HTTP '+response.getResponseCode());
+  const transaction=JSON.parse(response.getContentText()).transaction;
+  if(typeof transaction!=='string'||!transaction||transaction.length>8192)
+    throw new Error('Firestore transaction IDの取得に失敗しました。');
+  return transaction;
+}
+
+function yondeneQueueRollback_(token,transaction) {
+  const response=UrlFetchApp.fetch(yondeneQueueDatabaseUrl_()+':rollback',{
+    method:'post',contentType:'application/json',
+    payload:JSON.stringify({transaction:transaction}),
+    headers:{Authorization:'Bearer '+token},muteHttpExceptions:true
+  });
+  if(response.getResponseCode()!==200)
+    throw new Error('Firestore rollback HTTP '+response.getResponseCode());
+}
+
+function yondeneQueueApplyTransaction_(token,env,parsed) {
+  if(!YONDENE_QUEUE.WRITE_ENABLED)
+    throw new Error('GAS書き込みは未承認・無効です。');
+  const transaction=yondeneQueueBeginTransaction_(token);
+  let commitAttempted=false;
+  try {
+    const family=yondeneQueueDocument_(token,env.familyPath,transaction);
+    if(!family) throw new Error('家族ドキュメントが存在しません。');
+    const plan=yondeneQueuePreflight_(token,env,family,parsed,transaction);
+    if(plan.already) return 'ALREADY';
+    commitAttempted=true;
+    return yondeneQueueCommit_(token,env,parsed,plan,transaction);
+  } finally {
+    if(!commitAttempted) {
+      try {yondeneQueueRollback_(token,transaction);}
+      catch(err){Logger.log('rollback warning: '+String(err.message||err).slice(0,160));}
+    }
+  }
+}
+
 function yondeneQueueFamily_(env, token) {
   const family = yondeneFirestoreRequest_(token, env.familyPath, 'GET', null, Date.now());
   if (yondeneField_(family,'ownerUid') !== env.ownerUid)
@@ -307,10 +413,11 @@ function yondeneQueueFamily_(env, token) {
   return family;
 }
 
-function yondeneQueueDocument_(token, path) {
+function yondeneQueueDocument_(token, path, transaction) {
   const url = 'https://firestore.googleapis.com/v1/projects/' +
     encodeURIComponent(YONDENE.project) + '/databases/(default)/documents/' +
-    path.split('/').map(encodeURIComponent).join('/');
+    path.split('/').map(encodeURIComponent).join('/') +
+    (transaction?'?transaction='+encodeURIComponent(transaction):'');
   const response = UrlFetchApp.fetch(url,{
     method:'get',headers:{Authorization:'Bearer '+token},muteHttpExceptions:true
   });
@@ -320,7 +427,7 @@ function yondeneQueueDocument_(token, path) {
   return JSON.parse(response.getContentText());
 }
 
-function yondeneQueueQuery_(token, familyPath, collection, field, value, limit) {
+function yondeneQueueQuery_(token, familyPath, collection, field, value, limit, transaction) {
   const parent='https://firestore.googleapis.com/v1/projects/' +
     encodeURIComponent(YONDENE.project)+'/databases/(default)/documents/' +
     familyPath.split('/').map(encodeURIComponent).join('/')+':runQuery';
@@ -329,6 +436,7 @@ function yondeneQueueQuery_(token, familyPath, collection, field, value, limit) 
     where:{fieldFilter:{field:{fieldPath:field},op:'EQUAL',value:{stringValue:value}}},
     limit:limit
   }};
+  if(transaction) payload.transaction=transaction;
   const response=UrlFetchApp.fetch(parent,{
     method:'post',contentType:'application/json',
     headers:{Authorization:'Bearer '+token},payload:JSON.stringify(payload),
@@ -341,37 +449,45 @@ function yondeneQueueQuery_(token, familyPath, collection, field, value, limit) 
   return entries.filter(function(x){return x.document;}).map(function(x){return x.document;});
 }
 
-function yondeneQueuePreflight_(token, env, family, parsed) {
+function yondeneQueuePreflight_(token, env, family, parsed, transaction) {
   if (yondeneField_(family,'ownerUid')!==env.ownerUid)
     throw new Error('family ownerが変化しました。');
   const c=parsed.command;
   const markerPath=env.familyPath+'/chatgptMutations/'+c.commandId;
-  const marker=yondeneQueueDocument_(token,markerPath);
+  const marker=yondeneQueueDocument_(token,markerPath,transaction);
   if (marker) {
     if (yondeneField_(marker,'sourceDigest')!==parsed.digest)
       throw new Error('同一コマンドIDの適用証跡とダイジェストが不一致です。');
     return {already:true};
   }
+  if(c.op==='family.rename') {
+    if(yondeneField_(family,'name')!==c.expectedName)
+      throw new Error('競合: Firestoreの本棚名が変更されています。');
+    if(!family.updateTime) throw new Error('家族文書のupdateTimeがありません。');
+    return {already:false,action:'patch',recordPath:env.familyPath,
+      recordUpdateTime:family.updateTime,markerPath:markerPath,
+      updates:{name:c.newName}};
+  }
   if (c.op==='book.create'||c.op==='series.create') {
     const isBook=c.op==='book.create';
     const collection=isBook?'books':'series';
     const recordPath=env.familyPath+'/'+collection+'/'+parsed.targetId;
-    if (yondeneQueueDocument_(token,recordPath))
+    if (yondeneQueueDocument_(token,recordPath,transaction))
       throw new Error('対象IDの文書がすでに存在します。');
     const data=Object.assign({},isBook?c.book:c.series);
     const now=new Date().toISOString();
     if(isBook) {
-      const sameTitle=yondeneQueueQuery_(token,env.familyPath,'books','title',data.title,10);
+      const sameTitle=yondeneQueueQuery_(token,env.familyPath,'books','title',data.title,10,transaction);
       if(sameTitle.length===10)
         throw new Error('同じ書名の本が多すぎます。版の照合が必要です。');
       if(sameTitle.some(function(doc){
         return yondeneField_(doc,'author')===(data.author||'');
       })) throw new Error('同名・同著者の本が登録済みです。');
       if(data.isbn) {
-        const sameIsbn=yondeneQueueQuery_(token,env.familyPath,'books','isbn',data.isbn,2);
+        const sameIsbn=yondeneQueueQuery_(token,env.familyPath,'books','isbn',data.isbn,2,transaction);
         if(sameIsbn.length) throw new Error('同じISBNの本が登録済みです。');
       }
-      if(data.seriesId&&!yondeneQueueDocument_(token,env.familyPath+'/series/'+data.seriesId))
+      if(data.seriesId&&!yondeneQueueDocument_(token,env.familyPath+'/series/'+data.seriesId,transaction))
         throw new Error('参照するシリーズがありません。');
       if(data.status==='read' && !data.finishedAt &&
           yondeneQueueCalendarDate_(data.reportedAt)) {
@@ -385,7 +501,7 @@ function yondeneQueuePreflight_(token, env, family, parsed) {
       data.id=parsed.targetId;
       data.createdAt=now;
     } else {
-      const sameName=yondeneQueueQuery_(token,env.familyPath,'series','name',data.name,2);
+      const sameName=yondeneQueueQuery_(token,env.familyPath,'series','name',data.name,2,transaction);
       if(sameName.length) throw new Error('同名のシリーズが登録済みです。');
       data.id=parsed.targetId;
     }
@@ -394,14 +510,14 @@ function yondeneQueuePreflight_(token, env, family, parsed) {
       updates:data};
   }
   if (c.op==='childRating.set'||c.op==='childReflection.create') {
-    const book=yondeneQueueDocument_(token,env.familyPath+'/books/'+c.bookId);
+    const book=yondeneQueueDocument_(token,env.familyPath+'/books/'+c.bookId,transaction);
     if(!book || yondeneField_(book,'title')!==c.expectedTitle)
       throw new Error('書籍ID・書名が一致しません。');
     if (c.op==='childRating.set') {
       if (['read','reading','paused'].indexOf(yondeneField_(book,'status'))===-1)
         throw new Error('評価できる読書状態ではありません。');
       const recordPath=env.familyPath+'/childBookRatings/'+c.bookId;
-      const rating=yondeneQueueDocument_(token,recordPath);
+      const rating=yondeneQueueDocument_(token,recordPath,transaction);
       if(rating && yondeneField_(rating,'stars')!==c.stars)
         throw new Error('既存の★評価と異なるため自動上書きしません。');
       return {already:false,action:rating?'marker-only':'create',
@@ -415,8 +531,8 @@ function yondeneQueuePreflight_(token, env, family, parsed) {
     const recordPath=env.familyPath+'/books/'+c.bookId+
       '/childReflections/'+c.commandId;
     const activityPath=env.familyPath+'/activity/reflection-'+c.commandId;
-    if (yondeneQueueDocument_(token,recordPath) ||
-        yondeneQueueDocument_(token,activityPath))
+    if (yondeneQueueDocument_(token,recordPath,transaction) ||
+        yondeneQueueDocument_(token,activityPath,transaction))
       throw new Error('感想または活動履歴のIDがすでに存在します。');
     const now=new Date().toISOString();
     return {already:false,action:'create',recordPath:recordPath,markerPath:markerPath,
@@ -429,7 +545,7 @@ function yondeneQueuePreflight_(token, env, family, parsed) {
   }
   const collection=c.op==='book.patch'?'books':'series';
   const recordPath=env.familyPath+'/'+collection+'/'+parsed.targetId;
-  const record=yondeneQueueDocument_(token,recordPath);
+  const record=yondeneQueueDocument_(token,recordPath,transaction);
   if (!record) throw new Error('対象文書が存在しません。');
   const currentUpdatedAt=yondeneField_(record,'updatedAt')||'';
   if (currentUpdatedAt!==c.expectedUpdatedAt)
@@ -469,7 +585,7 @@ function yondeneQueuePreflight_(token, env, family, parsed) {
     if (newStatus!=='read' && updates.finishedAt)
       throw new Error('未読了の本に読了日を残せません。');
     if (updates.seriesId) {
-      const target=yondeneQueueDocument_(token,env.familyPath+'/series/'+updates.seriesId);
+      const target=yondeneQueueDocument_(token,env.familyPath+'/series/'+updates.seriesId,transaction);
       if (!target) throw new Error('参照するシリーズがありません。');
     }
   }
@@ -488,7 +604,10 @@ function yondeneQueueValue_(v) {
   throw new Error('未対応のFirestore値型です。');
 }
 
-function yondeneQueueCommit_(token, env, parsed, plan) {
+function yondeneQueueCommit_(token, env, parsed, plan, transaction) {
+  if(!YONDENE_QUEUE.WRITE_ENABLED)
+    throw new Error('GAS書き込みは未承認・無効です。');
+  if(!transaction) throw new Error('Firestore transactionが必要です。');
   const c=parsed.command;
   const prefix='projects/'+YONDENE.project+'/databases/(default)/documents/';
   const markerFields={
@@ -497,7 +616,8 @@ function yondeneQueueCommit_(token, env, parsed, plan) {
     commandId:{stringValue:c.commandId},op:{stringValue:c.op},
     sourceDigest:{stringValue:parsed.digest},
     reason:{stringValue:c.reason},
-    targetCollection:{stringValue:c.op==='childRating.set'?'childBookRatings':
+    targetCollection:{stringValue:c.op==='family.rename'?'families':
+      c.op==='childRating.set'?'childBookRatings':
       c.op==='childReflection.create'?'childReflections':
       c.op.startsWith('book.')?'books':'series'},
     targetId:{stringValue:parsed.targetId},
@@ -538,7 +658,7 @@ function yondeneQueueCommit_(token, env, parsed, plan) {
     'https://firestore.googleapis.com/v1/projects/'+
       encodeURIComponent(YONDENE.project)+'/databases/(default)/documents:commit',
     {method:'post',contentType:'application/json',
-      payload:JSON.stringify({writes:writes}),
+      payload:JSON.stringify(transaction?{writes:writes,transaction:transaction}:{writes:writes}),
       headers:{Authorization:'Bearer '+token},muteHttpExceptions:true});
   const code=response.getResponseCode();
   if (code===200) {

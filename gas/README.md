@@ -189,6 +189,42 @@ cleanup have passed. Zero synthetic test documents remain. This does **not**
 prove a real `family.rename`, concurrent old/new writers, full Stage C command
 parity, or readiness to enable GAS writes.
 
+## Stage E one-shot REAL family rename — owner-approved, not yet run
+
+On 2026-10-24 the owner explicitly approved one real shelf-name change
+as a bounded production acceptance test. This is **not** approval to
+turn on the general GAS command writer or polling triggers.
+
+- Public template: `gas/ProductionRenameProbe.gs` exports
+  `yondeneProductionRenameOnce`. Copy it into a NEW file in the
+  PRIVATE Sheet-bound Apps Script, leaving existing `Code.gs` and
+  the installed Stage A `Queue.gs` intact.
+- In that private copy only, replace `REPLACE_WITH_OLD_NAME` and
+  `REPLACE_WITH_NEW_NAME` with the exact authorized source and target
+  names. Never push those live values to PUBLIC.
+- Require private `設定!B2` to equal the target and `C2` to equal the
+  source. Verify an empty update queue and the common GAS write gate
+  remains hardcoded off. A mismatch aborts without a Firestore commit.
+- Reconcile the target family and owner; reject an existing deterministic
+  marker; begin a read-write transaction, re-read the family and marker,
+  confirm original `updateTime` and unchanged other fields.
+- Commit exactly two writes in one transaction: masked update of only
+  `families/{id}.name` with `updateTime` CAS, plus create-only
+  `chatgptMutations/{commandId}` with the same schema/digest as Stage C.
+- Independently verify new name, other family fields unchanged, marker
+  digest, ID and target; **only then** advance private `設定!C2`.
+  No book/series/history mutations, `Queue.gs` gate change, trigger,
+  automatic retry or private GitHub writer decommissioning.
+- Any post-commit uncertainty or verification failure is a STOP condition.
+  Do not re-run blindly; independently reconcile first.
+
+The exact live shelf names, family ID, owner UID and verification log
+remain private. CI mocks exercise success, failure, drift, idempotency
+precondition and uncertain commits; no CI job accesses production.
+
+This one-shot test **does not** establish simultaneous writer safety,
+other Stage C operation parity, or authorization for full cutover.
+
 ## Future cutover (not started)
 
 1. Close the blockers, reconcile the current Firestore books, series and

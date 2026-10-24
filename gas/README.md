@@ -121,6 +121,11 @@ The public module intentionally carries no private identifiers.
   `book.patch` instead.
 - `book.delete`, `book.patchByTitle` and user-queued `family.rename` remain
   blocked. The only family-name route is the separate internal settings path.
+- User-queued command IDs must begin with `gas-`, preventing accidental reuse
+  of historical GitHub command IDs. New markers explicitly record
+  `sourceCommandChannel=private-google-sheet` and
+  `sourceDigestScheme=sha256-json-stringify-v1`; existing markers remain untouched.
+  The internal `shelf-name-...` settings marker is not a user queue command.
 - Synthetic tests cover successful patches, duplicate collisions, stale
   revisions, changed expected bibliography, multi-book atomic commits, no-ops
   and blocked operations. PUBLIC CI passes on the tested branch.

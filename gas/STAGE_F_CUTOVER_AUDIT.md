@@ -87,3 +87,15 @@ Read from the existing private Firestore-to-Sheets mirror after the owner-report
 Code parity progress on the same Draft PR: guarded book.patch title/author/ISBN correction, guarded series.patch rename, bounded atomic catalog.audit, gas- command-ID namespace and marker provenance metadata have synthetic CI coverage. This is **PUBLIC source only**, not deployed into the private bound GAS. book.patchByTitle, book.delete and normal queued family.rename remain excluded or require an explicit exceptional route.
 
 **Remaining before switch:** independently verify current Firestore/marker truth (the mirror is non-atomic), inspect GAS manifest/OAuth/editor/trigger execution ownership, confirm decryptable and recoverable backup with the owner's authorized keys, reconcile no in-flight GitHub writer activity, install reviewed Queue.gs with WRITE_ENABLED:false, run dry-run, and only then seek explicit approval for an isolated real book command and one-writer handoff. Keep the independent encrypted-backup dispatch enabled. No production config, Firestore data or Apps Script installation was changed by this audit.
+
+
+## Stage H owner-supplied Apps Script manifest checkpoint (2026-10-25 JST)
+
+The owner supplied the private bound GAS manifest, without credentials. It specifies V8, Asia/Tokyo, Sheets API v4 and four OAuth scopes: spreadsheets, script.external_request, script.scriptapp and datastore (canonical Google OAuth scope URLs). No other scope was shown. This is a **manifest-content review**, not an independent grant audit or permission attestation.
+
+- These declared scopes correspond to Sheets read/write, outbound REST calls, Apps Script trigger management, and Firestore/Datastore access. They are **not read-only** and are not limited by the software write switch; the app's Google identity, project IAM, editorship and deployed code must also be trusted.
+- No Drive, Gmail, account-admin or broad cloud-platform OAuth scope appears in this provided manifest. Do not narrow or change scopes during the current code staging because the existing hourly reader may depend on them.
+- Independently re-read PUBLIC Stage G Queue.gs on PR #3: a single hardcoded WRITE_ENABLED:false gate, manual yondeneQueueDryRun and write-gated yondeneQueueProcess, no ScriptApp.newTrigger call or top-level processing invocation. This is a static source check only, not proof of installed bound-script behavior.
+- Proposed next bounded manual step: replace the existing private bound Queue.gs source (do **not** add a duplicate .gs) with the immutable reviewed Stage G source while retaining WRITE_ENABLED:false and the existing manifest/Code.gs/sole yondeneSyncNow trigger. Save a recoverable copy of the prior Queue.gs outside the project, execute only yondeneQueueDryRun, expect pending=0, ready=0, review=0, writeEnabled=false, and confirm the hourly mirror still runs. Any discrepancy is STOP. No cutover, automated trigger or live write authorization is implied.
+
+**Stage H status: MANIFEST REVIEW COMPLETE; PRIVATE GAS INSTALL NOT YET PERFORMED.**

@@ -25,7 +25,7 @@ function setup({mockRelease=false} = {}) {
     }
   };
   let queryRows = {}, rating = null, reflection = null, activity = null;
-  let bookStatus = 'reading';
+  let bookStatus = 'reading', seriesName = 'Demo Series';
   const ctx = {
     YONDENE: {project:'example-project', spreadsheetId:'example-sheet'},
     yondeneSha256_: x => createHash('sha256').update(x,'utf8').digest('hex'),
@@ -50,6 +50,10 @@ function setup({mockRelease=false} = {}) {
           updateTime:'2026-10-24T09:01:02.123456Z',
           fields:{title:{stringValue:'Demo Book'},status:{stringValue:bookStatus},
             updatedAt:{stringValue:updatedAt},notes:{stringValue:''}}
+        };
+        if (url.split('?')[0].endsWith('/series/demo-series')) data = {
+          updateTime:'2026-10-24T09:01:02.123456Z',
+          fields:{name:{stringValue:seriesName},updatedAt:{stringValue:updatedAt}}
         };
         return {getResponseCode:()=>data ? 200 : 404,
           getContentText:()=>JSON.stringify(data)};
@@ -118,6 +122,7 @@ function setup({mockRelease=false} = {}) {
     setMarker:x=>{marker=x},setUpdatedAt:x=>{updatedAt=x},
     setQuery:(field,value,docs)=>{queryRows[field+':'+value]=docs},
     setRating:x=>{rating=x},setBookStatus:x=>{bookStatus=x},
+    setSeriesName:x=>{seriesName=x},
     getCommitted:()=>committed,getCommitCount:()=>commits,
     getBeginCount:()=>begun,getRollbackCount:()=>rolledBack,
     getGets:()=>gets,getQueries:()=>queries,getFamilyName:()=>familyName,
@@ -190,10 +195,52 @@ test('commit uses atomic target CAS plus create-only marker',()=>{
   assert.equal(writes[1].update.fields.sourceDigest.stringValue,parsed.digest);
 });
 
-test('book rename requires later duplicate audit',()=>{
-  const s=setup(),cells=s.cells.slice();
-  cells[3]=JSON.stringify({...s.command,patch:{title:'Unverified Rename'}});
-  assert.throws(()=>s.api.preflight('fake',s.env,s.family,s.api.parse(cells)),/重複チェック/);
+test('book identity corrections are transactionally guarded and preserve stable ID',()=>{
+  const s=setup({mockRelease:true});
+  const c={...s.command,patch:{title:'Corrected Demo Book',
+    author:'Corrected Author',isbn:'9780000000017'}};
+  const parsed=withCommand(s,c);
+  assert.equal(s.api.apply('fake',s.env,parsed),'APPLIED');
+  const writes=s.getCommitted().writes;
+  assert.ok(writes[0].update.name.endsWith('/books/demo-book'));
+  assert.equal(writes[0].update.fields.title.stringValue,'Corrected Demo Book');
+  assert.equal(writes[0].update.fields.isbn.stringValue,'9780000000017');
+  assert.equal(s.getQueries().length,2);
+  assert.ok(s.getQueries().every(q=>q.transaction==='synthetic-transaction'));
+});
+test('book title/author/ISBN corrections reject duplicates from other IDs',()=>{
+  const s=setup(),prefix='projects/example-project/databases/(default)/documents/'+FAM;
+  const sameTitle={name:prefix+'/books/other-book',
+    fields:{author:{stringValue:'Another Author'}}};
+  s.setQuery('title','Corrected Demo Book',[sameTitle]);
+  const corrected={...s.command,patch:{title:'Corrected Demo Book',author:'Another Author'}};
+  assert.throws(()=>s.api.preflight('fake',s.env,s.family,
+    withCommand(s,corrected)),/同名・同著者/);
+  s.setQuery('title','Corrected Demo Book',[]);
+  s.setQuery('isbn','9780000000017',[{name:prefix+'/books/another',
+    fields:{isbn:{stringValue:'9780000000017'}}}]);
+  assert.throws(()=>s.api.preflight('fake',s.env,s.family,
+    withCommand(s,{...corrected,patch:{isbn:'9780000000017'}})),/同じISBN/);
+});
+test('series rename is uniqueness checked and revision-bound',()=>{
+  const s=setup({mockRelease:true}),base={
+    schemaVersion:1,commandId:'rename-series-01',op:'series.patch',
+    seriesId:'demo-series',expectedName:'Demo Series',
+    expectedUpdatedAt:DATE,patch:{name:'Corrected Series'},reason:'Synthetic correction'};
+  assert.equal(s.api.apply('fake',s.env,withCommand(s,base)),'APPLIED');
+  assert.ok(s.getCommitted().writes[0].update.name.endsWith('/series/demo-series'));
+  assert.equal(s.getCommitted().writes[0].update.fields.name.stringValue,
+    'Corrected Series');
+  assert.equal(s.getQueries()[0].transaction,'synthetic-transaction');
+  const t=setup(),prefix='projects/example-project/databases/(default)/documents/'+FAM;
+  t.setQuery('name','Corrected Series',[{name:prefix+'/series/other',
+    fields:{name:{stringValue:'Corrected Series'}}}]);
+  assert.throws(()=>t.api.preflight('fake',t.env,t.family,
+    withCommand(t,base)),/同名シリーズ/);
+  t.setQuery('name','Corrected Series',[]);
+  t.setUpdatedAt('stale');
+  assert.throws(()=>t.api.preflight('fake',t.env,t.family,
+    withCommand(t,base)),/競合/);
 });
 
 

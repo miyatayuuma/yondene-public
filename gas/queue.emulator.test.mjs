@@ -6,7 +6,7 @@ import {createHash} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import vm from 'node:vm';
 
-const PROJECT='demo-reading-shelf-rules';
+const PROJECT='demo-yondene-gas-stage-d';
 const HOST=process.env.FIRESTORE_EMULATOR_HOST;
 if(!HOST || !/^(127\.0\.0\.1|localhost):[0-9]+$/.test(HOST))
   throw new Error('Emulator-only test: FIRESTORE_EMULATOR_HOST must be loopback.');

@@ -52,6 +52,16 @@ The private bound GAS environment only needs the permanent read-only `Code.gs` a
 
 Keep the public, synthetic `*.test.mjs` regression tests in CI. Keep reviewed probe templates and their PASS evidence in Git history as historical acceptance material; do not auto-run one-time production probe entry points in CI or leave them installed in the live GAS project. Preserve the Stage E production rename marker and all historical command markers.
 
+## Operational encrypted-backup evidence (2026-10-25 JST)
+
+PRIVATE workflow inspection using GitHub Actions jobs and artifact metadata (read-only):
+
+- Schedule-triggered run `39681611233` at `2026-10-21T21:47:35Z`: `scheduled_backup_dispatch` succeeded; the writer job was skipped.
+- Dispatched run `39681625775` at `2026-10-21T21:47:42Z`: `backup` succeeded, including Firebase authentication, verified encrypted snapshot creation and encrypted artifact upload; `sync` and other write jobs were skipped.
+- Encrypted artifact `yondene-backup-39681625775`: `expired=false`, 33,349 bytes, expiration `2026-10-28T21:51:00Z` (2026-10-29 06:51 JST). This verifies a stored artifact, **not** an independent decryption/restore test. Do not publish/download plaintext backup artifacts.
+- Backup schedule and dispatch function independently from the old sync writer gate. Preserve this read-only backup path while planning writer cutover; disabling the entire workflow would remove the scheduled backup too.
+- **Still open:** authorized key custody, a controlled decryption/isolated restore drill, recovery after 7-day artifact expiry, and OAuth/Sheet editor permissions.
+
 ## Current gate
 
 **BLOCKED.** Do not merge PR #3, copy Stage C into the live project, enable either GAS writer gate or automatic trigger, disable private writer, alter IAM, or perform any further production mutation on the strength of this document. The next safe step is a *read-only security + backup/rollback and current-state reconciliation audit*, then a separately approved bounded business-command test.

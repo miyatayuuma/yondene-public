@@ -507,14 +507,19 @@ function yondeneQueueCommit_(token, env, parsed, plan) {
     markerFields[key]=yondeneQueueValue_(plan.markerExtra[key]);
   });
   const writes=[];
-  function encodeFields(data) {
+  function encodeFields(data, useFirestoreTimestamp) {
     const fields={};
-    Object.keys(data).forEach(function(key){fields[key]=yondeneQueueValue_(data[key]);});
+    Object.keys(data).forEach(function(key){
+      if(useFirestoreTimestamp && (key==='createdAt'||key==='updatedAt'))
+        fields[key]={timestampValue:data[key]};
+      else fields[key]=yondeneQueueValue_(data[key]);
+    });
     return fields;
   }
   if(plan.action!=='marker-only') {
     const target={update:{
-      name:prefix+plan.recordPath,fields:encodeFields(plan.updates)
+      name:prefix+plan.recordPath,fields:encodeFields(plan.updates,
+        c.op==='childRating.set'||c.op==='childReflection.create')
     }};
     if(plan.action==='patch') {
       target.updateMask={fieldPaths:Object.keys(plan.updates)};
@@ -525,7 +530,7 @@ function yondeneQueueCommit_(token, env, parsed, plan) {
     writes.push(target);
   }
   if(plan.activityPath) writes.push({update:{
-    name:prefix+plan.activityPath,fields:encodeFields(plan.activityData)
+    name:prefix+plan.activityPath,fields:encodeFields(plan.activityData,true)
   },currentDocument:{exists:false}});
   writes.push({update:{name:prefix+plan.markerPath,fields:markerFields},
     currentDocument:{exists:false}});

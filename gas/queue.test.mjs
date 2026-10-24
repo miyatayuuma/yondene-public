@@ -27,7 +27,7 @@ function setup() {
         if (url.includes('/childBookRatings/')) data = rating;
         if (url.includes('/childReflections/')) data = reflection;
         if (url.includes('/activity/')) data = activity;
-        if (url.includes('/books/demo-book')) data = {
+        if (url.endsWith('/books/demo-book')) data = {
           updateTime:'2026-10-24T09:01:02.123456Z',
           fields:{title:{stringValue:'Demo Book'},status:{stringValue:bookStatus},
             updatedAt:{stringValue:updatedAt},notes:{stringValue:''}}
@@ -213,6 +213,7 @@ test('childRating.set only creates first rating, repeat uses marker only',()=>{
   s.api.commit('fake',s.env,parsed,plan);
   assert.equal(s.getCommitted().writes.length,2);
   assert.equal(s.getCommitted().writes[1].update.fields.ratingCreated.booleanValue,true);
+  assert.match(s.getCommitted().writes[0].update.fields.createdAt.timestampValue,/^2026/);
   s.setRating({fields:{stars:{integerValue:'4'}}});
   const again=s.api.preflight('fake',s.env,s.family,parsed);
   assert.equal(again.action,'marker-only');
@@ -243,6 +244,8 @@ test('childReflection.create atomically creates reflection, activity and marker'
   assert.equal(writes[1].currentDocument.exists,false);
   assert.equal(writes[2].currentDocument.exists,false);
   assert.equal(writes[1].update.fields.hidden.booleanValue,false);
+  assert.match(writes[0].update.fields.createdAt.timestampValue,/^2026/);
+  assert.match(writes[1].update.fields.createdAt.timestampValue,/^2026/);
   assert.match(writes[0].update.name,/childReflections\/reflection-new-1$/);
   assert.match(writes[1].update.name,/activity\/reflection-reflection-new-1$/);
 });
@@ -254,7 +257,7 @@ test('create rejects unexpected child data, incomplete title and missing cover',
     reason:'Invalid synthetic create'};
   assert.throws(()=>withCommand(s,base),/書影URL/);
   assert.throws(()=>withCommand(s,{...base,stars:5,
-    book:{...base.book,coverUrl:'https://example.invalid/a.jpg'}}),/余分/);
+    book:{...base.book,coverUrl:'https://example.invalid/a.jpg'}}),/更新前条件|余分/);
   assert.throws(()=>withCommand(s,{...base,
     book:{...base.book,title:'',coverUrl:'https://example.invalid/a.jpg'}}),/書名/);
 });

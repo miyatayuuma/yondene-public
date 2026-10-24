@@ -238,6 +238,10 @@ function yondeneQueueParse_(cells) {
     throw new Error('コマンドID/操作/バージョンが一致しないか、未対応です。');
   if (typeof c.reason!=='string' || !c.reason.trim() || c.reason.length>800)
     throw new Error('更新理由が必要です。');
+  // Never reuse a historical GitHub command ID: raw-file and parsed-JSON
+  // SHA-256 digests deliberately use different contracts.
+  if(!/^gas-[A-Za-z0-9][A-Za-z0-9._-]{0,123}$/.test(c.commandId))
+    throw new Error('新規GASキューのコマンドIDはgas-で始めてください。');
   if(op==='catalog.audit') {
     if(Object.keys(c).some(function(key){
       return ['schemaVersion','commandId','op','reason','entries'].indexOf(key)===-1;
@@ -754,6 +758,8 @@ function yondeneQueueCommit_(token, env, parsed, plan, transaction) {
   const markerFields={
     source:{stringValue:'chatgpt-gas'},
     sourceRepository:{stringValue:'miyatayuuma/yondene-public'},
+    sourceCommandChannel:{stringValue:'private-google-sheet'},
+    sourceDigestScheme:{stringValue:'sha256-json-stringify-v1'},
     commandId:{stringValue:c.commandId},op:{stringValue:c.op},
     sourceDigest:{stringValue:parsed.digest},
     reason:{stringValue:c.reason},

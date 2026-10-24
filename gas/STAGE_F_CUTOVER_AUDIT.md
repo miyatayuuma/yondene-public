@@ -1,0 +1,57 @@
+# Stage F — legacy writer / GAS cutover compatibility audit
+
+Status: **SOURCE REVIEW COMPLETE; PRODUCTION CUTOVER BLOCKED** (2026-10-25 JST).
+
+This is a code-only audit. No private Firestore records, owner identifiers, Sheet URLs, credentials or real book data appear in this file. It does **not** certify deployed behavior or authorize a writer transfer.
+
+## Baseline reviewed
+
+- PRIVATE `miyatayuuma/yondene` main at `1aedf60356b234bd9c16457d50749bd48b552f44`: `reading-shelf/sync/runner.mjs`, `apply-commands.mjs`, `command.mjs`, `catalog-audit.mjs`, `child-rating-command.mjs`, `reflection-command.mjs`, `validate-queue.mjs`, workflow `.github/workflows/reading-shelf-chatgpt-sync.yml`, existing operations documentation.
+- PUBLIC Draft PR #3 `feature/gas-queue-stage-b` at `1143a9447bbc537aab05b96d34a8660dd86b532d`: `gas/Queue.gs`, `gas/queue.test.mjs`, `gas/README.md`.
+- Production Stage D bounded synthetic transaction acceptance and cleanup: owner logs PASS, synthetic docs remaining zero. Stage E one-shot `family.rename`: owner log PASS. Neither is a general queue/writer acceptance.
+- The PRIVATE bound Apps Script still has Stage A `Queue.gs`; reviewed Stage C source is **not installed**. Existing GitHub Actions remains the normal writer. `YONDENE_QUEUE.WRITE_ENABLED` remains hardcoded `false` in PUBLIC.
+
+## Operation parity
+
+| Operation | Existing GitHub writer | Draft GAS queue | Decision before cutover |
+| --- | --- | --- | --- |
+| `book.create` | YES | YES; additionally requires cover URL | Shared core fields are identical (38/38), but compare representative complete output and duplicate/edition rules |
+| `book.patch` | YES | YES, **but blocks title, author, ISBN edits** | Decide explicit safe bibliographic correction path; preserve ID/title/revision CAS |
+| `series.create` | YES | YES | Verify unique-name and stable-ID behavior |
+| `series.patch` | YES, including name | YES, **but blocks name changes** | Decide a collision-safe rename path |
+| `book.patchByTitle` | YES; unique-title lookup | NO | Prefer planned deprecation in favor of verified ID + title + revision; do not silently lose a needed workflow |
+| `book.delete` | YES, confirmation/title bound | NO | Keep disabled by default; define a separate explicit recovery/cleanup path or retain BLOCKED status |
+| `catalog.audit` | YES; multi-book transactional bibliographic patches with expected-value checks | NO | Need atomic multi-book correction equivalent or a separately reviewed replacement |
+| `childRating.set` | YES; never overwrite different stars | YES; first-create or same-stars marker-only | Verify stored Firestore field types, UI behavior, marker shape and genuine update acceptance |
+| `childReflection.create` | YES; reflection + activity + marker atomic | YES; intended same three writes | Compare concrete persisted types, app rendering, replay and rollback |
+| `family.rename` | No general GitHub command path | Internal GAS setting-based rename | One-shot Stage E PASS only; no recurring trigger approval |
+| Read-only revision requests | Supported in private workflow | No equivalent in GAS queue | Retain an authorized read-only revision/CAS source after writer switch |
+
+`book.patchByTitle`, deletion, and catalog audit are deliberately **not** added by this review. Implementing them without an acceptance design could increase data-loss risk. The common 38 book fields and three series fields match as names; this is **not** proof of semantic parity.
+
+## Marker and replay incompatibility
+
+- Existing GitHub runner computes `sourceDigest = SHA-256(raw UTF-8 command file bytes)` and marks `source=chatgpt-github`, `sourceRepository=miyatayuuma/yondene`, `sourceCommit`.
+- GAS computes `sourceDigest = SHA-256(JSON.stringify(parsed command object))` and marks `source=chatgpt-gas`, `sourceRepository=miyatayuuma/yondene-public`. For equal logical commands, digest equality is **not guaranteed**; the latter repository describes code provenance, not the private Sheet row storing the command.
+- Both use `families/{familyId}/chatgptMutations/{commandId}`. A pre-existing marker with a different digest is a hard conflict. **Do not import/replay prior GitHub command IDs into GAS.** Do not rewrite or delete historical markers.
+- Before cutover, define a source-aware durable marker format/digest contract and separate fresh GAS ID namespace. Independently inventory all existing marker IDs/digests and reconcile after every accepted write.
+
+## Readiness blockers / evidence to collect
+
+1. **Product/API decisions**: document which legacy features must be preserved, deliberately retired, or sent through an explicitly approved exceptional path. No two simultaneous production writers.
+2. **Input/semantic acceptance**: compare real schema types and output of representative book create, completion, undo completion, series, rating, reflection and controlled correction with no unwanted fields. Historical requests must remain unchanged.
+3. **Fresh CAS input**: hourly read-only Sheet mirror may lag; refresh authoritative Firestore `updatedAt` and title before composing `PENDING` commands. On conflict, stop for review rather than retry with a new ID.
+4. **Authorization and isolation**: independently inspect the bound GAS project's editor list, OAuth scopes/token authority, Sheet permissions, immutable source/queue integrity and execution ownership. A hardcoded software switch is not a sufficient privilege boundary for a script editor.
+5. **Backup/recovery**: verify the twice-weekly encrypted backup is *actually running*, decryptable by an authorized recovery process, and recoverable before writer changes. The backup job shares the GitHub workflow but has a separate `YONDENE_BACKUP_ENABLED` gate: **do not disable the whole workflow while relying on that backup**. Audit OIDC provider changes and credential-drain timing.
+6. **No overlapping writers**: agree on the actual old-writer disable mechanism, verify no queued/running operations, reconcile before/after state, and activate GAS only by a new explicit owner approval and a scoped genuine command acceptance. Do not install a trigger during audit.
+7. **Recovery proof**: document fail-closed behavior for failed GAS commit, marker-only reconciliation, interrupted Sheet status write and rollback without resurrecting old commands.
+
+## One-time production acceptance scripts — disposition
+
+The private bound GAS environment only needs the permanent read-only `Code.gs` and the currently disabled `Queue.gs` while this review continues. After their code/evidence is safely retained, remove the *executable copies* of `ProductionReadProbe.gs`, `ProductionCommitProbe.gs`, `ProductionCleanupProbe.gs` and `ProductionRenameProbe.gs` from that live bound project **manually**. Never rerun synthetic commit/rename as a housekeeping step. Merely renaming a `.gs` file does not disable its top-level functions.
+
+Keep the public, synthetic `*.test.mjs` regression tests in CI. Keep reviewed probe templates and their PASS evidence in Git history as historical acceptance material; do not auto-run one-time production probe entry points in CI or leave them installed in the live GAS project. Preserve the Stage E production rename marker and all historical command markers.
+
+## Current gate
+
+**BLOCKED.** Do not merge PR #3, copy Stage C into the live project, enable either GAS writer gate or automatic trigger, disable private writer, alter IAM, or perform any further production mutation on the strength of this document. The next safe step is a *read-only security + backup/rollback and current-state reconciliation audit*, then a separately approved bounded business-command test.

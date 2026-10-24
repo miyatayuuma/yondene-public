@@ -64,7 +64,7 @@ function harness(id,initialName='Seed Shelf') {
     yondeneFirestoreRequest_:()=>{throw new Error('Unexpected legacy request')},
     UrlFetchApp:{fetch:(url,options)=>{
       if(!url.startsWith(CLOUD))throw new Error('Unexpected outbound URL');
-      const local='http://'+HOST+url.slice(CLOUD.length);
+      const local=BASE+url.slice(CLOUD.length);
       const method=String(options.method||'get').toUpperCase();
       if(method==='POST' && local.includes('documents:commit'))commits++;
       const result=rest(method,local,options.payload?JSON.parse(options.payload):undefined);

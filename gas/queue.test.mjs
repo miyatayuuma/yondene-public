@@ -26,6 +26,7 @@ function setup({mockRelease=false} = {}) {
   };
   let queryRows = {}, rating = null, reflection = null, activity = null;
   let bookStatus = 'reading', seriesName = 'Demo Series', publisher = '';
+  let bookNotes = '', completionNote = '';
   const ctx = {
     YONDENE: {project:'example-project', spreadsheetId:'example-sheet'},
     yondeneSha256_: x => createHash('sha256').update(x,'utf8').digest('hex'),
@@ -49,7 +50,8 @@ function setup({mockRelease=false} = {}) {
         if (url.split('?')[0].endsWith('/books/demo-book')) data = {
           updateTime:'2026-10-24T09:01:02.123456Z',
           fields:{title:{stringValue:'Demo Book'},status:{stringValue:bookStatus},
-            updatedAt:{stringValue:updatedAt},notes:{stringValue:''},
+            updatedAt:{stringValue:updatedAt},notes:{stringValue:bookNotes},
+            finishedPeriodNote:{stringValue:completionNote},
             publisher:{stringValue:publisher}}
         };
         if (url.split('?')[0].endsWith('/books/demo-book-2')) data = {
@@ -116,8 +118,10 @@ function setup({mockRelease=false} = {}) {
     processSettings:yondeneQueueProcessSettings_})`,ctx);
   const command = {schemaVersion:1,commandId:'gas-demo-command-001',
     op:'book.patch',bookId:'demo-book',expectedTitle:'Demo Book',
-    expectedUpdatedAt:DATE,patch:{status:'read',reportedAt:'2026-10-24',notes:''},
-    reason:'Test an explicitly reported completion'};
+    expectedUpdatedAt:DATE,
+    patch:{status:'read',reportedAt:'2026-10-24',finishedAt:'2026-10-23',
+      finishedPeriodBasis:'confirmed_completion_date',notes:''},
+    reason:'Test an explicitly confirmed completion'};
   const cells = [
     command.commandId,'2026-10-24 18:00','book.patch',
     JSON.stringify(command),'PENDING','','','','',''
@@ -128,6 +132,7 @@ function setup({mockRelease=false} = {}) {
     setMarker:x=>{marker=x},setUpdatedAt:x=>{updatedAt=x},
     setQuery:(field,value,docs)=>{queryRows[field+':'+value]=docs},
     setRating:x=>{rating=x},setBookStatus:x=>{bookStatus=x},
+    setBookNotes:x=>{bookNotes=x},setCompletionNote:x=>{completionNote=x},
     setSeriesName:x=>{seriesName=x},setPublisher:x=>{publisher=x},
     getCommitted:()=>committed,getCommitCount:()=>commits,
     getBeginCount:()=>begun,getRollbackCount:()=>rolledBack,
@@ -176,8 +181,8 @@ test('preflight guards target, owner and completion date',()=>{
   const s=setup(),parsed=s.api.parse(s.cells);
   const plan=s.api.preflight('fake',s.env,s.family,parsed);
   assert.equal(plan.recordUpdateTime,'2026-10-24T09:01:02.123456Z');
-  assert.equal(plan.updates.finishedAt,'2026-10-24');
-  assert.equal(plan.updates.finishedPeriodBasis,'completion_report_date');
+  assert.equal(plan.updates.finishedAt,'2026-10-23');
+  assert.equal(plan.updates.finishedPeriodBasis,'confirmed_completion_date');
   s.setUpdatedAt('changed');
   assert.throws(()=>s.api.preflight('fake',s.env,s.family,parsed),/競合/);
   assert.throws(()=>s.api.preflight('fake',s.env,{fields:{}},parsed),/owner/);
@@ -521,4 +526,83 @@ test('settings with unchanged shelf name cause no Firestore reads or writes',()=
   assert.equal(s.getBeginCount(),0);
   assert.equal(s.getCommitCount(),0);
   assert.equal(s.getSettingsConfirmed(),'Demo Shelf');
+});
+
+
+test('completion is rejected without explicit period even if a report date is present',()=>{
+  const s=setup({mockRelease:true});
+  const patch={status:'read',reportedAt:'2026-10-24',readingMode:'read-aloud'};
+  const c={...s.command,patch};
+  const parsed=withCommand(s,c);
+  assert.throws(()=>s.api.apply('fake',s.env,parsed),/読了時期を明示/);
+  assert.equal(s.getCommitCount(),0);
+  assert.equal(s.getRollbackCount(),1);
+});
+
+test('explicit completion period is never replaced by a later report date',()=>{
+  const s=setup({mockRelease:true});
+  const c={...s.command,patch:{status:'read',finishedAt:'2026-09',
+    reportedAt:'2026-10-24',readingMode:'read-aloud'}};
+  const plan=s.api.preflight('fake',s.env,s.family,withCommand(s,c));
+  assert.equal(plan.updates.finishedAt,'2026-09');
+  assert.equal(plan.updates.reportedAt,'2026-10-24');
+  assert.equal(plan.updates.finishedPeriodBasis,undefined);
+});
+
+test('new read book requires explicit completion and never defaults from reportedAt',()=>{
+  const s=setup({mockRelease:true});
+  const base={schemaVersion:1,commandId:'gas-read-create-01',op:'book.create',
+    bookId:'new-fake-book',reason:'Synthetic completion rule',
+    book:{title:'Synthetic Read Book',author:'Sample Author',
+      status:'read',coverUrl:'https://example.invalid/cover.png',
+      reportedAt:'2026-10-24',readingMode:'read-aloud'}};
+  const parsed=withCommand(s,base);
+  assert.throws(()=>s.api.apply('fake',s.env,parsed),/読了時期を明示/);
+  assert.equal(s.getCommitCount(),0);
+  const approved={...base,commandId:'gas-read-create-02',
+    book:{...base.book,finishedAt:'2026-10-22'}};
+  const plan=s.api.preflight('fake',s.env,s.family,withCommand(s,approved));
+  assert.equal(plan.updates.finishedAt,'2026-10-22');
+});
+
+test('read to unread clears completion metadata and reading mode but not observation notes',()=>{
+  const s=setup({mockRelease:true});
+  s.setBookStatus('read');
+  s.setBookNotes('本人の興味と発言を保存');
+  const c={...s.command,patch:{status:'unread'}};
+  const parsed=withCommand(s,c);
+  const plan=s.api.preflight('fake',s.env,s.family,parsed);
+  for(const key of ['finishedAt','finishedPeriodLabel','finishedPeriodStart',
+    'finishedPeriodEnd','finishedPeriodPrecision','finishedPeriodBasis',
+    'finishedPeriodNote','finishPrecision','readingMode']){
+    assert.equal(plan.updates[key],'',key);
+  }
+  assert.equal(plan.updates.notes,undefined);
+  assert.equal(s.api.commit('fake',s.env,parsed,plan,'synthetic-transaction'),'APPLIED');
+  const fields=s.getCommitted().writes[0].update.fields;
+  assert.equal(fields.finishedAt.stringValue,'');
+  assert.equal(fields.readingMode.stringValue,'');
+  assert.equal(fields.notes,undefined);
+});
+
+test('protects a filled free-text completion note before undoing read',()=>{
+  const s=setup({mockRelease:true});
+  s.setBookStatus('read');
+  s.setCompletionNote('子の発言が含まれるかもしれない');
+  const pending={...s.command,patch:{status:'unread'}};
+  assert.throws(()=>s.api.apply('fake',s.env,withCommand(s,pending)),/退避・確認/);
+  assert.equal(s.getCommitCount(),0);
+  const explicit={...s.command,commandId:'gas-undo-confirmed-01',
+    patch:{status:'unread',finishedPeriodNote:''}};
+  const plan=s.api.preflight('fake',s.env,s.family,withCommand(s,explicit));
+  assert.equal(plan.updates.finishedPeriodNote,'');
+});
+
+test('unread and paused cannot receive an explicit nonempty completion period',()=>{
+  const s=setup({mockRelease:true});
+  s.setBookStatus('read');
+  const bad={...s.command,patch:{status:'unread',finishedAt:'2026-10'}};
+  assert.throws(()=>s.api.preflight('fake',s.env,s.family,withCommand(s,bad)),/未読了/);
+  const wrong={...s.command,patch:{status:'paused',finishedPeriodStart:'2026-10'}};
+  assert.throws(()=>s.api.preflight('fake',s.env,s.family,withCommand(s,wrong)),/未読了/);
 });

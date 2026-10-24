@@ -1,0 +1,503 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+    function familyPath(fid) {
+      return /databases/$(database)/documents/families/$(fid);
+    }
+    function memberPath(fid, uid) {
+      return /databases/$(database)/documents/families/$(fid)/members/$(uid);
+    }
+    function invitePath(fid, email) {
+      return /databases/$(database)/documents/families/$(fid)/invites/$(email);
+    }
+    function owner(fid) {
+      return signedIn() && exists(familyPath(fid))
+          && get(familyPath(fid)).data.ownerUid == request.auth.uid;
+    }
+    function member(fid) {
+      return signedIn() && (owner(fid) || exists(memberPath(fid, request.auth.uid)));
+    }
+    function childReflectionPath(fid, bookId, rid) {
+      return /databases/$(database)/documents/families/$(fid)/books/$(bookId)/childReflections/$(rid);
+    }
+    function archivedReflectionPath(fid, bookId, rid) {
+      return /databases/$(database)/documents/families/$(fid)/books/$(bookId)/withdrawnReflections/$(rid);
+    }
+    function reactionPath(fid, bookId, bucket, uid) {
+      return /databases/$(database)/documents/families/$(fid)/books/$(bookId)/$(bucket)/$(uid);
+    }
+    function reactionBucket(kind) {
+      return kind == 'like' ? 'reactions' : 'requests';
+    }
+    function readingRecord(data) {
+      return {
+        'status':data.get('status',''),
+        'readingMode':data.get('readingMode',''),
+        'finishedAt':data.get('finishedAt',''),
+        'finishedPeriodLabel':data.get('finishedPeriodLabel',''),
+        'finishedPeriodStart':data.get('finishedPeriodStart',''),
+        'finishedPeriodEnd':data.get('finishedPeriodEnd',''),
+        'finishedPeriodPrecision':data.get('finishedPeriodPrecision',''),
+        'finishedPeriodBasis':data.get('finishedPeriodBasis',''),
+        'finishedPeriodNote':data.get('finishedPeriodNote',''),
+        'finishPrecision':data.get('finishPrecision','')
+      };
+    }
+
+    function validReadingPeriod(record) {
+      return record.finishedAt is string
+        && record.finishedAt.matches('^$|^[0-9]{4}-(0[1-9]|1[0-2])(-([0][1-9]|[12][0-9]|3[01]))?$')
+        && record.finishedPeriodLabel is string && record.finishedPeriodLabel.size() <= 160
+        && record.finishedPeriodStart is string && record.finishedPeriodEnd is string
+        && record.finishedPeriodStart.matches('^$|^[0-9]{4}-(0[1-9]|1[0-2])$')
+        && record.finishedPeriodEnd.matches('^$|^[0-9]{4}-(0[1-9]|1[0-2])$')
+        && ((record.finishedPeriodStart == '' && record.finishedPeriodEnd == '')
+          || (record.finishedPeriodStart != '' && record.finishedPeriodEnd != ''
+          && record.finishedPeriodStart <= record.finishedPeriodEnd))
+        && record.finishedPeriodPrecision is string && record.finishedPeriodPrecision.size() <= 80
+        && record.finishedPeriodBasis is string && record.finishedPeriodBasis.size() <= 120
+        && record.finishedPeriodNote is string && record.finishedPeriodNote.size() <= 1500
+        && record.finishPrecision is string && record.finishPrecision.size() <= 80;
+    }
+    function noCompletion(record) {
+      return record.finishedAt == '' && record.finishedPeriodLabel == ''
+        && record.finishedPeriodStart == '' && record.finishedPeriodEnd == ''
+        && record.finishedPeriodPrecision == '' && record.finishedPeriodBasis == ''
+        && record.finishedPeriodNote == '' && record.finishPrecision == '';
+    }
+    function readingBookPath(fid,bookId) {
+      return /databases/$(database)/documents/families/$(fid)/books/$(bookId);
+    }
+    function readingEventPath(fid,bookId,eventId) {
+      return /databases/$(database)/documents/families/$(fid)/books/$(bookId)/readingEditEvents/$(eventId);
+    }
+    // Old v26 clients still send the original receipt shape for normal edits.
+    // Corrections add exactly one declared marker; it cannot modify other evidence.
+    function validReadingReceipt(receipt, expected, previous, next) {
+      return receipt.diff(expected).affectedKeys().hasOnly(['correctionKind'])
+        && ((previous.status == 'read' && next.status != 'read'
+          && receipt.get('correctionKind','') == 'mistaken-completion')
+          || ((previous.status != 'read' || next.status == 'read')
+          && !receipt.keys().hasAny(['correctionKind'])));
+    }
+    function validReadingBookEdit(fid,bookId) {
+      let eventId = request.resource.data.get('lastReadingEditId','');
+      let next = readingRecord(request.resource.data);
+      let prior = readingRecord(resource.data);
+      let eventPath = readingEventPath(fid,bookId,eventId);
+      return owner(fid)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status','readingMode','finishedAt','finishedPeriodLabel','finishedPeriodStart',
+          'finishedPeriodEnd','finishedPeriodPrecision','finishedPeriodBasis',
+          'finishedPeriodNote','finishPrecision','updatedAt','lastReadingEditId','manualEditedAt'
+        ])
+        && eventId is string && eventId.matches('^edit-[a-f0-9-]{36}$')
+        && eventId != resource.data.get('lastReadingEditId','')
+        && request.resource.data.updatedAt is string
+        && request.resource.data.updatedAt.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$')
+        && request.resource.data.updatedAt != resource.data.get('updatedAt','')
+        && request.resource.data.manualEditedAt == request.time
+        && next.status in ['unread','reading','paused','read']
+        && next.readingMode in ['','read-aloud','independent','mixed']
+        && ((next.status == 'unread' && next.readingMode == '')
+          || (next.status != 'unread' && next.readingMode != ''))
+        && validReadingPeriod(next)
+        && (next.status == 'read' || noCompletion(next))
+        && !exists(eventPath) && existsAfter(eventPath)
+        && validReadingReceipt(getAfter(eventPath).data, {
+          'bookId':bookId,'actorUid':request.auth.uid,'previous':prior,'next':next,
+          'previousUpdatedAt':resource.data.get('updatedAt',''),
+          'newUpdatedAt':request.resource.data.updatedAt,'editedAt':request.time
+        },prior,next);
+    }
+    function validReadingEvent(fid,bookId,eventId) {
+      let bookPath = readingBookPath(fid,bookId);
+      let previous = readingRecord(get(bookPath).data);
+      let next = readingRecord(getAfter(bookPath).data);
+      return owner(fid)
+        && eventId.matches('^edit-[a-f0-9-]{36}$')
+        && exists(bookPath)
+        && get(bookPath).data.get('lastReadingEditId','') != eventId
+        && getAfter(bookPath).data.get('lastReadingEditId','') == eventId
+        && validReadingReceipt(request.resource.data, {
+          'bookId':bookId,'actorUid':request.auth.uid,
+          'previous':previous,
+          'next':next,
+          'previousUpdatedAt':get(bookPath).data.get('updatedAt',''),
+          'newUpdatedAt':getAfter(bookPath).data.updatedAt,
+          'editedAt':request.time
+        },previous,next);
+    }
+    function validReactionActivity(fid, activityId) {
+      let item = request.resource.data;
+      let reaction = reactionPath(fid, item.bookId, reactionBucket(item.kind), request.auth.uid);
+      return item.kind in ['like','ask-reflection']
+        && activityId == item.kind + '-' + item.bookId + '-' + request.auth.uid
+        && item.sourceId == request.auth.uid
+        && get(/databases/$(database)/documents/families/$(fid)/books/$(item.bookId)).data.title == item.title
+        && existsAfter(reaction)
+        && getAfter(reaction).data.uid == request.auth.uid
+        && getAfter(reaction).data.kind == item.kind;
+    }
+    function linkInvitePath(fid, token) {
+      return /databases/$(database)/documents/families/$(fid)/openInvites/$(token);
+    }
+    function ownEmail(email) {
+      return signedIn() && request.auth.token.email_verified == true
+        && request.auth.token.email == email;
+    }
+    match /users/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow list, delete: if false;
+      allow create, update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.familyId is string
+        && member(request.resource.data.familyId)
+        && ( !exists(/databases/$(database)/documents/users/$(uid))
+             || resource.data.familyId == request.resource.data.familyId);
+    }
+    match /families/{fid} {
+      allow get: if member(fid);
+      allow list, delete: if false;
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['ownerUid','name','createdAt','schemaVersion'])
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 80
+        && request.resource.data.schemaVersion == 1
+        && request.resource.data.createdAt is timestamp;
+      allow update: if owner(fid)
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.schemaVersion == resource.data.schemaVersion;
+      match /members/{uid} {
+        // Email and role data are private: owners may list; users may get only themselves.
+        allow get: if owner(fid) || (signedIn() && request.auth.uid == uid && member(fid));
+        allow list: if owner(fid);
+        allow create: if signedIn()
+          && request.auth.uid == uid
+          && request.resource.data.uid == uid
+          && request.resource.data.email == request.auth.token.email
+          && request.resource.data.displayName is string
+          && request.resource.data.joinedAt is timestamp
+          && request.resource.data.keys().hasOnly(['uid','email','displayName','role','joinedAt','inviteToken'])
+          && (
+            (owner(fid) && request.resource.data.role == 'owner'
+              && !request.resource.data.keys().hasAny(['inviteToken'])) ||
+            (request.auth.token.email_verified == true
+              && exists(invitePath(fid, request.auth.token.email))
+              && get(invitePath(fid, request.auth.token.email)).data.expiresAt > request.time
+              && get(invitePath(fid, request.auth.token.email)).data.role == request.resource.data.role
+              && request.resource.data.role in ['editor','viewer']
+              && !request.resource.data.keys().hasAny(['inviteToken'])) ||
+            (request.auth.token.email_verified == true
+              && request.resource.data.keys().hasAll(['inviteToken'])
+              && request.resource.data.inviteToken is string
+              && request.resource.data.inviteToken.matches('^[A-Za-z0-9_-]{43}$')
+              && exists(linkInvitePath(fid, request.resource.data.inviteToken))
+              && get(linkInvitePath(fid, request.resource.data.inviteToken)).data.role == 'viewer'
+              && get(linkInvitePath(fid, request.resource.data.inviteToken)).data.claimedByUid == ''
+              && get(linkInvitePath(fid, request.resource.data.inviteToken)).data.expiresAt > request.time
+              && request.resource.data.role == 'viewer'
+              && request.resource.data.joinedAt == request.time
+              && getAfter(linkInvitePath(fid, request.resource.data.inviteToken)).data.claimedByUid == uid
+              && getAfter(linkInvitePath(fid, request.resource.data.inviteToken)).data.claimedAt == request.time)
+          );
+        allow update: if owner(fid) && uid != request.auth.uid
+          && resource.data.role != 'owner'
+          && request.resource.data.uid == uid
+          && request.resource.data.email == resource.data.email
+          && request.resource.data.role in ['editor', 'viewer'];
+        allow delete: if owner(fid) && resource.data.role != 'owner';
+      }
+      // Family-readable presentation layer. No email addresses or roles here.
+      match /publicProfiles/{uid} {
+        allow get, list: if member(fid);
+        allow create: if member(fid) && request.auth.uid == uid
+          && request.resource.data.keys().hasOnly(['uid','nickname','updatedAt'])
+          && request.resource.data.keys().hasAll(['uid','nickname','updatedAt'])
+          && request.resource.data.uid == uid
+          && request.resource.data.nickname is string
+          && request.resource.data.nickname.size() >= 2
+          && request.resource.data.nickname.size() <= 20
+          && request.resource.data.updatedAt == request.time;
+        allow update: if member(fid) && request.auth.uid == uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['nickname','updatedAt'])
+          && request.resource.data.uid == resource.data.uid
+          && request.resource.data.nickname is string
+          && request.resource.data.nickname.size() >= 2
+          && request.resource.data.nickname.size() <= 20
+          && request.resource.data.updatedAt == request.time;
+        allow delete: if owner(fid) && uid != request.auth.uid;
+      }
+      match /invites/{email} {
+        allow get: if owner(fid) || ownEmail(email);
+        allow list: if owner(fid);
+        allow create, update: if owner(fid)
+          && request.resource.data.email == email
+          && request.resource.data.role in ['editor','viewer']
+          && request.resource.data.expiresAt is timestamp
+          && request.resource.data.expiresAt > request.time;
+        allow delete: if owner(fid);
+      }
+      // ChatGPT sync uses a scoped Google Cloud service account and Admin SDK.
+      // Family browser sessions remain read-only even for the owner.
+      // A claim and its new membership must be validated atomically.
+      match /openInvites/{token} {
+        allow get: if signedIn() && token.matches('^[A-Za-z0-9_-]{43}$')
+          && (owner(fid) || (resource != null && (resource.data.claimedByUid == ''
+            || resource.data.claimedByUid == request.auth.uid)));
+        allow list: if owner(fid);
+        allow create: if owner(fid)
+          && token.matches('^[A-Za-z0-9_-]{43}$')
+          && request.resource.data.keys().hasOnly(['role','createdAt','expiresAt','claimedByUid','claimedAt'])
+          && request.resource.data.keys().hasAll(['role','createdAt','expiresAt','claimedByUid','claimedAt'])
+          && request.resource.data.role == 'viewer'
+          && request.resource.data.createdAt == request.time
+          && request.resource.data.expiresAt is timestamp
+          && request.resource.data.expiresAt > request.time
+          && request.resource.data.expiresAt <= request.time + duration.value(14,'d')
+          && request.resource.data.claimedByUid == ''
+          && request.resource.data.claimedAt == null;
+        allow update: if signedIn() && request.auth.token.email_verified == true
+          && resource.data.claimedByUid == ''
+          && resource.data.expiresAt > request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['claimedByUid','claimedAt'])
+          && request.resource.data.claimedByUid == request.auth.uid
+          && request.resource.data.claimedAt == request.time
+          && !exists(memberPath(fid,request.auth.uid))
+          && existsAfter(memberPath(fid,request.auth.uid))
+          && getAfter(memberPath(fid,request.auth.uid)).data.inviteToken == token
+          && getAfter(memberPath(fid,request.auth.uid)).data.role == resource.data.role;
+        allow delete: if owner(fid) && resource.data.claimedByUid == '';
+      }
+      // Only a family owner records a child's stars, never changes books.
+      match /childBookRatings/{bookId} {
+        allow get, list: if member(fid);
+        allow create: if owner(fid)
+          && exists(/databases/$(database)/documents/families/$(fid)/books/$(bookId))
+          && get(/databases/$(database)/documents/families/$(fid)/books/$(bookId)).data.status in ['read','reading','paused']
+          && request.resource.data.keys().hasOnly(['stars','enteredByUid','createdAt','updatedAt'])
+          && request.resource.data.keys().hasAll(['stars','enteredByUid','createdAt','updatedAt'])
+          && request.resource.data.stars is int
+          && request.resource.data.stars >= 1 && request.resource.data.stars <= 5
+          && request.resource.data.enteredByUid == request.auth.uid
+          && request.resource.data.createdAt == request.time
+          && request.resource.data.updatedAt == request.time;
+        allow update: if owner(fid)
+          && exists(/databases/$(database)/documents/families/$(fid)/books/$(bookId))
+          && get(/databases/$(database)/documents/families/$(fid)/books/$(bookId)).data.status in ['read','reading','paused']
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stars','updatedAt'])
+          && request.resource.data.keys().hasAll(['stars','enteredByUid','createdAt','updatedAt'])
+          && request.resource.data.keys().hasOnly(['stars','enteredByUid','createdAt','updatedAt'])
+          && request.resource.data.stars is int
+          && request.resource.data.stars >= 1 && request.resource.data.stars <= 5
+          && request.resource.data.enteredByUid == resource.data.enteredByUid
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.updatedAt == request.time;
+        allow delete: if owner(fid);
+      }
+      match /books/{bookId} {
+        allow get, list: if member(fid);
+        allow create, delete: if false;
+        allow update: if validReadingBookEdit(fid,bookId);
+
+        match /readingEditEvents/{eventId} {
+          allow get, list: if owner(fid);
+          allow create: if validReadingEvent(fid,bookId,eventId);
+          allow update, delete: if false;
+        }
+
+        // Child observations are formally recorded by the authorized
+        // ChatGPT->GitHub->Admin SDK pipeline, not by family web clients.
+        match /childReflections/{reflectionId} {
+          allow get, list: if member(fid);
+          // The Google account that owns this family can append a child's
+          // observed words. Members cannot alter the formal record.
+          allow create: if owner(fid)
+            && request.resource.data.keys().hasOnly(['quote','attribution','observedAt','createdAt','source','authorUid'])
+            && request.resource.data.keys().hasAll(['quote','attribution','observedAt','createdAt','source','authorUid'])
+            && request.resource.data.quote is string
+            && request.resource.data.quote.size() > 0
+            && request.resource.data.quote.size() <= 3000
+            && request.resource.data.attribution in ['verbatim','parent-summary']
+            && request.resource.data.observedAt is string
+            && request.resource.data.observedAt.size() <= 100
+            && request.resource.data.createdAt == request.time
+            && request.resource.data.source == 'owner-app'
+            && request.resource.data.authorUid == request.auth.uid;
+          // Restore the exact original record in the same batch that deletes
+          // its owner-only archive; do not admit forged content or edited history.
+          allow create: if owner(fid)
+            && exists(archivedReflectionPath(fid,bookId,reflectionId))
+            && !existsAfter(archivedReflectionPath(fid,bookId,reflectionId))
+            && request.resource.data == get(archivedReflectionPath(fid,bookId,reflectionId)).data.original;
+          allow update: if false;
+          allow delete: if owner(fid)
+            && !exists(archivedReflectionPath(fid,bookId,reflectionId))
+            && existsAfter(archivedReflectionPath(fid,bookId,reflectionId))
+            && getAfter(archivedReflectionPath(fid,bookId,reflectionId)).data.original == resource.data;
+        }
+        match /withdrawnReflections/{reflectionId} {
+          // Not just visually hidden: general members cannot retrieve a withdrawn quote.
+          allow get, list: if owner(fid);
+          allow create: if owner(fid)
+            && request.resource.data.keys().hasOnly(['original','withdrawnAt','withdrawnBy'])
+            && request.resource.data.keys().hasAll(['original','withdrawnAt','withdrawnBy'])
+            && request.resource.data.withdrawnBy == request.auth.uid
+            && request.resource.data.withdrawnAt == request.time
+            && exists(childReflectionPath(fid,bookId,reflectionId))
+            && !existsAfter(childReflectionPath(fid,bookId,reflectionId))
+            && request.resource.data.original == get(childReflectionPath(fid,bookId,reflectionId)).data;
+          allow update: if false;
+          allow delete: if owner(fid)
+            && !exists(childReflectionPath(fid,bookId,reflectionId))
+            && existsAfter(childReflectionPath(fid,bookId,reflectionId))
+            && getAfter(childReflectionPath(fid,bookId,reflectionId)).data == resource.data.original;
+        }
+        match /comments/{commentId} {
+          // Listeners must query hidden == false; owners may separately
+          // list moderated comments for restoration.
+          allow get: if member(fid) && (
+            owner(fid) || resource.data.hidden == false ||
+            resource.data.authorUid == request.auth.uid
+          );
+          allow list: if member(fid) && (owner(fid) || resource.data.hidden == false);
+          allow create: if member(fid)
+            && request.resource.data.keys().hasOnly(['authorUid','body','createdAt','updatedAt','hidden'])
+            && request.resource.data.keys().hasAll(['authorUid','body','createdAt','updatedAt','hidden'])
+            && request.resource.data.authorUid == request.auth.uid
+            && request.resource.data.body is string
+            && request.resource.data.body.size() > 0
+            && request.resource.data.body.size() <= 2000
+            && request.resource.data.createdAt == request.time
+            && request.resource.data.updatedAt == request.time
+            && request.resource.data.hidden == false;
+          allow update: if member(fid) && (
+            (resource.data.authorUid == request.auth.uid
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['body','updatedAt'])
+              && request.resource.data.body is string
+              && request.resource.data.body.size() > 0
+              && request.resource.data.body.size() <= 2000
+              && request.resource.data.updatedAt == request.time)
+            ||
+            (owner(fid) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hidden'])
+              && request.resource.data.hidden is bool
+              && request.resource.data.hidden != resource.data.hidden)
+          );
+          allow delete: if member(fid) && resource.data.authorUid == request.auth.uid;
+        }
+        match /reactions/{uid} {
+          allow get, list: if member(fid);
+          allow create: if member(fid) && uid == request.auth.uid
+            && request.resource.data.keys().hasOnly(['uid','kind','createdAt'])
+            && request.resource.data.keys().hasAll(['uid','kind','createdAt'])
+            && request.resource.data.uid == uid
+            && request.resource.data.kind == 'like'
+            && request.resource.data.createdAt == request.time;
+          allow update: if false;
+          allow delete: if member(fid) && uid == request.auth.uid;
+        }
+        match /requests/{uid} {
+          allow get, list: if member(fid);
+          allow create: if member(fid) && uid == request.auth.uid
+            && request.resource.data.keys().hasOnly(['uid','kind','createdAt'])
+            && request.resource.data.keys().hasAll(['uid','kind','createdAt'])
+            && request.resource.data.uid == uid
+            && request.resource.data.kind == 'ask-reflection'
+            && request.resource.data.createdAt == request.time;
+          allow update: if false;
+          allow delete: if member(fid) && uid == request.auth.uid;
+        }
+      }
+      match /series/{sid} {
+        allow get, list: if member(fid);
+        allow create, update, delete: if false;
+      }
+      // Activity feed stores only who performed which action on which book.
+      // No comment text, children's words, email address or recommendation reason.
+      match /activity/{activityId} {
+        allow get, list: if member(fid);
+        allow create: if member(fid)
+          && request.resource.data.keys().hasOnly(['actorUid','kind','title','bookId','sourceId','hidden','createdAt'])
+          && request.resource.data.keys().hasAll(['actorUid','kind','title','bookId','sourceId','hidden','createdAt'])
+          && request.resource.data.actorUid == request.auth.uid
+          && ((
+            request.resource.data.kind in ['comment','recommendation','reflection']
+            && (request.resource.data.kind != 'reflection' || owner(fid))
+          ) || validReactionActivity(fid, activityId))
+          && request.resource.data.title is string
+          && request.resource.data.title.size() > 0
+          && request.resource.data.title.size() <= 250
+          && request.resource.data.bookId is string
+          && request.resource.data.bookId.size() <= 128
+          && request.resource.data.sourceId is string
+          && request.resource.data.sourceId.size() > 0
+          && request.resource.data.sourceId.size() <= 128
+          && request.resource.data.hidden == false
+          && request.resource.data.createdAt == request.time;
+        allow update: if owner(fid) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hidden'])
+          && request.resource.data.hidden is bool;
+        allow delete: if member(fid) && (
+          resource.data.actorUid == request.auth.uid || owner(fid)
+        );
+      }
+      match /recommendations/{recommendationId} {
+        allow get: if member(fid) && (owner(fid) || resource.data.hidden == false ||
+          resource.data.authorUid == request.auth.uid);
+        allow list: if member(fid) && (owner(fid) || resource.data.hidden == false);
+        allow create: if member(fid)
+          && request.resource.data.keys().hasOnly(['authorUid','title','normalizedTitle','reason','url','hidden','createdAt','updatedAt','author','publisher','publishedDate','isbn','coverUrl','metadataSource'])
+          && request.resource.data.keys().hasAll(['authorUid','title','normalizedTitle','reason','url','hidden','createdAt','updatedAt'])
+          && request.resource.data.authorUid == request.auth.uid
+          && request.resource.data.title is string
+          && request.resource.data.title.size() > 0
+          && request.resource.data.title.size() <= 250
+          && request.resource.data.normalizedTitle is string
+          && request.resource.data.normalizedTitle.size() > 0
+          && request.resource.data.normalizedTitle.size() <= 250
+          && request.resource.data.reason is string
+          && request.resource.data.reason.size() <= 1000
+          && request.resource.data.url is string
+          && request.resource.data.url.size() <= 1500
+          && (request.resource.data.url == '' || request.resource.data.url.matches('^https://.+'))
+          && request.resource.data.get('author','') is string
+          && request.resource.data.get('author','').size() <= 250
+          && request.resource.data.get('publisher','') is string
+          && request.resource.data.get('publisher','').size() <= 250
+          && request.resource.data.get('publishedDate','') is string
+          && request.resource.data.get('publishedDate','').size() <= 35
+          && request.resource.data.get('isbn','') is string
+          && request.resource.data.get('isbn','').size() <= 13
+          && request.resource.data.get('coverUrl','') is string
+          && request.resource.data.get('coverUrl','').size() <= 1500
+          && (request.resource.data.get('coverUrl','') == '' || request.resource.data.get('coverUrl','').matches('^https://.+'))
+          && request.resource.data.get('metadataSource','') is string
+          && request.resource.data.get('metadataSource','').size() <= 1500
+          && (request.resource.data.get('metadataSource','') == '' || request.resource.data.get('metadataSource','').matches('^https://.+'))
+          && request.resource.data.hidden == false
+          && request.resource.data.createdAt == request.time
+          && request.resource.data.updatedAt == request.time;
+        allow update: if member(fid) && (
+          (resource.data.authorUid == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reason','url','updatedAt'])
+            && request.resource.data.reason is string
+            && request.resource.data.reason.size() <= 1000
+            && request.resource.data.url is string
+            && request.resource.data.url.size() <= 1500
+            && (request.resource.data.url == '' || request.resource.data.url.matches('^https://.+'))
+            && request.resource.data.updatedAt == request.time)
+          ||
+          (owner(fid) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hidden'])
+            && request.resource.data.hidden is bool
+            && request.resource.data.hidden != resource.data.hidden)
+        );
+        allow delete: if member(fid) && resource.data.authorUid == request.auth.uid;
+      }
+
+    }
+  }
+}

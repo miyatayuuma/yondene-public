@@ -55,9 +55,10 @@ from Firestore; there is no separate hardcoded UI name to update.
 2. Recheck parity for required legacy commands such as `book.patchByTitle`,
    deletion, catalog audits and corrections. Never make automatic deletion
    part of an unreviewed import.
-3. Test genuine concurrent Firestore transactions, conflicts and historical
-   marker integrity in an isolated test project. Mocks are necessary but
-   insufficient as a production acceptance substitute.
+3. Production synthetic transactions have passed, but genuine concurrent
+   writers, Stage C business operations (including shelf rename), conflicts
+   and historical marker integrity still need acceptance. Mocks and bounded
+   synthetic probes alone are insufficient for cutover.
 4. Independently audit authorization, OAuth scopes, secret separation, backup
    and rollback, and the old Action writer disablement.
 5. Require a new explicit owner approval for any production write or polling
@@ -108,12 +109,12 @@ An isolated synthetic Firestore emulator was used solely to investigate the exac
 
 The pre-existing mocked queue tests (21/21), public boundary checks, app tests and normal Firestore security-rules tests (37/37) passed in the last full run. **Live Firestore transaction serialization, logical uniqueness and shelf rename remain UNVERIFIED.** The test-only wide-open synthetic rules and the long-running blocked experiment have been removed from mandatory CI to conserve GitHub Actions minutes. Evidence remains in public Actions runs `40099342392`, `40099556695` and `40099701410` and commit history.
 
-Do not enable writes or retire the PRIVATE writer on this evidence. A separate isolated Firestore staging project and independently reviewed, bounded acceptance are required before any production cutover.
+The emulator result alone cannot authorize cutover. As no staging Firebase project is available, the owner authorized narrowly scoped production probes (below); independent operational and business-command acceptance are still required before any production cutover.
 
-## Stage D production read-only probe (owner approved; not yet run)
+## Stage D production read-only probe (PASS, 2026-10-24 23:19:47 JST)
 
 The owner authorized a **production environment test** on 2026-10-24 because
-no staging Firebase project exists. The first step is restricted to
+no staging Firebase project exists. The completed first step was restricted to
 **read-only transactions and rollback**, with zero Firestore mutations, zero
 Sheet edits, and no replacement of the old writer.
 
@@ -126,19 +127,20 @@ transaction-bound family GET and a deliberately unmatched book query, then
 rolls back. It returns PASS only after rollback completes. Logs contain no
 family ID, UID, title or response body.
 
+The read-only PASS log was `tx read/query/rollback; Firestore更新0件`.
 The probe **does not** test commits or concurrent writes, activate
 `WRITE_ENABLED`, install a trigger, change `設定!B2/C2`, or merge this PR.
 Even a passing probe cannot justify production writer cutover. A subsequent
 explicitly scoped synthetic-only commit test and independent audit are still
 needed. Never run `yondeneQueueProcess` during this phase.
 
-## Stage D synthetic production commit probe (prepared, NOT RUN)
+## Stage D synthetic production commit probe (PASS, 2026-10-24 23:34:10 JST)
 
 The owner approved production-environment testing on 2026-10-24 and the
 read-only manual probe reported PASS at 23:19:47 JST: transaction-bound GET,
 runQuery and rollback completed with zero writes.
 
-The next step is a **one-shot, manually invoked synthetic-only write test**:
+The owner completed the **one-shot, manually invoked synthetic-only write test**:
 `gas/ProductionCommitProbe.gs` exports `yondeneProductionCommitProbe`. Paste
 this as a **separate** file into the existing private bound Apps Script project.
 It validates the same private project, family and owner as the read probe,
@@ -149,15 +151,15 @@ After verifying both documents, a non-transactional duplicate create is
 expected to fail. Any unexpected response is reported for manual review
 without a blind retry.
 
-On PASS, the two synthetic proof documents **remain** for independent
-read-only reconciliation and a separately gated cleanup. Do not run the
-function twice; a second invocation would use a different random ID.
+At the time of commit PASS, the two synthetic proof documents were retained
+for independent reconciliation and cleanup, completed later as documented
+below. Do not rerun the function; a new invocation generates another ID.
 The script has no automatic cleanup, triggers, spreadsheet writes, real
 book/series/marker writes, or writer-gate enablement. This is not a test
 of two truly concurrent writers or of an actual family rename. Those and
 the writer cutover remain blocked.
 
-## Stage D independent production reconcile and cleanup (prepared, NOT RUN)
+## Stage D independent production reconcile and cleanup (PASS, 2026-10-24 23:46:12 JST)
 
 At 23:34:10 JST on 2026-10-24, the owner reported PASS for the
 synthetic atomic two-document commit, duplicate rejection and fresh reads.
@@ -165,9 +167,9 @@ The resulting random `testId` remains **PRIVATE** (in the bound Script logs
 and the owner's chat), and is never hardcoded in this public repository.
 
 `gas/ProductionCleanupProbe.gs` is a separate manual function:
-`yondeneProductionProbeReconcileAndCleanup`. The owner must replace the
-sole `REPLACE_WITH_TEST_ID` placeholder in their PRIVATE Apps Script copy.
-The default source fails closed. It independently reads and fully validates
+`yondeneProductionProbeReconcileAndCleanup`. The owner replaced the
+sole `REPLACE_WITH_TEST_ID` placeholder in their PRIVATE Apps Script copy,
+without committing the actual value to PUBLIC. The default source fails closed. It independently reads and fully validates
 the **two exact synthetic documents**, their names, data marker, source,
 nonce, timestamp and server updateTime. It then opens a transaction,
 reads again and deletes **only those two** with updateTime preconditions
@@ -176,7 +178,16 @@ in an atomic commit. Final fresh GETs must both be 404 for PASS.
 Any discrepancy aborts before deletion. Unknown commit outcomes never
 blindly retry. No family, book, series, mutation-marker or Sheet document is
 written, and the queue write gate remains disabled. Do not run twice.
-No actual cleanup has been executed yet.
+At 23:46:12 JST the owner reported `PASS: independentReconcile/atomicDelete2/notFound2`.
+Both test-only documents were conditionally deleted and separately confirmed
+absent (404/404). The reported real Firestore data changes were zero;
+no production testId, family identifier or UID is stored here.
+
+**Stage D result:** production read/query/rollback, atomic synthetic commit,
+duplicate-create rejection, independent reconcile and conditional two-document
+cleanup have passed. Zero synthetic test documents remain. This does **not**
+prove a real `family.rename`, concurrent old/new writers, full Stage C command
+parity, or readiness to enable GAS writes.
 
 ## Future cutover (not started)
 

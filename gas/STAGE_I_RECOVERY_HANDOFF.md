@@ -46,3 +46,19 @@ Owner confirmed private GitHub Actions has insufficient free execution minutes a
 6. Design independent, versioned recovery in private Google storage without transferring records to public GitHub. Hosting switch remains a separate release.
 
 **As of this note**: No old-writer gate change, GAS write activation, Firestore record changes, backup deletion, or hosting changes have been made.
+
+## Stage K — effective legacy writer disabled, one-shot rename planned (2026-10-25)
+
+The owner supplied the GitHub CLI confirmation:
+`gh variable set YONDENE_SYNC_ENABLED --body false -R miyatayuuma/yondene -e production-reading-shelf`
+followed by `gh variable get ...` returning **`false`**. This disables the old v1 `sync` job and v2 execution's shared `YONDENE_SYNC_ENABLED` preflight; the backup gate was **not** changed. The owner's last ten listed workflow runs were completed successfully, with none running in that provided list. This is not independent attestation of all permissions, remote manual invocations, or every historical job.
+
+The PRIVATE Sheets ledger was re-read with connected Google Sheets:
+- settings tab has an authorized pending name change (B2 differs from C2), with actual shelf names excluded from this PUBLIC repository;
+- update queue has headers only, no command entries;
+- sync status reports healthy hourly Firestore→Sheets mirroring.
+- The public, generic one-shot `gas/ProductionRenameProbe.gs` already accepts private exact pre/post names, validates family/owner, hard-requires `YONDENE_QUEUE.WRITE_ENABLED===false`, and performs one masked name CAS + create-only marker transaction with fresh verification before advancing C2. If it has already been used for a previous change, create a new GAS file from the immutable reviewed source with new privately supplied name values, do not rerun the earlier one.
+
+**Pending:** no new GAS production rename was executed, no new immutable marker independently confirmed, general GAS queue write gate remains off, no trigger was added. An uncertain commit outcome must be reconciled without a blind retry. Actual production backup restoration is not verified.
+
+No book, reading record, private identifiers, or owner names have been added to the public repository.

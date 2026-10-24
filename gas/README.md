@@ -110,6 +110,28 @@ The pre-existing mocked queue tests (21/21), public boundary checks, app tests a
 
 Do not enable writes or retire the PRIVATE writer on this evidence. A separate isolated Firestore staging project and independently reviewed, bounded acceptance are required before any production cutover.
 
+## Stage D production read-only probe (owner approved; not yet run)
+
+The owner authorized a **production environment test** on 2026-10-24 because
+no staging Firebase project exists. The first step is restricted to
+**read-only transactions and rollback**, with zero Firestore mutations, zero
+Sheet edits, and no replacement of the old writer.
+
+For this step, paste only \`gas/ProductionReadProbe.gs\` into the existing
+private Sheet-bound Apps Script project, next to \`Code.gs\`. Run the manual
+function \`yondeneProductionReadProbe\` once. It verifies the project and owner
+against the private \`同期状態\` tab, reads the live family baseline, begins the
+same default Firestore read-write transaction used by Stage C, performs a
+transaction-bound family GET and a deliberately unmatched book query, then
+rolls back. It returns PASS only after rollback completes. Logs contain no
+family ID, UID, title or response body.
+
+The probe **does not** test commits or concurrent writes, activate
+\`WRITE_ENABLED\`, install a trigger, change \`設定!B2/C2\`, or merge this PR.
+Even a passing probe cannot justify production writer cutover. A subsequent
+explicitly scoped synthetic-only commit test and independent audit are still
+needed. Never run \`yondeneQueueProcess\` during this phase.
+
 ## Future cutover (not started)
 
 1. Close the blockers, reconcile the current Firestore books, series and

@@ -556,8 +556,8 @@ test('new read book requires explicit completion and never defaults from reporte
     book:{title:'Synthetic Read Book',author:'Sample Author',
       status:'read',coverUrl:'https://example.invalid/cover.png',
       reportedAt:'2026-10-24',readingMode:'read-aloud'}};
-  const parsed=withCommand(s,base);
-  assert.throws(()=>s.api.apply('fake',s.env,parsed),/読了時期を明示/);
+  assert.throws(()=>s.api.parse([base.commandId,'','book.create',
+    JSON.stringify(base),'PENDING','','','','','']),/読了時期を明示/);
   assert.equal(s.getCommitCount(),0);
   const approved={...base,commandId:'gas-read-create-02',
     book:{...base.book,finishedAt:'2026-10-22'}};

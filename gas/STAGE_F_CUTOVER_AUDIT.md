@@ -62,6 +62,13 @@ PRIVATE workflow inspection using GitHub Actions jobs and artifact metadata (rea
 - Backup schedule and dispatch function independently from the old sync writer gate. Preserve this read-only backup path while planning writer cutover; disabling the entire workflow would remove the scheduled backup too.
 - **Still open:** authorized key custody, a controlled decryption/isolated restore drill, recovery after 7-day artifact expiry, and OAuth/Sheet editor permissions.
 
+## Bound Apps Script hygiene — owner-reported (2026-10-25 JST)
+
+- The spreadsheet currently has **one editor**. This is an owner report, not an independent verification of Google authorization, Apps Script execution identity or OAuth scopes.
+- Exactly **one installed trigger**, named `yondeneSyncNow`, remains. Based on the existing design this is the read-only Firestore-to-Sheets mirror. Trigger source, handler body and execution history have not yet been independently read in this audit.
+- All four one-shot `ProductionReadProbe.gs`, `ProductionCommitProbe.gs`, `ProductionCleanupProbe.gs` and `ProductionRenameProbe.gs` executable copies were **removed from the bound project**, per owner confirmation. Their reviewed synthetic templates and test evidence remain in versioned PUBLIC history.
+- No GAS queue processing trigger is installed or approved; `Queue.gs` Stage A remains write-disabled. Neither `Code.gs` nor permanent `Queue.gs` was removed.
+
 ## Current gate
 
 **BLOCKED.** Do not merge PR #3, copy Stage C into the live project, enable either GAS writer gate or automatic trigger, disable private writer, alter IAM, or perform any further production mutation on the strength of this document. The next safe step is a *read-only security + backup/rollback and current-state reconciliation audit*, then a separately approved bounded business-command test.

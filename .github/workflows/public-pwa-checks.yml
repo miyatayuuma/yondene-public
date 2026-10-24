@@ -1,7 +1,7 @@
 name: Public PWA checks
 on:
   push:
-    branches: [main, "feature/**"]
+    branches: [main]
   pull_request:
 permissions:
   contents: read
@@ -52,4 +52,4 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Test Firestore security rules locally
         working-directory: reading-shelf-firebase
-        run: npx firebase emulators:exec --only firestore --project demo-reading-shelf-rules "node --test firestore.rules.test.mjs"
+        run: npx firebase emulators:exec --only firestore --project demo-reading-shelf-rules "node --test firestore.rules.test.mjs ../gas/queue.emulator.test.mjs"

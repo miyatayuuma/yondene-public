@@ -72,3 +72,18 @@ PRIVATE workflow inspection using GitHub Actions jobs and artifact metadata (rea
 ## Current gate
 
 **BLOCKED.** Do not merge PR #3, copy Stage C into the live project, enable either GAS writer gate or automatic trigger, disable private writer, alter IAM, or perform any further production mutation on the strength of this document. The next safe step is a *read-only security + backup/rollback and current-state reconciliation audit*, then a separately approved bounded business-command test.
+
+
+## Stage G read-only spreadsheet/marker checkpoint (2026-10-25 JST)
+
+Read from the existing private Firestore-to-Sheets mirror after the owner-reported Stage E one-shot acceptance. Only aggregate and schema-check results appear here; no private IDs, document payloads, book titles, Sheet URLs or credentials.
+
+- Sheet metadata: six expected tabs are present. The synchronization status reports **normal**; last successful mirror read **2026-10-25 00:55:20 JST**. The mirror explicitly labels its source collection **non-atomic** and subject to refresh, so it is **not** a transactionally frozen Firestore snapshot.
+- Mirrored inventory: **164** original document rows, **164 unique paths**, **41** top-level book documents and visible shelf entries, **10** top-level series documents and visible series entries; consistency checks found **0 malformed JSON**, **0 row/document-path mismatches**, and **0 row/document-updateTime mismatches**.
+- Marker inventory: **45** mirrored mutation markers (**44** legacy GitHub source and **1** GAS source, consistent with the one-shot rename); **0** missing/malformed 64-hex sourceDigest fields and **0** marker document-path/command-ID mismatches. This verifies basic persisted marker shape in the mirror, **not** a cryptographic replay of every original source command or independent Firestore read.
+- The dedicated Google Sheet command queue contains its header only: **0 queued entries, 0 pending**. The settings request and last-confirmed family name match, with **no pending rename**.
+- A newer revision event can supersede an earlier book status change. Do not infer current book status solely from a historical user request without checking newer persisted edit history; no book changes were made in this checkpoint.
+
+Code parity progress on the same Draft PR: guarded book.patch title/author/ISBN correction, guarded series.patch rename, bounded atomic catalog.audit, gas- command-ID namespace and marker provenance metadata have synthetic CI coverage. This is **PUBLIC source only**, not deployed into the private bound GAS. book.patchByTitle, book.delete and normal queued family.rename remain excluded or require an explicit exceptional route.
+
+**Remaining before switch:** independently verify current Firestore/marker truth (the mirror is non-atomic), inspect GAS manifest/OAuth/editor/trigger execution ownership, confirm decryptable and recoverable backup with the owner's authorized keys, reconcile no in-flight GitHub writer activity, install reviewed Queue.gs with WRITE_ENABLED:false, run dry-run, and only then seek explicit approval for an isolated real book command and one-writer handoff. Keep the independent encrypted-backup dispatch enabled. No production config, Firestore data or Apps Script installation was changed by this audit.

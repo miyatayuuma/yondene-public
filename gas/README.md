@@ -117,20 +117,45 @@ no staging Firebase project exists. The first step is restricted to
 **read-only transactions and rollback**, with zero Firestore mutations, zero
 Sheet edits, and no replacement of the old writer.
 
-For this step, paste only \`gas/ProductionReadProbe.gs\` into the existing
-private Sheet-bound Apps Script project, next to \`Code.gs\`. Run the manual
-function \`yondeneProductionReadProbe\` once. It verifies the project and owner
-against the private \`同期状態\` tab, reads the live family baseline, begins the
+For this step, paste only `gas/ProductionReadProbe.gs` into the existing
+private Sheet-bound Apps Script project, next to `Code.gs`. Run the manual
+function `yondeneProductionReadProbe` once. It verifies the project and owner
+against the private `同期状態` tab, reads the live family baseline, begins the
 same default Firestore read-write transaction used by Stage C, performs a
 transaction-bound family GET and a deliberately unmatched book query, then
 rolls back. It returns PASS only after rollback completes. Logs contain no
 family ID, UID, title or response body.
 
 The probe **does not** test commits or concurrent writes, activate
-\`WRITE_ENABLED\`, install a trigger, change \`設定!B2/C2\`, or merge this PR.
+`WRITE_ENABLED`, install a trigger, change `設定!B2/C2`, or merge this PR.
 Even a passing probe cannot justify production writer cutover. A subsequent
 explicitly scoped synthetic-only commit test and independent audit are still
-needed. Never run \`yondeneQueueProcess\` during this phase.
+needed. Never run `yondeneQueueProcess` during this phase.
+
+## Stage D synthetic production commit probe (prepared, NOT RUN)
+
+The owner approved production-environment testing on 2026-10-24 and the
+read-only manual probe reported PASS at 23:19:47 JST: transaction-bound GET,
+runQuery and rollback completed with zero writes.
+
+The next step is a **one-shot, manually invoked synthetic-only write test**:
+`gas/ProductionCommitProbe.gs` exports `yondeneProductionCommitProbe`. Paste
+this as a **separate** file into the existing private bound Apps Script project.
+It validates the same private project, family and owner as the read probe,
+then uses a read-write REST transaction to create **exactly two documents** in
+the unrelated root collection `yondene_gas_acceptance_tests`, not under
+`families`. Both writes carry `exists:false`; commit is attempted **once**.
+After verifying both documents, a non-transactional duplicate create is
+expected to fail. Any unexpected response is reported for manual review
+without a blind retry.
+
+On PASS, the two synthetic proof documents **remain** for independent
+read-only reconciliation and a separately gated cleanup. Do not run the
+function twice; a second invocation would use a different random ID.
+The script has no automatic cleanup, triggers, spreadsheet writes, real
+book/series/marker writes, or writer-gate enablement. This is not a test
+of two truly concurrent writers or of an actual family rename. Those and
+the writer cutover remain blocked.
 
 ## Future cutover (not started)
 

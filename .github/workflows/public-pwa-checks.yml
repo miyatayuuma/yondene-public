@@ -19,7 +19,7 @@ jobs:
       - name: Check public data boundary
         run: node scripts/check-public-boundary.mjs
       - name: Test GAS queue safety with fake data
-        run: node --test gas/queue.test.mjs gas/production-read-probe.test.mjs
+        run: node --test gas/queue.test.mjs gas/production-read-probe.test.mjs gas/production-commit-probe.test.mjs
       - name: Test app domain and PWA
         working-directory: reading-shelf-firebase
         run: >-

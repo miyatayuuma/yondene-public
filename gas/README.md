@@ -23,12 +23,13 @@ OAuth credential, deployment ID, or family-specific log.
 
 | Operation | Transactional preflight | Planned atomic write |
 | --- | --- | --- |
-| `book.patch` | Family owner, ID/title/updatedAt, allowed fields | CAS update + create-only marker |
-| `series.patch` | Family owner, ID/name/updatedAt, rename held | CAS update + marker |
+| `book.patch` | Family owner, ID/title/updatedAt, allowed fields, transaction-bound title/author/ISBN duplicate checks | CAS update + create-only marker |
+| `series.patch` | Family owner, ID/name/updatedAt, transaction-bound name uniqueness check | CAS update + marker |
 | `book.create` | Family owner, ID absence, ISBN/title+author, series lookup, cover URL | Create-only book + marker |
 | `series.create` | Family owner, ID absence, duplicate-name query | Create-only series + marker |
 | `childRating.set` | Family owner, ID/title/status and existing rating | Create-only rating + marker; same stars → marker only |
 | `childReflection.create` | Family owner, ID/title, reflection/activity absence | Create-only reflection + activity + marker |
+| `catalog.audit` | Family owner, 1–50 unique book IDs + titles, expected-value checks; identity fields excluded | Atomic changed-field CAS patches + one marker |
 | Internal `family.rename` | Family owner, current name equals `C2`, updateTime | Only `families/{id}.name` CAS update + marker |
 
 Stage C begins a Firestore REST **read-write transaction**. Family,
@@ -52,9 +53,11 @@ from Firestore; there is no separate hardcoded UI name to update.
 
 1. **Production writes remain blocked.** Stage C source has not been copied to
    the private bound GAS script; no write trigger is installed or enabled.
-2. Recheck parity for required legacy commands such as `book.patchByTitle`,
-   deletion, catalog audits and corrections. Never make automatic deletion
-   part of an unreviewed import.
+2. Stage G source review implemented unique-ID book/series corrections and bounded
+   multi-book bibliographic audit. Title/ISBN changes use `book.patch`; catalog
+   audit intentionally excludes them. `book.patchByTitle` and deletion remain
+   unavailable in the normal queue. Any exceptional deletion needs a separately
+   approved recovery design; do not auto-import legacy commands.
 3. Production synthetic transactions and one scoped real shelf-name rename have
    passed, but genuine concurrent writers, full Stage C queue-operation parity,
    conflict handling and historical marker integrity still need acceptance.
@@ -102,6 +105,28 @@ committed source remains disabled.**
 The private bound `Code.gs` must provide `YONDENE`,
 `yondeneFirestoreRequest_`, `yondeneField_`, and `yondeneSha256_`.
 The public module intentionally carries no private identifiers.
+
+## Stage G source-only parity work (2026-10-25)
+
+- Transaction-bound uniqueness checks now permit direct ID-scoped `book.patch`
+  corrections to title, author and ISBN, and `series.patch` renames. Existing
+  document ID, title/name and `expectedUpdatedAt` preconditions are retained;
+  edits to related names/ISBN never use an unqualified title-only selector.
+- `catalog.audit` accepts 1–50 unique book IDs for bibliographic-only changes.
+  Each book is independently verified against its expected title and previous
+  values, and changed documents are patched with server update-time CAS inside
+  one read-write transaction; one create-only marker records the batch.
+  No-op entries create only a marker. Its `title` and `isbn` patches are
+  intentionally rejected, so identity corrections use individually verified
+  `book.patch` instead.
+- `book.delete`, `book.patchByTitle` and user-queued `family.rename` remain
+  blocked. The only family-name route is the separate internal settings path.
+- Synthetic tests cover successful patches, duplicate collisions, stale
+  revisions, changed expected bibliography, multi-book atomic commits, no-ops
+  and blocked operations. PUBLIC CI passes on the tested branch.
+- **Source-only:** these features are not installed in the private bound GAS,
+  the write gate is still `false`, no processing trigger exists, the old
+  writer has not been disabled and no production record was changed.
 
 ## Stage D emulator investigation (BLOCKED, 2026-10-24)
 

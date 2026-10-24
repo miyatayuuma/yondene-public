@@ -358,6 +358,10 @@ function yondeneQueueWithoutStaleProgressNotes_(value) {
   return pieces.filter(function(part){return !progress.test(part.trim());}).join('').trim();
 }
 
+function yondeneQueueDocumentName_(path) {
+  return 'projects/'+YONDENE.project+'/databases/(default)/documents/'+path;
+}
+
 function yondeneQueueDatabaseUrl_() {
   return 'https://firestore.googleapis.com/v1/projects/' +
     encodeURIComponent(YONDENE.project)+'/databases/(default)/documents';
@@ -557,10 +561,35 @@ function yondeneQueuePreflight_(token, env, family, parsed, transaction) {
   if (!record.updateTime) throw new Error('Firestore updateTimeが取得できません。');
   const updates=Object.assign({},c.patch,{updatedAt:new Date().toISOString()});
   if (c.op==='book.patch') {
-    if (['title','author','isbn'].some(function(key) {
-      return Object.prototype.hasOwnProperty.call(updates,key) &&
-        updates[key] !== yondeneField_(record,key);
-    })) throw new Error('書名・著者・ISBN変更は重複チェック実装まで保留です。');
+    // Identity-changing bibliographic corrections need transactional uniqueness
+    // checks. Keep the current document ID stable and never infer an edition
+    // solely from a title match.
+    const title=Object.prototype.hasOwnProperty.call(updates,'title')?
+      updates.title:yondeneField_(record,'title');
+    const author=Object.prototype.hasOwnProperty.call(updates,'author')?
+      updates.author:yondeneField_(record,'author');
+    const isbn=Object.prototype.hasOwnProperty.call(updates,'isbn')?
+      updates.isbn:yondeneField_(record,'isbn');
+    if(title!==yondeneField_(record,'title') ||
+       author!==yondeneField_(record,'author')) {
+      const sameTitle=yondeneQueueQuery_(
+        token,env.familyPath,'books','title',title,10,transaction);
+      if(sameTitle.length===10)
+        throw new Error('同名書籍が多すぎます。版の個別照合が必要です。');
+      if(sameTitle.some(function(doc){
+        return doc.name!==yondeneQueueDocumentName_(recordPath) &&
+          yondeneField_(doc,'author')===author;
+      })) throw new Error('同名・同著者の別ID書籍が存在します。');
+    }
+    if(isbn && isbn!==yondeneField_(record,'isbn')) {
+      const sameIsbn=yondeneQueueQuery_(
+        token,env.familyPath,'books','isbn',isbn,2,transaction);
+      if(sameIsbn.length===2)
+        throw new Error('同じISBNの書籍が複数存在します。手動照合が必要です。');
+      if(sameIsbn.some(function(doc){
+        return doc.name!==yondeneQueueDocumentName_(recordPath);
+      })) throw new Error('同じISBNの別ID書籍が存在します。');
+    }
     const oldStatus=yondeneField_(record,'status');
     const newStatus=updates.status===undefined?oldStatus:updates.status;
     if (newStatus==='read' && oldStatus!=='read') {
@@ -589,9 +618,16 @@ function yondeneQueuePreflight_(token, env, family, parsed, transaction) {
       if (!target) throw new Error('参照するシリーズがありません。');
     }
   }
-  if (c.op==='series.patch' && c.patch.name!==undefined &&
-      c.patch.name!==c.expectedName)
-    throw new Error('シリーズ改名は重複チェック未実装のため保留です。');
+  if(c.op==='series.patch' && c.patch.name!==undefined &&
+     c.patch.name!==c.expectedName) {
+    const names=yondeneQueueQuery_(
+      token,env.familyPath,'series','name',c.patch.name,2,transaction);
+    if(names.length===2)
+      throw new Error('同名シリーズが複数存在します。手動照合が必要です。');
+    if(names.some(function(doc){
+      return doc.name!==yondeneQueueDocumentName_(recordPath);
+    })) throw new Error('同名シリーズが別IDで登録済みです。');
+  }
   return {already:false,action:'patch',recordPath:recordPath,markerPath:markerPath,
     recordUpdateTime:record.updateTime,updates:updates};
 }

@@ -102,6 +102,14 @@ The private bound `Code.gs` must provide `YONDENE`,
 `yondeneFirestoreRequest_`, `yondeneField_`, and `yondeneSha256_`.
 The public module intentionally carries no private identifiers.
 
+## Stage D emulator investigation (BLOCKED, 2026-10-24)
+
+An isolated synthetic Firestore emulator was used solely to investigate the exact REST transaction paths; no production project or private data was touched. `documents:beginTransaction` returned a token, but the first transaction-bound `documents.get?transaction=...` stopped responding in each of four cases and timed out after 40 seconds. This is not proof of a production Firestore defect, nor proof of transactional safety.
+
+The pre-existing mocked queue tests (21/21), public boundary checks, app tests and normal Firestore security-rules tests (37/37) passed in the last full run. **Live Firestore transaction serialization, logical uniqueness and shelf rename remain UNVERIFIED.** The test-only wide-open synthetic rules and the long-running blocked experiment have been removed from mandatory CI to conserve GitHub Actions minutes. Evidence remains in public Actions runs `40099342392`, `40099556695` and `40099701410` and commit history.
+
+Do not enable writes or retire the PRIVATE writer on this evidence. A separate isolated Firestore staging project and independently reviewed, bounded acceptance are required before any production cutover.
+
 ## Future cutover (not started)
 
 1. Close the blockers, reconcile the current Firestore books, series and

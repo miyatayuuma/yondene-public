@@ -53,11 +53,3 @@ jobs:
       - name: Test Firestore security rules locally
         working-directory: reading-shelf-firebase
         run: npx firebase emulators:exec --only firestore --project demo-reading-shelf-rules "node --test firestore.rules.test.mjs"
-      - name: Test GAS REST transactions in a separate synthetic emulator
-        working-directory: reading-shelf-firebase
-        run: >-
-          npx firebase emulators:exec
-          --config ../gas/firebase.test-only.json
-          --only firestore
-          --project demo-yondene-gas-stage-d
-          "node --test ../gas/queue.emulator.test.mjs"

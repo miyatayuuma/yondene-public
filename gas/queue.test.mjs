@@ -99,9 +99,11 @@ function setup({mockRelease=false} = {}) {
   vm.runInContext(mockRelease ?
     source.replace('WRITE_ENABLED: false','WRITE_ENABLED: true') :
     source,ctx,{filename:'Queue.gs'});
-  const api = vm.runInContext('({cfg:YONDENE_QUEUE, parse:yondeneQueueParse_, preflight:yondeneQueuePreflight_, commit:yondeneQueueCommit_, pending:yondeneQueuePending_, process:yondeneQueueProcess,apply:yondeneQueueApplyTransaction_,
-    settings:yondeneQueueSettingsCommand_,
-    processSettings:yondeneQueueProcessSettings_})',ctx);
+  const api = vm.runInContext(`({cfg:YONDENE_QUEUE, parse:yondeneQueueParse_,
+    preflight:yondeneQueuePreflight_, commit:yondeneQueueCommit_,
+    pending:yondeneQueuePending_, process:yondeneQueueProcess,
+    apply:yondeneQueueApplyTransaction_,settings:yondeneQueueSettingsCommand_,
+    processSettings:yondeneQueueProcessSettings_})`,ctx);
   const command = {schemaVersion:1,commandId:'demo-command-001',
     op:'book.patch',bookId:'demo-book',expectedTitle:'Demo Book',
     expectedUpdatedAt:DATE,patch:{status:'read',reportedAt:'2026-10-24',notes:''},

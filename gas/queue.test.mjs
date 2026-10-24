@@ -25,7 +25,7 @@ function setup({mockRelease=false} = {}) {
     }
   };
   let queryRows = {}, rating = null, reflection = null, activity = null;
-  let bookStatus = 'reading', seriesName = 'Demo Series';
+  let bookStatus = 'reading', seriesName = 'Demo Series', publisher = '';
   const ctx = {
     YONDENE: {project:'example-project', spreadsheetId:'example-sheet'},
     yondeneSha256_: x => createHash('sha256').update(x,'utf8').digest('hex'),
@@ -49,7 +49,13 @@ function setup({mockRelease=false} = {}) {
         if (url.split('?')[0].endsWith('/books/demo-book')) data = {
           updateTime:'2026-10-24T09:01:02.123456Z',
           fields:{title:{stringValue:'Demo Book'},status:{stringValue:bookStatus},
-            updatedAt:{stringValue:updatedAt},notes:{stringValue:''}}
+            updatedAt:{stringValue:updatedAt},notes:{stringValue:''},
+            publisher:{stringValue:publisher}}
+        };
+        if (url.split('?')[0].endsWith('/books/demo-book-2')) data = {
+          updateTime:'2026-10-24T09:01:04.123456Z',
+          fields:{title:{stringValue:'Second Demo Book'},publisher:{stringValue:''},
+            updatedAt:{stringValue:updatedAt}}
         };
         if (url.split('?')[0].endsWith('/series/demo-series')) data = {
           updateTime:'2026-10-24T09:01:02.123456Z',
@@ -122,7 +128,7 @@ function setup({mockRelease=false} = {}) {
     setMarker:x=>{marker=x},setUpdatedAt:x=>{updatedAt=x},
     setQuery:(field,value,docs)=>{queryRows[field+':'+value]=docs},
     setRating:x=>{rating=x},setBookStatus:x=>{bookStatus=x},
-    setSeriesName:x=>{seriesName=x},
+    setSeriesName:x=>{seriesName=x},setPublisher:x=>{publisher=x},
     getCommitted:()=>committed,getCommitCount:()=>commits,
     getBeginCount:()=>begun,getRollbackCount:()=>rolledBack,
     getGets:()=>gets,getQueries:()=>queries,getFamilyName:()=>familyName,
@@ -148,7 +154,7 @@ test('schema and queue ID checked',()=>{
 
 test('unsafe operations and unknown fields rejected',()=>{
   const s=setup(),cells=s.cells.slice();
-  for(const op of ['book.delete','book.patchByTitle','catalog.audit','family.rename']) {
+  for(const op of ['book.delete','book.patchByTitle','family.rename']) {
     cells[2]=op;cells[3]=JSON.stringify({...s.command,op});
     assert.throws(()=>s.api.parse(cells),/未対応/,op+' must not be accepted from user queue');
   }
@@ -442,6 +448,64 @@ test('settings reject stale names and do not alter C2 on conflict',()=>{
   assert.equal(s.getCommitCount(),0);
   assert.equal(s.getRollbackCount(),1);
   assert.equal(s.getSettingsConfirmed(),'Unexpected Previous Name');
+});
+
+test('catalog audit atomically patches multiple bibliographic records',()=>{
+  const s=setup({mockRelease:true});
+  const command={schemaVersion:1,commandId:'catalog-correct-01',op:'catalog.audit',
+    entries:[
+      {id:'demo-book',expectedTitle:'Demo Book',patch:{publisher:'Publisher One',
+        publicationYear:2020}},
+      {id:'demo-book-2',expectedTitle:'Second Demo Book',
+        patch:{publisher:'Publisher Two'}}
+    ],reason:'Synthetic bibliographic update'};
+  assert.equal(s.api.apply('fake',s.env,withCommand(s,command)),'APPLIED');
+  const writes=s.getCommitted().writes;
+  assert.equal(writes.length,3);
+  assert.ok(writes[0].update.name.endsWith('/books/demo-book'));
+  assert.ok(writes[1].update.name.endsWith('/books/demo-book-2'));
+  assert.deepEqual(writes[0].updateMask.fieldPaths,
+    ['publisher','publicationYear','updatedAt']);
+  assert.equal(writes[0].currentDocument.updateTime,
+    '2026-10-24T09:01:02.123456Z');
+  assert.equal(writes[2].update.fields.updatedCount.integerValue,'2');
+  assert.equal(writes[2].update.fields.entryCount.integerValue,'2');
+  assert.equal(s.getCommitCount(),1);
+  assert.equal(s.getCommitted().transaction,'synthetic-transaction');
+  assert.equal(writes.some(w=>w.update.fields.status!==undefined),false);
+});
+test('catalog audit rejects duplicates, identity changes, and unexpected payloads',()=>{
+  const s=setup();
+  const entry={id:'demo-book',expectedTitle:'Demo Book',patch:{publisher:'New'}};
+  const cmd={schemaVersion:1,commandId:'catalog-reject-01',op:'catalog.audit',
+    entries:[entry],reason:'Synthetic invalid example'};
+  assert.throws(()=>withCommand(s,{...cmd,entries:[entry,entry]}),/重複/);
+  assert.throws(()=>withCommand(s,{...cmd,entries:[{...entry,
+    patch:{title:'Wrong'}}]}),/変更不可/);
+  assert.throws(()=>withCommand(s,{...cmd,entries:[{...entry,
+    patch:{isbn:'9780000000017'}}]}),/変更不可/);
+  assert.throws(()=>withCommand(s,{...cmd,bookId:'demo-book'}),/余分/);
+  assert.throws(()=>withCommand(s,{...s.command,entries:[entry]}),/entries/);
+});
+test('catalog audit checks expected old value and marks no-change without patching',()=>{
+  const s=setup({mockRelease:true});
+  s.setPublisher('Existing Publisher');
+  const base={schemaVersion:1,commandId:'catalog-cas-01',op:'catalog.audit',
+    entries:[{id:'demo-book',expectedTitle:'Demo Book',
+      patch:{publisher:'New Publisher'},expected:{publisher:'Outdated'}}],
+    reason:'Synthetic verified catalog correction'};
+  assert.throws(()=>s.api.preflight('fake',s.env,s.family,withCommand(s,base)),
+    /既存値が変わっています/);
+  const approved={...base,entries:[{...base.entries[0],
+    expected:{publisher:'Existing Publisher'}}]};
+  assert.equal(s.api.apply('fake',s.env,withCommand(s,approved)),'APPLIED');
+  assert.equal(s.getCommitted().writes.length,2);
+  const noChange={...base,commandId:'catalog-same-01',
+    entries:[{id:'demo-book',expectedTitle:'Demo Book',
+      patch:{publisher:'Existing Publisher'}}]};
+  assert.equal(s.api.apply('fake',s.env,withCommand(s,noChange)),'APPLIED');
+  assert.equal(s.getCommitted().writes.length,1);
+  assert.equal(s.getCommitted().writes[0].update.fields.updatedCount.integerValue,'0');
 });
 
 test('settings with unchanged shelf name cause no Firestore reads or writes',()=>{

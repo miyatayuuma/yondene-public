@@ -33,3 +33,7 @@ Firestore Rules のテストには Firebase CLI / Java とエミュレータが�
 ## 注意
 
 このリポジトリの Git 履歴は公開用に新規開始したものです。非公開 `miyatayuuma/yondene` の Git 履歴・Issue・PR・Actions ログを移行しません。
+
+## Google Sheets 更新キュー（準備中）
+
+公開ソースと匿名のテストは gas/ に配置しています。書き込みゲートは無効のままで、既存のFirestore参照同期とprivate GitHub Actions書き込みは変更しません。手順・制限事項は gas/README.md を参照してください。

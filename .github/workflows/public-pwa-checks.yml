@@ -18,6 +18,8 @@ jobs:
           node-version: "22"
       - name: Check public data boundary
         run: node scripts/check-public-boundary.mjs
+      - name: Test GAS queue safety with fake data
+        run: node --test gas/queue.test.mjs
       - name: Test app domain and PWA
         working-directory: reading-shelf-firebase
         run: >-

@@ -5,7 +5,7 @@ const violations=[];
 for(const path of files){
   if(/^(reading-shelf\/|private\/|\.firebase\/)/.test(path))violations.push('prohibited path: '+path);
   if(/(^|\/)(?:\.env(?:\.|$)|.*\.(?:pem|p12|pfx|key)$|service-account[^/]*\.json$)/i.test(path))violations.push('possible secret file: '+path);
-  if(!/\.(?:md|mjs|js|json|webmanifest|html|css|svg|yml|yaml|gitignore)$/.test(path))continue;
+  if(!/\.(?:md|mjs|js|json|webmanifest|html|css|svg|gs|yml|yaml|gitignore)$/.test(path))continue;
   const body=readFileSync(path,'utf8');
   if(/-----BEGIN (?:RSA |EC )?PRIVATE KEY-----|\"private_key\"\s*:\s*\"-----BEGIN|ghp_[A-Za-z0-9]{20,}/.test(body))violations.push('secret material in: '+path);
   if(/docs\.google\.com\/spreadsheets\/d\/[A-Za-z0-9_-]{15,}|script\.google\.com\/macros\/s\/[A-Za-z0-9_-]{15,}/.test(body))violations.push('private Sheet/GAS URL: '+path);

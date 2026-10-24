@@ -37,4 +37,4 @@ firebase deploy --only hosting --project kodomo-reading-shelf-87f11
 
 ## データ更新経路の別工程
 
-Sheets→GAS 更新キューはまだ本リポジトリに実装・受入していない。現状の同期は Firestore→Sheets の読み取りのみ。新しい GAS writer の権限・CAS・冪等性・監査を確認するまで旧 private writer を無効化しない。
+Sheets→GAS 更新キューの Stage A（コード・匿名テスト・Sheetsタブ準備）は実装済み。ただし GAS 書き込みはハードコードで無効、トリガーは未設定、受入は未実施。現状の同期は Firestore→Sheets の読み取りのみ。新しい GAS writer の権限・CAS・冪等性・監査を確認するまで旧 private writer を無効化しない。

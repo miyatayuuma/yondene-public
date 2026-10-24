@@ -277,8 +277,10 @@ function yondeneQueueParse_(cells) {
         throw new Error('書名は必須です。');
       if (['read','reading','paused','unread'].indexOf(data.status)===-1)
         throw new Error('状態が不正です。');
-      if (data.status!=='read' && data.finishedAt)
-        throw new Error('未読了の本には読了日を設定できません。');
+      if (data.status==='read' && !yondeneQueueExplicitCompletion_(data))
+        throw new Error('読了時期を明示してください。報告日から推測しません。');
+      if (data.status!=='read' && yondeneQueueExplicitCompletion_(data))
+        throw new Error('未読了の本には読了時期を設定できません。');
       if (!data.coverUrl) throw new Error('書影URLを確認してください。');
     } else if (typeof data.name!=='string'||!data.name.trim())
       throw new Error('シリーズ名は必須です。');
@@ -414,6 +416,14 @@ function yondeneQueueValidateValues_(data,allowed) {
     throw new Error('書名は空にできません。');
   if (Object.prototype.hasOwnProperty.call(data,'name')&&!data.name.trim())
     throw new Error('シリーズ名は空にできません。');
+}
+
+function yondeneQueueExplicitCompletion_(data) {
+  // A report date is a distinct fact and never proves when completion occurred.
+  return ['finishedAt','finishedPeriodLabel','finishedPeriodStart',
+    'finishedPeriodEnd'].some(function(key) {
+      return typeof data[key]==='string' && data[key].trim().length>0;
+    });
 }
 
 function yondeneQueueCalendarDate_(s) {
@@ -602,11 +612,7 @@ function yondeneQueuePreflight_(token, env, family, parsed, transaction) {
       }
       if(data.seriesId&&!yondeneQueueDocument_(token,env.familyPath+'/series/'+data.seriesId,transaction))
         throw new Error('参照するシリーズがありません。');
-      if(data.status==='read' && !data.finishedAt &&
-          yondeneQueueCalendarDate_(data.reportedAt)) {
-        data.finishedAt=data.reportedAt;
-        data.finishedPeriodBasis='completion_report_date';
-      }
+      // Never infer completion from the day the parent reported the book.
       if(data.status==='read' && typeof data.notes==='string')
         data.notes=yondeneQueueWithoutStaleProgressNotes_(data.notes);
       if(!data.finishedAt)data.finishedAt='';
@@ -705,11 +711,8 @@ function yondeneQueuePreflight_(token, env, family, parsed, transaction) {
       const period=['finishedAt','finishedPeriodLabel','finishedPeriodStart',
         'finishedPeriodEnd','finishedPeriodPrecision','finishedPeriodBasis',
         'finishedPeriodNote','finishPrecision'];
-      if (!period.some(function(key){return Object.prototype.hasOwnProperty.call(updates,key);}) &&
-          yondeneQueueCalendarDate_(updates.reportedAt)) {
-        updates.finishedAt=updates.reportedAt;
-        updates.finishedPeriodBasis='completion_report_date';
-      }
+      if (!yondeneQueueExplicitCompletion_(updates))
+        throw new Error('読了時期を明示してください。報告日から推測しません。');
       const originalNotes=Object.prototype.hasOwnProperty.call(updates,'notes') ?
         updates.notes : yondeneField_(record,'notes');
       if(typeof originalNotes==='string') {
@@ -717,11 +720,23 @@ function yondeneQueuePreflight_(token, env, family, parsed, transaction) {
         if(withoutProgress!==originalNotes) updates.notes=withoutProgress;
       }
     }
-    if (newStatus!=='read' && updates.status!==undefined &&
-        !Object.prototype.hasOwnProperty.call(updates,'finishedAt'))
-      updates.finishedAt='';
-    if (newStatus!=='read' && updates.finishedAt)
-      throw new Error('未読了の本に読了日を残せません。');
+    if (newStatus!=='read') {
+      const period=['finishedAt','finishedPeriodLabel','finishedPeriodStart',
+        'finishedPeriodEnd','finishedPeriodPrecision','finishedPeriodBasis',
+        'finishedPeriodNote','finishPrecision'];
+      if (period.some(function(key){return !!updates[key];}))
+        throw new Error('未読了の本には読了時期を指定できません。');
+      if (updates.status!==undefined) {
+        // Preserve human observations: require an explicit decision before
+        // clearing a populated free-text completion-period note.
+        if(yondeneField_(record,'finishedPeriodNote') &&
+            !Object.prototype.hasOwnProperty.call(c.patch,'finishedPeriodNote'))
+          throw new Error('読了時期の補足に記録があります。退避・確認してから状態を変更してください。');
+        period.forEach(function(key){updates[key]='';});
+        // "きになる" has no observed reading mode; never carry over a stale one.
+        if (newStatus==='unread') updates.readingMode='';
+      }
+    }
     if (updates.seriesId) {
       const target=yondeneQueueDocument_(token,env.familyPath+'/series/'+updates.seriesId,transaction);
       if (!target) throw new Error('参照するシリーズがありません。');

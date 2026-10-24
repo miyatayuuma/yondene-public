@@ -55,10 +55,10 @@ from Firestore; there is no separate hardcoded UI name to update.
 2. Recheck parity for required legacy commands such as `book.patchByTitle`,
    deletion, catalog audits and corrections. Never make automatic deletion
    part of an unreviewed import.
-3. Production synthetic transactions have passed, but genuine concurrent
-   writers, Stage C business operations (including shelf rename), conflicts
-   and historical marker integrity still need acceptance. Mocks and bounded
-   synthetic probes alone are insufficient for cutover.
+3. Production synthetic transactions and one scoped real shelf-name rename have
+   passed, but genuine concurrent writers, full Stage C queue-operation parity,
+   conflict handling and historical marker integrity still need acceptance.
+   Mocks and bounded acceptance probes alone are insufficient for cutover.
 4. Independently audit authorization, OAuth scopes, secret separation, backup
    and rollback, and the old Action writer disablement.
 5. Require a new explicit owner approval for any production write or polling
@@ -189,7 +189,7 @@ cleanup have passed. Zero synthetic test documents remain. This does **not**
 prove a real `family.rename`, concurrent old/new writers, full Stage C command
 parity, or readiness to enable GAS writes.
 
-## Stage E one-shot REAL family rename — owner-approved, not yet run
+## Stage E one-shot REAL family rename — PASS, 2026-10-25 00:07:08 JST
 
 On 2026-10-24 the owner explicitly approved one real shelf-name change
 as a bounded production acceptance test. This is **not** approval to
@@ -222,8 +222,21 @@ The exact live shelf names, family ID, owner UID and verification log
 remain private. CI mocks exercise success, failure, drift, idempotency
 precondition and uncertain commits; no CI job accesses production.
 
-This one-shot test **does not** establish simultaneous writer safety,
-other Stage C operation parity, or authorization for full cutover.
+At 00:07:08 JST on 2026-10-25, the owner reported:
+
+`よんでね本棚名変更 PASS: family.rename CAS+marker+verified; 設定C2反映`
+
+`Firestore家族name以外のフィールド変更0件・読書記録変更0件・通常writer無効のまま`
+
+A fresh independent Google Sheets API read confirmed the private `設定`
+tab had matching `B2` and `C2` and `D2` reported no pending change.
+The actual live values and family identifiers are intentionally not included
+in this PUBLIC repository. The one-shot Stage C-compatible immutable mutation
+marker is retained as the proper permanent audit record.
+
+**Stage E is CLOSED for this single change only.** This test **does not**
+establish simultaneous writer safety, other Stage C operation parity, or
+authorization for full cutover.
 
 ## Future cutover (not started)
 
@@ -231,8 +244,8 @@ other Stage C operation parity, or authorization for full cutover.
    markers, and independently validate a read-only snapshot.
 2. Stop old command intake and disable **all** private Actions writer
    entry points before enabling GAS.
-3. Stage and authorize one bounded production command with a separate
-   reconcile after execution. Verify Firestore and private Sheet values.
+3. Separately review, authorize and reconcile bounded *general queue*
+   operations; the one-shot family rename is not a substitute for those tests.
 4. Only on explicit owner approval install/enable GAS polling. Keep the
    `Code.gs` mirror, Sheets and Firestore private.
 5. Migrate Firebase Hosting to verified PUBLIC code in a separate release,

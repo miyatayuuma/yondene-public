@@ -155,7 +155,7 @@ function yondeneQueueAcceptApprovedBookPatchOnce() {
     const bookPath=env.familyPath+'/books/'+approval.bookId;
     const before=yondeneQueueDocument_(token,bookPath);
     if(!before || yondeneField_(before,'title')!==parsed.command.expectedTitle ||
-        yondeneField_(before,'updatedAt')!==parsed.command.expectedUpdatedAt ||
+        yondeneQueueRevision_(before)!==parsed.command.expectedUpdatedAt ||
         yondeneField_(before,approval.field)!==approval.previousValue)
       throw new Error('対象書籍の更新前条件が変化しています。');
     // Re-read row: the exact approved payload must remain unchanged.
@@ -173,7 +173,10 @@ function yondeneQueueAcceptApprovedBookPatchOnce() {
     const allowed=new Set([approval.field,'updatedAt']);
     const oldFields=before.fields||{},newFields=after.fields||{};
     const same=function(x,y){return JSON.stringify(x)===JSON.stringify(y);};
-    if(!same(Object.keys(oldFields).sort(),Object.keys(newFields).sort()) ||
+    // Legacy records may lack updatedAt: creating that operational field is
+    // permitted, but all *other* pre-existing fields must be byte-identical.
+    if(!same(Object.keys(oldFields).filter(function(k){return k!=='updatedAt';}).sort(),
+             Object.keys(newFields).filter(function(k){return k!=='updatedAt';}).sort()) ||
        Object.keys(newFields).some(function(k){
          return !allowed.has(k)&&!same(oldFields[k],newFields[k]);
        }) || before.createTime!==after.createTime ||
@@ -614,6 +617,12 @@ function yondeneQueueApplyTransaction_(token,env,parsed,approval) {
     const plan=yondeneQueuePreflight_(token,env,family,parsed,transaction);
     if(plan.already) return 'ALREADY';
     if (approval) {
+      // Verify previous value again inside the same Firestore transaction:
+      // currentDocument.updateTime enforces it atomically at commit.
+      const actual=yondeneQueueDocument_(
+        token,env.familyPath+'/books/'+approval.bookId,transaction);
+      if(!actual || yondeneField_(actual,approval.field)!==approval.previousValue)
+        throw new Error('限定受入の変更前フィールドが変化しました。');
       const keys=Object.keys(plan.updates||{}).sort().join(',');
       if(plan.action!=='patch' ||
           plan.recordPath!==env.familyPath+'/books/'+approval.bookId ||
@@ -672,6 +681,15 @@ function yondeneQueueQuery_(token, familyPath, collection, field, value, limit, 
   const entries=JSON.parse(response.getContentText());
   if (!Array.isArray(entries)) throw new Error('Firestore queryの応答形式が不正です。');
   return entries.filter(function(x){return x.document;}).map(function(x){return x.document;});
+}
+
+function yondeneQueueRevision_(record) {
+  const explicit=yondeneField_(record,'updatedAt');
+  if(explicit) return explicit;
+  if(record && typeof record.updateTime==='string' &&
+      /^\d{4}-\d{2}-\d{2}T/.test(record.updateTime))
+    return record.updateTime;
+  throw new Error('Firestoreの更新リビジョンを確認できません。');
 }
 
 function yondeneQueuePreflight_(token, env, family, parsed, transaction) {
@@ -805,9 +823,12 @@ function yondeneQueuePreflight_(token, env, family, parsed, transaction) {
   const recordPath=env.familyPath+'/'+collection+'/'+parsed.targetId;
   const record=yondeneQueueDocument_(token,recordPath,transaction);
   if (!record) throw new Error('対象文書が存在しません。');
-  const currentUpdatedAt=yondeneField_(record,'updatedAt')||'';
+  // Legacy book documents may have no updatedAt field. In that case bind the
+  // command to the authoritative Firestore document updateTime, then also
+  // enforce currentDocument.updateTime in the commit (no inferred revision).
+  const currentUpdatedAt=yondeneQueueRevision_(record);
   if (currentUpdatedAt!==c.expectedUpdatedAt)
-    throw new Error('競合: updatedAtが変わっています。');
+    throw new Error('競合: updatedAt/updateTimeが変わっています。');
   if (c.op==='book.patch' && yondeneField_(record,'title')!==c.expectedTitle)
     throw new Error('競合: 書名が変わっています。');
   if (c.op==='series.patch' && yondeneField_(record,'name')!==c.expectedName)

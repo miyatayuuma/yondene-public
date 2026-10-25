@@ -96,7 +96,7 @@ test('no removed DOM ID can silently cause a null property assignment',()=>{
 test('PWA cannot combine stale JS with current HTML after deployment',()=>{
   const html=text('index.html'),sw=text('sw.js');
   const config=JSON.parse(text('firebase.json'));
-  assert.match(html,/app\.mjs\?build=20261019-shelf-v28/);
+  assert.match(html,/app\.mjs\?build=20261025-reading-legacy-v1/);
   assert.match(sw,/const ARTWORK_PATHS=new Set\(ARTWORK\)/);
   assert.ok(!sw.includes('PUBLIC_ASSETS'));
   for(const path of ['/app.mjs','/index.html','/domain.mjs','/book-community.mjs','/recommendations.mjs']){
@@ -150,20 +150,22 @@ test('single-step sorting options have distinct clear Japanese descriptions',()=
   assert.match(app,/filter:view==='series'\?'all':\$\('filter'\)\.value/);
   assert.match(app,/sort:\$\('sort'\)\.value/);
 });
-test('PWA build matches all local module edges and cannot silently run old domain labels',()=>{
+test('PWA build isolates the reading-editor hotfix from unchanged module assets',()=>{
   const html=text('index.html'),app=text('app.mjs'),recs=text('recommendations.mjs');
-  const build='20261019-shelf-v28';
+  const build='20261025-reading-legacy-v1',unchanged='20261019-shelf-v28';
   assert.match(html,new RegExp('data-app-build="'+build+'"'));
   assert.match(html,new RegExp('app\\.mjs\\?build='+build));
-  assert.match(html,new RegExp('style\\.css\\?build='+build));
+  assert.match(html,new RegExp('style\\.css\\?build='+unchanged));
   assert.match(app,new RegExp("const APP_BUILD='"+build+"'"));
   assert.match(app,/document\.documentElement\.dataset\.appBuild!==APP_BUILD/);
+  assert.ok(app.includes("'./reading-record-editor.mjs?build="+build+"'"));
+  assert.ok(text('reading-record-editor.mjs').includes("'./reading-record-domain.mjs?build="+build+"'"));
   for(const module of ['domain','book-community','recommendations','bibliography-identity','firebase-config','activity','invite-links','cover-thumbnails','nickname','reader-name','pending-reflections','startup-recovery']){
-    assert.ok(app.includes("'./"+module+".mjs?build="+build+"'"),'versioned import: '+module);
+    assert.ok(app.includes("'./"+module+".mjs?build="+unchanged+"'"),'unchanged versioned import: '+module);
   }
-  assert.ok(recs.includes("'./domain.mjs?build="+build+"'"));
-  assert.ok(app.includes("'./child-rating.mjs?build="+build+"'"));
-  assert.ok(text('book-community.mjs').includes("'./reflection-withdrawal.mjs?build="+build+"'"));
+  assert.ok(recs.includes("'./domain.mjs?build="+unchanged+"'"));
+  assert.ok(app.includes("'./child-rating.mjs?build="+unchanged+"'"));
+  assert.ok(text('book-community.mjs').includes("'./reflection-withdrawal.mjs?build="+unchanged+"'"));
   assert.doesNotMatch(app,/ChatGPT|sortDirection|timelineToggle/);
   assert.match(app,/アプリのバージョン：/);
 });

@@ -95,3 +95,15 @@ Fail-closed requirements:
 - approver must confirm existing old GitHub writer remains disabled, approve the actual book/field/values and explicitly install this code into the bound PRIVATE GAS project. Never enable routine triggers based on this acceptance.
 
 **Status:** implementation and synthetic CI are prerequisites, but the first real `book.patch` has NOT been performed; separate scoped owner approval still required. Previous Stage L no-change acceptance remains PASS.
+
+
+### Stage M bounded production invocation — provisional commit evidence (2026-10-25 JST)
+
+This paragraph **supersedes the earlier Stage M status** that only synthetic testing had occurred. The owner explicitly authorized one actual single-field bibliographic correction, and manually installed the reviewed bound GAS source and private approval while keeping the general writer gate disabled. No owner names, document IDs, book titles, changed strings, or actual command payloads are recorded in this PUBLIC repository.
+
+- Installed code dry-run first exposed the old `updatedAt` assumption on a legacy document. The corrected `Queue.gs` uses authenticated Firestore `updateTime` as the CAS source if the book has no `updatedAt` field. Synthetic CI for that fix passed.
+- Subsequent private manual dry-run: `pending=1 ready=1 review=0 writeEnabled=false`.
+- At approximately **20:21 JST** the owner invoked **only** `yondeneQueueAcceptApprovedBookPatchOnce`. It reported `SCOPED_BOOK_PATCH_PASS`, `writes=1 marker=1 generalWriterEnabled=false`.
+- An independent connected-Google-Sheets read of the private queue returned `APPLIED`, `COMMIT_OK`, SHA256 matching the approved payload, `attempts=1`, no error; no second `PENDING`.
+- **Not yet final PASS**: the last independently available Firestore→Sheets read-only sync predates 20:21, so persistence of the target field, the immutable marker and full unrelated-field equality **await fresh authoritative mirror reconciliation**. Manual operator has been asked to run `yondeneSyncNow` exactly once; do NOT rerun the writer.
+- Neither the PUBLIC PR nor Firebase Hosting was merged/deployed. Ordinary GAS writer remains owner-reported `WRITE_ENABLED=false`; no recurring GAS trigger approved.

@@ -25,7 +25,7 @@ function setup({mockRelease=false} = {}) {
     }
   };
   let queryRows = {}, rating = null, reflection = null, activity = null;
-  let queueRows = [];
+  let queueRows = [], simulatePersist = false;
   let bookStatus = 'reading', seriesName = 'Demo Series', publisher = '';
   let bookNotes = '', completionNote = '';
   const queueSheet={
@@ -112,6 +112,7 @@ function setup({mockRelease=false} = {}) {
           const familyWrite=committed.writes.find(w=>
             w.update?.name?.endsWith('/families/example-family'));
           if(familyWrite) familyName=familyWrite.update.fields.name.stringValue;
+          if(simulatePersist) {
           const bookWrite=committed.writes.find(w=>
             w.update?.name?.endsWith('/books/demo-book'));
           if(bookWrite) {
@@ -125,6 +126,7 @@ function setup({mockRelease=false} = {}) {
           if(markerWrite) marker={
             name:markerWrite.update.name,fields:markerWrite.update.fields
           };
+          }
         }
         return {getResponseCode:()=>commitStatus,
           getContentText:()=>commitStatus===200?
@@ -182,7 +184,8 @@ function setup({mockRelease=false} = {}) {
     addQueueCommand:c=>{queueRows.push([
       c.commandId,'2026-10-25','book.patch',JSON.stringify(c),
       'PENDING','','','','',''])},
-    queueState:()=>queueRows.map(r=>r.slice())};
+    queueState:()=>queueRows.map(r=>r.slice()),
+    enableCommitPersistence:()=>{simulatePersist=true}};
 }
 
 test('Stage A direct invocation cannot write',()=>{
@@ -744,6 +747,7 @@ test('end-to-end manual scoped entrypoint commits exactly one approved book patc
     expiresAt:new Date(Date.now()+3600000).toISOString()};
   s.setQueueCommand(c);
   s.setApproval(approval);
+  s.enableCommitPersistence();
   assert.equal(s.api.cfg.WRITE_ENABLED,false);
   const result=s.api.approvedOnce();
   assert.equal(result.status,'PASS');

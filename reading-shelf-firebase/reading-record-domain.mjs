@@ -10,7 +10,15 @@ export const PERIOD_PRECISIONS=Object.freeze(['school_year','school_term','schoo
 export function readingSnapshot(book){
   return Object.fromEntries(READING_EDIT_FIELDS.map(key=>[key,String(book?.[key]??'')]));
 }
-const hasPeriod=b=>READING_EDIT_FIELDS.slice(2).some(k=>String(b?.[k]??'')!=='');
+// Historical imports sometimes set finishPrecision='unknown' on an unread
+// book even when there is NO completion date, period, basis or note. Treat
+// that sentinel as missing metadata, not as evidence of a completed book.
+// All meaningful completion fields, including free-text notes, still block
+// automatic cleanup until the parent reviews them through ChatOps.
+const hasPeriod=b=>READING_EDIT_FIELDS.slice(2).some(key=>{
+  const value=String(b?.[key]??'');
+  return value!=='' && !(key==='finishPrecision' && value==='unknown');
+});
 const validMonth=v=>/^\d{4}-(0[1-9]|1[0-2])$/.test(v);
 const validDay=v=>{
   if(!/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(v))return false;

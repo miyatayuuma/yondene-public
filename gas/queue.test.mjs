@@ -27,7 +27,7 @@ function setup({mockRelease=false} = {}) {
   let queryRows = {}, rating = null, reflection = null, activity = null;
   let queueRows = [], simulatePersist = false;
   let bookStatus = 'reading', seriesName = 'Demo Series', publisher = '';
-  let bookNotes = '', completionNote = '';
+  let bookNotes = '', completionNote = '', ageSource = '', legacyNoUpdatedAt = false;
   const queueSheet={
     getLastRow:()=>queueRows.length+1,
     getRange:(row,col,height,width)=>{
@@ -68,9 +68,11 @@ function setup({mockRelease=false} = {}) {
         if (url.split('?')[0].endsWith('/books/demo-book')) data = {
           updateTime:'2026-10-24T09:01:02.123456Z',
           fields:{title:{stringValue:'Demo Book'},status:{stringValue:bookStatus},
-            updatedAt:{stringValue:updatedAt},notes:{stringValue:bookNotes},
+            ...(legacyNoUpdatedAt ? {} : {updatedAt:{stringValue:updatedAt}}),
+            notes:{stringValue:bookNotes},
             finishedPeriodNote:{stringValue:completionNote},
-            publisher:{stringValue:publisher}}
+            publisher:{stringValue:publisher},
+            ageSource:{stringValue:ageSource}}
         };
         if (url.split('?')[0].endsWith('/books/demo-book-2')) data = {
           updateTime:'2026-10-24T09:01:04.123456Z',
@@ -118,8 +120,12 @@ function setup({mockRelease=false} = {}) {
           if(bookWrite) {
             if(bookWrite.update.fields.publisher)
               publisher=bookWrite.update.fields.publisher.stringValue;
-            if(bookWrite.update.fields.updatedAt)
+            if(bookWrite.update.fields.ageSource)
+              ageSource=bookWrite.update.fields.ageSource.stringValue;
+            if(bookWrite.update.fields.updatedAt) {
               updatedAt=bookWrite.update.fields.updatedAt.stringValue;
+              legacyNoUpdatedAt=false;
+            }
           }
           const markerWrite=committed.writes.find(w=>
             w.update?.name?.includes('/chatgptMutations/'));
@@ -171,6 +177,7 @@ function setup({mockRelease=false} = {}) {
     setQuery:(field,value,docs)=>{queryRows[field+':'+value]=docs},
     setRating:x=>{rating=x},setBookStatus:x=>{bookStatus=x},
     setBookNotes:x=>{bookNotes=x},setCompletionNote:x=>{completionNote=x},
+    setAgeSource:x=>{ageSource=x},setLegacyBook:()=>{legacyNoUpdatedAt=true},
     setSeriesName:x=>{seriesName=x},setPublisher:x=>{publisher=x},
     getCommitted:()=>committed,getCommitCount:()=>commits,
     getBeginCount:()=>begun,getRollbackCount:()=>rolledBack,
@@ -791,4 +798,43 @@ test('stale book CAS blocks scoped entrypoint without altering the queue',()=>{
   assert.throws(()=>s.api.approvedOnce(),/更新前条件/);
   assert.equal(s.getCommitCount(),0);
   assert.equal(s.queueState()[0][4],'PENDING');
+});
+
+test('legacy book without updatedAt uses Firestore updateTime CAS for exact ageSource patch',()=>{
+  const s=setup();
+  s.setLegacyBook();
+  const official='https://example.invalid/official-book';
+  const currentRevision='2026-10-24T09:01:02.123456Z';
+  const c={...s.command,expectedUpdatedAt:currentRevision,
+    patch:{ageSource:official}};
+  const parsed=withCommand(s,c);
+  const approval={
+    commandId:c.commandId,sourceDigest:parsed.digest,bookId:c.bookId,
+    field:'ageSource',previousValue:'',newValue:official,
+    expiresAt:new Date(Date.now()+3600000).toISOString()
+  };
+  s.setQueueCommand(c);
+  s.setApproval(approval);
+  s.enableCommitPersistence();
+  assert.equal(s.api.cfg.WRITE_ENABLED,false);
+  assert.equal(s.api.approvedOnce().status,'PASS');
+  const writes=s.getCommitted().writes;
+  assert.equal(writes.length,2);
+  assert.deepEqual(Array.from(writes[0].updateMask.fieldPaths).sort(),
+    ['ageSource','updatedAt']);
+  assert.equal(writes[0].currentDocument.updateTime,currentRevision);
+  assert.equal(writes[0].update.fields.ageSource.stringValue,official);
+  assert.equal(s.getCommitCount(),1);
+  assert.equal(s.queueState()[0][4],'APPLIED');
+  assert.throws(()=>s.api.approvedOnce(),/PENDING/);
+});
+
+test('legacy book rejects arbitrary CAS timestamp rather than bypassing revision',()=>{
+  const s=setup();
+  s.setLegacyBook();
+  const c={...s.command,expectedUpdatedAt:'2026-10-24T09:00:00Z',
+    patch:{ageSource:'https://example.invalid/source'}};
+  const parsed=withCommand(s,c);
+  assert.throws(()=>s.api.preflight('fake',s.env,s.family,parsed),/updateTime/);
+  assert.equal(s.getCommitCount(),0);
 });

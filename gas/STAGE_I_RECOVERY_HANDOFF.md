@@ -62,3 +62,15 @@ The PRIVATE Sheets ledger was re-read with connected Google Sheets:
 **Pending:** no new GAS production rename was executed, no new immutable marker independently confirmed, general GAS queue write gate remains off, no trigger was added. An uncertain commit outcome must be reconciled without a blind retry. Actual production backup restoration is not verified.
 
 No book, reading record, private identifiers, or owner names have been added to the public repository.
+
+
+## Stage L — one-shot catalogue NO_CHANGE acceptance (2026-10-25 JST)
+
+The owner approved **one** production GAS queue acceptance for an existing book with identical expected and proposed publisher values: `catalog.audit`, one entry, **expected real book writes 0**, expected immutable mutation markers 1. The book title, family ID, publisher, and private command JSON remain in the PRIVATE ledger, not this public repository.
+
+- The installed Stage C `Queue.gs` manual `yondeneQueueDryRun` reported `pending=1 ready=1 review=0 writeEnabled=false`.
+- The owner temporarily set `WRITE_ENABLED: true`, manually invoked `yondeneQueueProcess` **once** at approximately 09:21 JST, then restored `WRITE_ENABLED: false` and saved. No periodic GAS writer trigger was authorized.
+- Independent Google Sheets API read of PRIVATE `更新キュー` after the invocation returned **`APPLIED`**, **`COMMIT_OK`**, `試行回数=1`, SHA256 present, error empty.
+- That queue evidence establishes successful reported Firestore commit; the catalogue no-change plan produces only a marker write. **Independent read of a post-execution Firestore→Sheets mirror remains pending**: at the time of check its last successful sync predates the acceptance. Thus book unchanged and marker retained remain **NOT YET INDEPENDENTLY VERIFIED**.
+- Do not replay the command or re-enable the general writer. Wait for the next successful read-only mirror refresh or run the existing `yondeneSyncNow` manually once; then compare persisted marker's digest/updatedCount/entryCount and target book document updateTime/fields against the pre-acceptance baseline.
+- This one-shot acceptance does NOT enable continuous GAS queue processing; a separate approved *real book change* acceptance and recovery/rollback design are still required.

@@ -84,6 +84,137 @@ function yondeneQueueDryRun() {
 }
 
 /** Not installed as a trigger. Hard-denied while WRITE_ENABLED is false. */
+/**
+ * Stage M: manual, single-command acceptance while the general writer stays OFF.
+ *
+ * The PRIVATE bound Apps Script project may define YONDENE_BOOK_PATCH_APPROVAL
+ * only after explicit approval of the exact field change. Do not put this
+ * object, book information, IDs, or JSON in PUBLIC GitHub. No trigger.
+ *
+ * Schema: {commandId,sourceDigest,bookId,field,previousValue,newValue,
+ *          expiresAt}. Only one nonempty bibliographic text field is accepted.
+ */
+function yondeneQueueOneShotBookPatchAuthorized_(parsed, approval) {
+  if (YONDENE_QUEUE.WRITE_ENABLED!==false ||
+      typeof YONDENE_BOOK_PATCH_APPROVAL==='undefined' ||
+      approval!==YONDENE_BOOK_PATCH_APPROVAL ||
+      !approval || typeof approval!=='object' || Array.isArray(approval))
+    return false;
+  const keys=['commandId','sourceDigest','bookId','field',
+    'previousValue','newValue','expiresAt'];
+  if (Object.keys(approval).sort().join(',')!==keys.slice().sort().join(','))
+    return false;
+  const c=parsed&&parsed.command;
+  if (!c||c.op!=='book.patch' ||
+      c.commandId!==approval.commandId ||
+      c.bookId!==approval.bookId ||
+      parsed.targetId!==approval.bookId ||
+      parsed.digest!==approval.sourceDigest ||
+      typeof approval.sourceDigest!=='string' ||
+      !/^[a-f0-9]{64}$/.test(approval.sourceDigest) ||
+      !['publisher','publicationDate','editionNote','ageLabel','ageSource',
+        'coverReferenceSource','coverEditionStatus','bibliographicSource']
+        .includes(approval.field) ||
+      typeof approval.previousValue!=='string' ||
+      typeof approval.newValue!=='string' ||
+      approval.previousValue===approval.newValue ||
+      Object.keys(c.patch||{}).length!==1 ||
+      c.patch[approval.field]!==approval.newValue)
+    return false;
+  // The acceptance expires automatically and cannot be kept armed indefinitely.
+  const expires=Date.parse(approval.expiresAt);
+  return typeof approval.expiresAt==='string' &&
+    /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$/.test(approval.expiresAt) &&
+    Number.isFinite(expires) && expires>Date.now() &&
+    expires-Date.now()<=24*60*60*1000;
+}
+
+function yondeneQueueAcceptApprovedBookPatchOnce() {
+  if (YONDENE_QUEUE.WRITE_ENABLED!==false)
+    throw new Error('一般writerが有効です。限定受入を拒否します。');
+  if (typeof YONDENE_BOOK_PATCH_APPROVAL==='undefined')
+    throw new Error('非公開の1件限定承認設定がありません。');
+  const approval=YONDENE_BOOK_PATCH_APPROVAL;
+  const lock=LockService.getScriptLock();
+  if(!lock.tryLock(20000))throw new Error('別のGAS処理が実行中です。');
+  let item=null,parsed=null,commitAttempted=false;
+  try {
+    const env=yondeneQueueEnvironment_();
+    const pending=yondeneQueuePending_(env.sheet);
+    if(pending.length!==1)
+      throw new Error('PENDINGは承認済みの1件だけにしてください。');
+    item=pending[0];
+    if(item.cells.slice(5).some(function(x){return x!=='';}))
+      throw new Error('処理済み履歴のある行は実行できません。');
+    parsed=yondeneQueueParse_(item.cells);
+    if(!yondeneQueueOneShotBookPatchAuthorized_(parsed,approval))
+      throw new Error('コマンド・承認digest・対象フィールド・期限が不一致。');
+    const settings=yondeneQueueSettingsCommand_(env);
+    if(settings)throw new Error('本棚名の変更依頼が残っています。');
+    const token=ScriptApp.getOAuthToken();
+    const bookPath=env.familyPath+'/books/'+approval.bookId;
+    const before=yondeneQueueDocument_(token,bookPath);
+    if(!before || yondeneField_(before,'title')!==parsed.command.expectedTitle ||
+        yondeneField_(before,'updatedAt')!==parsed.command.expectedUpdatedAt ||
+        yondeneField_(before,approval.field)!==approval.previousValue)
+      throw new Error('対象書籍の更新前条件が変化しています。');
+    // Re-read row: the exact approved payload must remain unchanged.
+    if(JSON.stringify(env.sheet.getRange(item.row,1,1,10).getDisplayValues()[0])!==
+       JSON.stringify(item.cells))throw new Error('キュー行が変更されました。');
+    commitAttempted=true; // Any subsequent exception requires reconciliation.
+    const outcome=yondeneQueueApplyTransaction_(token,env,parsed,approval);
+    const marker=yondeneQueueDocument_(
+      token,env.familyPath+'/chatgptMutations/'+approval.commandId);
+    const after=yondeneQueueDocument_(token,bookPath);
+    if(!marker || yondeneField_(marker,'sourceDigest')!==parsed.digest ||
+        yondeneField_(marker,'op')!=='book.patch' || !after ||
+        yondeneField_(after,approval.field)!==approval.newValue)
+      throw new Error('SCOPED_UNCERTAIN: 永続マーカーまたは更新値の照合失敗。');
+    const allowed=new Set([approval.field,'updatedAt']);
+    const oldFields=before.fields||{},newFields=after.fields||{};
+    const same=function(x,y){return JSON.stringify(x)===JSON.stringify(y);};
+    if(!same(Object.keys(oldFields).sort(),Object.keys(newFields).sort()) ||
+       Object.keys(newFields).some(function(k){
+         return !allowed.has(k)&&!same(oldFields[k],newFields[k]);
+       }) || before.createTime!==after.createTime ||
+       yondeneField_(after,'updatedAt')===parsed.command.expectedUpdatedAt)
+      throw new Error('SCOPED_UNCERTAIN: 承認外フィールドの差分がありました。');
+    if(JSON.stringify(env.sheet.getRange(item.row,1,1,10).getDisplayValues()[0])!==
+       JSON.stringify(item.cells))throw new Error('SCOPED_UNCERTAIN: キュー行が変化。');
+    env.sheet.getRange(item.row,5,1,6).setValues([[
+      outcome==='ALREADY'?'ALREADY':'APPLIED',new Date().toISOString(),
+      outcome==='ALREADY'?'MARKER_MATCH':'COMMIT_OK',
+      parsed.digest,1,''
+    ]]);
+    SpreadsheetApp.flush();
+    Logger.log('SCOPED_BOOK_PATCH_PASS: commandId='+approval.commandId+
+      ' writes=1 marker=1 generalWriterEnabled=false');
+    return {status:'PASS',outcome:outcome,commandId:approval.commandId};
+  } catch(err) {
+    // Preflight rejection leaves PENDING for manual correction. Once a commit
+    // may have been sent, freeze the row as REVIEW; never automatically retry.
+    if(commitAttempted&&item){
+      try {
+        const env=yondeneQueueEnvironment_();
+        env.sheet.getRange(item.row,5,1,6).setValues([[
+          'REVIEW',new Date().toISOString(),'SCOPED_COMMIT_UNCERTAIN',
+          parsed?parsed.digest:'',1,'再実行禁止。マーカーと書籍を独立照合。'
+        ]]);
+        SpreadsheetApp.flush();
+      } catch(e){Logger.log('SCOPED_UNCERTAIN: queue reconciliation needed');}
+    }
+    throw err;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** Separate gates for normal writer vs the bounded, approved one-shot. */
+function yondeneQueueWriteGate_(parsed,approval) {
+  if(YONDENE_QUEUE.WRITE_ENABLED) return true;
+  return yondeneQueueOneShotBookPatchAuthorized_(parsed,approval);
+}
+
 function yondeneQueueProcess() {
   if (!YONDENE_QUEUE.WRITE_ENABLED)
     throw new Error('GAS書き込みは未承認・無効です。キュー監査のみ実行できます。');
@@ -472,8 +603,8 @@ function yondeneQueueRollback_(token,transaction) {
     throw new Error('Firestore rollback HTTP '+response.getResponseCode());
 }
 
-function yondeneQueueApplyTransaction_(token,env,parsed) {
-  if(!YONDENE_QUEUE.WRITE_ENABLED)
+function yondeneQueueApplyTransaction_(token,env,parsed,approval) {
+  if(!yondeneQueueWriteGate_(parsed,approval))
     throw new Error('GAS書き込みは未承認・無効です。');
   const transaction=yondeneQueueBeginTransaction_(token);
   let commitAttempted=false;
@@ -482,8 +613,16 @@ function yondeneQueueApplyTransaction_(token,env,parsed) {
     if(!family) throw new Error('家族ドキュメントが存在しません。');
     const plan=yondeneQueuePreflight_(token,env,family,parsed,transaction);
     if(plan.already) return 'ALREADY';
+    if (approval) {
+      const keys=Object.keys(plan.updates||{}).sort().join(',');
+      if(plan.action!=='patch' ||
+          plan.recordPath!==env.familyPath+'/books/'+approval.bookId ||
+          keys!==[approval.field,'updatedAt'].sort().join(',') ||
+          plan.updates[approval.field]!==approval.newValue)
+        throw new Error('限定承認の変更フィールドと実行プランが不一致。');
+    }
     commitAttempted=true;
-    return yondeneQueueCommit_(token,env,parsed,plan,transaction);
+    return yondeneQueueCommit_(token,env,parsed,plan,transaction,approval);
   } finally {
     if(!commitAttempted) {
       try {yondeneQueueRollback_(token,transaction);}
@@ -764,8 +903,8 @@ function yondeneQueueValue_(v) {
   throw new Error('未対応のFirestore値型です。');
 }
 
-function yondeneQueueCommit_(token, env, parsed, plan, transaction) {
-  if(!YONDENE_QUEUE.WRITE_ENABLED)
+function yondeneQueueCommit_(token, env, parsed, plan, transaction, approval) {
+  if(!yondeneQueueWriteGate_(parsed,approval))
     throw new Error('GAS書き込みは未承認・無効です。');
   if(!transaction) throw new Error('Firestore transactionが必要です。');
   const c=parsed.command;

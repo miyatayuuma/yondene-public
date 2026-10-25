@@ -124,7 +124,7 @@ function yondeneQueueOneShotBookPatchAuthorized_(parsed, approval) {
   // The acceptance expires automatically and cannot be kept armed indefinitely.
   const expires=Date.parse(approval.expiresAt);
   return typeof approval.expiresAt==='string' &&
-    /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$/.test(approval.expiresAt) &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(approval.expiresAt) &&
     Number.isFinite(expires) && expires>Date.now() &&
     expires-Date.now()<=24*60*60*1000;
 }

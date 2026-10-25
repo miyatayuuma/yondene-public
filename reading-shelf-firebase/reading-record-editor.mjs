@@ -1,6 +1,6 @@
 import {doc,runTransaction,serverTimestamp} from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-firestore.js';
 import {READING_MODE,PERIOD_PRECISIONS,
-  makeReadingNext,makeReadingMutation,initialPeriod,localToday,assertReadingRevision} from './reading-record-domain.mjs?build=20261019-shelf-v28';
+  makeReadingNext,makeReadingMutation,initialPeriod,localToday,assertReadingRevision} from './reading-record-domain.mjs?build=20261025-reading-legacy-v1';
 
 const el=(tag,label='',className='')=>{
   const node=document.createElement(tag);if(label)node.textContent=label;

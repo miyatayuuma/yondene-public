@@ -75,3 +75,23 @@ The owner approved **one** production GAS queue acceptance for an existing book 
 - The newly persisted immutable marker exists exactly once, has `source=chatgpt-gas`, `op=catalog.audit`, `entryCount=1`, `updatedCount=0` and its `sourceDigest` matches the PRIVATE queue SHA256. The target book's Firestore document `updateTime` and all **34 fields** match the captured pre-acceptance baseline (stable canonical fingerprint match); no book field or revision was changed. Private IDs, titles, publisher and raw command are intentionally excluded here.
 - **Stage L limited acceptance: PASS** (one command, one marker, zero book updates). Do not replay the command or re-enable the general writer. Both the old GitHub sync environment gate and the general GAS queue gate remain operator-reported disabled; no automatic GAS writer trigger was approved.
 - This one-shot acceptance does NOT enable continuous GAS queue processing; a separate approved *real book change* acceptance and recovery/rollback design are still required.
+
+
+## Stage M — approved one-book `book.patch` acceptance without global writer gate
+
+Scope: **CODE + SYNTHETIC TESTS ONLY**. No production GAS installation, new queue command, book mutation, Firebase Hosting change, or PR merge is authorized by this stage.
+
+The public `gas/Queue.gs` now provides `yondeneQueueAcceptApprovedBookPatchOnce()`, a manual-only entrypoint that runs the existing Firestore transactional `book.patch` machinery while `WRITE_ENABLED=false` if and only if an exact **PRIVATE** approval object (`YONDENE_BOOK_PATCH_APPROVAL`) is installed in the private Sheet-bound script. Regular `yondeneQueueProcess()` remains disabled.
+
+The PRIVATE approval object contains **exactly** the following keys: `commandId`, `sourceDigest` (sha256-json-stringify-v1, computed from the actual queue JSON), `bookId`, `field`, `previousValue`, `newValue`, and `expiresAt` (UTC ISO time, less than 24 hours from execution). Do NOT populate approval values until the owner authorizes an exact real book correction. Do not publish names, IDs, source data or digests from actual private commands.
+
+Fail-closed requirements:
+- one and only one `PENDING` row, without prior attempts; no outstanding shelf rename;
+- book-only `book.patch`, exactly one approved bibliographic *string* field, no status, progress, personal notes, rating, reflection, title, ISBN or series mutation;
+- command ID, digest, target ID, field and new value bound to private approval; expected current field value and `expectedUpdatedAt` checked against live Firestore;
+- existing transaction CAS and create-only immutable marker; the commit accepts only the specified field plus `updatedAt`; no global writer gate activation;
+- immediate marker and unchanged-other-fields verification, then queue status `APPLIED`; uncertain commit outcome freezes the row in `REVIEW`, never automatically replays;
+- successful queue status is provisional until *independent read-only Firestore→Sheets reconciliation* confirms persisted exact diff and the marker;
+- approver must confirm existing old GitHub writer remains disabled, approve the actual book/field/values and explicitly install this code into the bound PRIVATE GAS project. Never enable routine triggers based on this acceptance.
+
+**Status:** implementation and synthetic CI are prerequisites, but the first real `book.patch` has NOT been performed; separate scoped owner approval still required. Previous Stage L no-change acceptance remains PASS.

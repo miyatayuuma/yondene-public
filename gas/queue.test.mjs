@@ -25,8 +25,26 @@ function setup({mockRelease=false} = {}) {
     }
   };
   let queryRows = {}, rating = null, reflection = null, activity = null;
+  let queueRows = [];
   let bookStatus = 'reading', seriesName = 'Demo Series', publisher = '';
   let bookNotes = '', completionNote = '';
+  const queueSheet={
+    getLastRow:()=>queueRows.length+1,
+    getRange:(row,col,height,width)=>{
+      if(row===1&&col===1&&height===1&&width===10)
+        return {getDisplayValues:()=>[[
+          'コマンドID','登録時刻','操作','コマンドJSON','状態','処理日時',
+          '結果コード','SHA256','試行回数','エラー概要']]};
+      if(row===2&&col===1&&width===10&&height===queueRows.length)
+        return {getDisplayValues:()=>queueRows.map(v=>v.slice())};
+      if(row===2&&col===5&&height===1&&width===6)
+        return {setValues:vals=>queueRows[0].splice(4,6,...vals[0])};
+      throw Error('Unexpected queue range '+[row,col,height,width].join(','));
+    }
+  };
+  const syncSheet={getRange:key=>({
+    getDisplayValue:()=>({B7:'example-family',B8:'owner-1'})[key]
+  })};
   const ctx = {
     YONDENE: {project:'example-project', spreadsheetId:'example-sheet'},
     yondeneSha256_: x => createHash('sha256').update(x,'utf8').digest('hex'),
@@ -94,6 +112,19 @@ function setup({mockRelease=false} = {}) {
           const familyWrite=committed.writes.find(w=>
             w.update?.name?.endsWith('/families/example-family'));
           if(familyWrite) familyName=familyWrite.update.fields.name.stringValue;
+          const bookWrite=committed.writes.find(w=>
+            w.update?.name?.endsWith('/books/demo-book'));
+          if(bookWrite) {
+            if(bookWrite.update.fields.publisher)
+              publisher=bookWrite.update.fields.publisher.stringValue;
+            if(bookWrite.update.fields.updatedAt)
+              updatedAt=bookWrite.update.fields.updatedAt.stringValue;
+          }
+          const markerWrite=committed.writes.find(w=>
+            w.update?.name?.includes('/chatgptMutations/'));
+          if(markerWrite) marker={
+            name:markerWrite.update.name,fields:markerWrite.update.fields
+          };
         }
         return {getResponseCode:()=>commitStatus,
           getContentText:()=>commitStatus===200?
@@ -104,7 +135,9 @@ function setup({mockRelease=false} = {}) {
     LockService:{getScriptLock:()=>({tryLock:()=>true,releaseLock:()=>{}})},
     Logger:{log:()=>{}},ScriptApp:{getOAuthToken:()=>'fake'},
     SpreadsheetApp:{flush:()=>{},
-      openById:()=>({getSheetByName:name=>name==='設定'?settingsSheet:null})},
+      openById:()=>({getSheetByName:name=>({
+        '設定':settingsSheet,'更新キュー':queueSheet,'同期状態':syncSheet
+      })[name]||null})},
     Date,JSON,Number,Object,String,Array,Math,RegExp,Error,Set,
   };
   vm.createContext(ctx);
@@ -128,6 +161,7 @@ function setup({mockRelease=false} = {}) {
     command.commandId,'2026-10-24 18:00','book.patch',
     JSON.stringify(command),'PENDING','','','','',''
   ];
+  queueRows=[cells];
   const env = {familyPath:FAM,familyId:'example-family',ownerUid:'owner-1'};
   const family = {fields:{ownerUid:{stringValue:'owner-1'}}};
   return {api,command,cells,env,family,
@@ -142,7 +176,13 @@ function setup({mockRelease=false} = {}) {
     setFamilyName:v=>{familyName=v},setCommitStatus:v=>{commitStatus=v},
     setSettings:(desired,confirmed)=>{settingsDesired=desired;settingsConfirmed=confirmed},
     getSettingsConfirmed:()=>settingsConfirmed,
-    setApproval:a=>{ctx.YONDENE_BOOK_PATCH_APPROVAL=a;}};
+    setApproval:a=>{ctx.YONDENE_BOOK_PATCH_APPROVAL=a;},
+    setQueueCommand:c=>{const row=cells.slice();row[0]=c.commandId;
+      row[2]=c.op;row[3]=JSON.stringify(c);queueRows=[row];},
+    addQueueCommand:c=>{queueRows.push([
+      c.commandId,'2026-10-25','book.patch',JSON.stringify(c),
+      'PENDING','','','','',''])},
+    queueState:()=>queueRows.map(r=>r.slice())};
 }
 
 test('Stage A direct invocation cannot write',()=>{
@@ -692,4 +732,59 @@ test('one-shot forbids expanded implicit status writes even with synthetically f
   assert.equal(s.api.scopedGate(parsed,approval),false);
   assert.throws(()=>s.api.apply('fake',s.env,parsed,approval),/未承認/);
   assert.equal(s.getCommitCount(),0);
+});
+
+test('end-to-end manual scoped entrypoint commits exactly one approved book patch',()=>{
+  const s=setup();
+  s.setPublisher('Old Publisher');
+  const c={...s.command,patch:{publisher:'Corrected Publisher'}};
+  const parsed=withCommand(s,c);
+  const approval={commandId:c.commandId,sourceDigest:parsed.digest,bookId:c.bookId,
+    field:'publisher',previousValue:'Old Publisher',newValue:'Corrected Publisher',
+    expiresAt:new Date(Date.now()+3600000).toISOString()};
+  s.setQueueCommand(c);
+  s.setApproval(approval);
+  assert.equal(s.api.cfg.WRITE_ENABLED,false);
+  const result=s.api.approvedOnce();
+  assert.equal(result.status,'PASS');
+  assert.equal(result.outcome,'APPLIED');
+  assert.equal(s.getCommitCount(),1);
+  const row=s.queueState()[0];
+  assert.equal(row[4],'APPLIED');
+  assert.equal(row[6],'COMMIT_OK');
+  assert.equal(row[7],parsed.digest);
+  assert.equal(row[8],1);
+  assert.throws(()=>s.api.approvedOnce(),/PENDING/, 'successful one-shot cannot replay');
+});
+
+test('manual scoped entrypoint rejects extra PENDING without a Firestore write',()=>{
+  const s=setup();
+  s.setPublisher('Old Publisher');
+  const c={...s.command,patch:{publisher:'Corrected Publisher'}};
+  const parsed=withCommand(s,c);
+  const approval={commandId:c.commandId,sourceDigest:parsed.digest,bookId:c.bookId,
+    field:'publisher',previousValue:'Old Publisher',newValue:'Corrected Publisher',
+    expiresAt:new Date(Date.now()+3600000).toISOString()};
+  s.setQueueCommand(c);
+  s.addQueueCommand({...c,commandId:'gas-unrelated-command'});
+  s.setApproval(approval);
+  assert.throws(()=>s.api.approvedOnce(),/PENDINGは承認済みの1件/);
+  assert.equal(s.getCommitCount(),0);
+  assert.equal(s.queueState()[0][4],'PENDING');
+});
+
+test('stale book CAS blocks scoped entrypoint without altering the queue',()=>{
+  const s=setup();
+  s.setPublisher('Old Publisher');
+  s.setUpdatedAt('changed');
+  const c={...s.command,patch:{publisher:'Corrected Publisher'}};
+  const parsed=withCommand(s,c);
+  const approval={commandId:c.commandId,sourceDigest:parsed.digest,bookId:c.bookId,
+    field:'publisher',previousValue:'Old Publisher',newValue:'Corrected Publisher',
+    expiresAt:new Date(Date.now()+3600000).toISOString()};
+  s.setQueueCommand(c);
+  s.setApproval(approval);
+  assert.throws(()=>s.api.approvedOnce(),/更新前条件/);
+  assert.equal(s.getCommitCount(),0);
+  assert.equal(s.queueState()[0][4],'PENDING');
 });

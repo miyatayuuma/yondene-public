@@ -115,7 +115,9 @@ function setup({mockRelease=false} = {}) {
     preflight:yondeneQueuePreflight_, commit:yondeneQueueCommit_,
     pending:yondeneQueuePending_, process:yondeneQueueProcess,
     apply:yondeneQueueApplyTransaction_,settings:yondeneQueueSettingsCommand_,
-    processSettings:yondeneQueueProcessSettings_})`,ctx);
+    processSettings:yondeneQueueProcessSettings_,
+    approvedOnce:yondeneQueueAcceptApprovedBookPatchOnce,
+    scopedGate:yondeneQueueOneShotBookPatchAuthorized_})`,ctx);
   const command = {schemaVersion:1,commandId:'gas-demo-command-001',
     op:'book.patch',bookId:'demo-book',expectedTitle:'Demo Book',
     expectedUpdatedAt:DATE,
@@ -139,7 +141,8 @@ function setup({mockRelease=false} = {}) {
     getGets:()=>gets,getQueries:()=>queries,getFamilyName:()=>familyName,
     setFamilyName:v=>{familyName=v},setCommitStatus:v=>{commitStatus=v},
     setSettings:(desired,confirmed)=>{settingsDesired=desired;settingsConfirmed=confirmed},
-    getSettingsConfirmed:()=>settingsConfirmed};
+    getSettingsConfirmed:()=>settingsConfirmed,
+    setApproval:a=>{ctx.YONDENE_BOOK_PATCH_APPROVAL=a;}};
 }
 
 test('Stage A direct invocation cannot write',()=>{
@@ -605,4 +608,88 @@ test('unread and paused cannot receive an explicit nonempty completion period',(
   assert.throws(()=>s.api.preflight('fake',s.env,s.family,withCommand(s,bad)),/未読了/);
   const wrong={...s.command,patch:{status:'paused',finishedPeriodStart:'2026-10'}};
   assert.throws(()=>s.api.preflight('fake',s.env,s.family,withCommand(s,wrong)),/未読了/);
+});
+
+
+test('scoped book patch is denied without private approval and general writer stays off',()=>{
+  const s=setup();
+  const c={...s.command,patch:{publisher:'Corrected Publisher'}};
+  const parsed=withCommand(s,c);
+  assert.equal(s.api.cfg.WRITE_ENABLED,false);
+  assert.throws(()=>s.api.apply('fake',s.env,parsed),/未承認/);
+  assert.throws(()=>s.api.approvedOnce(),/限定承認設定/);
+  assert.equal(s.getCommitCount(),0);
+});
+
+test('one-shot approval binds exact command digest, book, field, and 24-hour expiry',()=>{
+  const s=setup();
+  const c={...s.command,patch:{publisher:'Corrected Publisher'}};
+  const parsed=withCommand(s,c);
+  const approval={
+    commandId:c.commandId,sourceDigest:parsed.digest,bookId:c.bookId,
+    field:'publisher',previousValue:'Old Publisher',
+    newValue:'Corrected Publisher',
+    expiresAt:new Date(Date.now()+60*60*1000).toISOString()
+  };
+  s.setApproval(approval);
+  assert.equal(s.api.scopedGate(parsed,approval),true);
+  assert.equal(s.api.scopedGate(parsed,{...approval}),false,
+    'approval must be the PRIVATE bound object');
+  for(const bad of [
+    {...approval,commandId:'different'},
+    {...approval,sourceDigest:'a'.repeat(64)},
+    {...approval,bookId:'other-book'},
+    {...approval,field:'status'},
+    {...approval,newValue:'Injected'},
+    {...approval,expiresAt:new Date(Date.now()-1000).toISOString()},
+    {...approval,expiresAt:new Date(Date.now()+48*3600000).toISOString()},
+    {...approval,extra:'not approved'},
+  ]){
+    s.setApproval(bad);
+    assert.equal(s.api.scopedGate(parsed,bad),false);
+  }
+  s.setApproval(approval);
+  const changed={...c,patch:{publisher:'Corrected Publisher',notes:'Changed'}};
+  assert.equal(s.api.scopedGate(withCommand(s,changed),approval),false);
+});
+
+test('one-shot scoped grant runs normal transactional book.patch while global writer is off',()=>{
+  const s=setup();
+  s.setPublisher('Old Publisher');
+  const c={...s.command,patch:{publisher:'Corrected Publisher'}};
+  const parsed=withCommand(s,c);
+  const approval={
+    commandId:c.commandId,sourceDigest:parsed.digest,bookId:c.bookId,
+    field:'publisher',previousValue:'Old Publisher',
+    newValue:'Corrected Publisher',
+    expiresAt:new Date(Date.now()+3600000).toISOString()
+  };
+  s.setApproval(approval);
+  const result=s.api.apply('fake',s.env,parsed,approval);
+  assert.equal(result,'APPLIED');
+  assert.equal(s.api.cfg.WRITE_ENABLED,false);
+  assert.equal(s.getCommitCount(),1);
+  const writes=s.getCommitted().writes;
+  assert.equal(writes.length,2);
+  assert.equal(writes[0].update.fields.publisher.stringValue,'Corrected Publisher');
+  assert.deepEqual(Array.from(writes[0].updateMask.fieldPaths).sort(),
+    ['publisher','updatedAt']);
+  assert.equal(writes[0].currentDocument.updateTime,'2026-10-24T09:01:02.123456Z');
+  assert.equal(writes[1].currentDocument.exists,false);
+  assert.equal(writes[1].update.fields.sourceDigest.stringValue,parsed.digest);
+});
+
+test('one-shot forbids expanded implicit status writes even with synthetically forged approval',()=>{
+  const s=setup();
+  const c={...s.command,patch:{status:'unread'}};
+  const parsed=withCommand(s,c);
+  const approval={
+    commandId:c.commandId,sourceDigest:parsed.digest,bookId:c.bookId,
+    field:'status',previousValue:'reading',newValue:'unread',
+    expiresAt:new Date(Date.now()+3600000).toISOString()
+  };
+  s.setApproval(approval);
+  assert.equal(s.api.scopedGate(parsed,approval),false);
+  assert.throws(()=>s.api.apply('fake',s.env,parsed,approval),/未承認/);
+  assert.equal(s.getCommitCount(),0);
 });

@@ -12,11 +12,11 @@ import {coverStatusLabel,coverIsAlternate,editionStatusLabel} from './bibliograp
 import {mountPendingReflections} from './pending-reflections.mjs?build=20261019-shelf-v28';
 import {mountFamilyActivity} from './activity.mjs?build=20261019-shelf-v28';
 import {mountChildRating} from './child-rating.mjs?build=20261019-shelf-v28';
-import {mountReadingRecordEditor} from './reading-record-editor.mjs?build=20261019-shelf-v28';
+import {mountReadingRecordEditor} from './reading-record-editor.mjs?build=20261025-reading-legacy-v1';
 import {readerNameFromShelf} from './reader-name.mjs?build=20261019-shelf-v28';
 import {STATUSES,ACTIVE_READ_FILTER,filteredBooks,readPeriodLabel,compactReadPeriodLabel,readingModeLabel,emptyStateMessage} from './domain.mjs?build=20261019-shelf-v28';
 
-const APP_BUILD='20261019-shelf-v28';
+const APP_BUILD='20261025-reading-legacy-v1';
 const $=id=>{const element=document.getElementById(id);if(!element)throw new Error('APP_DOM_MISMATCH: missing #'+id);return element};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const safeCover=url=>/^(https:\/\/|data:image\/(jpeg|png|webp);base64,)/i.test(String(url||''))?String(url):'';

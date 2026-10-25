@@ -85,6 +85,51 @@ test('no-op, malformed timestamps and legacy stale completion reject',()=>{
  assert.throws(()=>makeReadingMutation(book(),draft(),{eventId:'edit-00000000-0000-4000-8000-000000000001',updatedAt:'2026-10-17T12:00:00.000Z'}),/更新時刻/);
 });
 
+test('legacy unread unknown precision placeholder no longer blocks reading start',()=>{
+ const legacy=book({status:'unread',readingMode:'read-aloud',
+   finishedAt:'',finishPrecision:'unknown',notes:'本人の観察を保持'});
+ const started=makeReadingNext(legacy,draft({status:'reading',readingMode:'read-aloud'})).next;
+ assert.equal(started.status,'reading');assert.equal(started.readingMode,'read-aloud');
+ for(const key of ['finishedAt','finishedPeriodLabel','finishedPeriodStart',
+   'finishedPeriodEnd','finishedPeriodPrecision','finishedPeriodBasis',
+   'finishedPeriodNote','finishPrecision'])assert.equal(started[key],'',key);
+ const mutation=makeReadingMutation(legacy,draft({status:'reading',readingMode:'read-aloud'}),{
+   eventId:'edit-00000000-0000-4000-8000-000000000041',
+   updatedAt:'2026-10-25T12:00:00.000Z',editedAt:'server',actorUid:'owner1'});
+ assert.equal(mutation.patch.notes,undefined);
+ assert.equal(mutation.event.previous.finishPrecision,'unknown');
+ assert.equal(mutation.event.next.finishPrecision,'');
+ assert.equal(mutation.event.correctionKind,undefined);
+});
+
+test('placeholder-only legacy books can pause or reset unread status',()=>{
+ const old=book({status:'unread',readingMode:'read-aloud',finishPrecision:'unknown'});
+ const paused=makeReadingNext(old,draft({status:'paused',readingMode:'mixed'})).next;
+ assert.equal(paused.status,'paused');assert.equal(paused.readingMode,'mixed');
+ assert.equal(paused.finishPrecision,'');
+ const cleaned=makeReadingNext(old,draft({status:'unread'})).next;
+ assert.equal(cleaned.status,'unread');assert.equal(cleaned.readingMode,'');
+ assert.equal(cleaned.finishPrecision,'');
+});
+
+test('real completion values and free-text observations remain protected',()=>{
+ const base={status:'unread',readingMode:'read-aloud',finishPrecision:'unknown'};
+ const keep=['finishedAt','finishedPeriodLabel','finishedPeriodStart',
+   'finishedPeriodEnd','finishedPeriodPrecision','finishedPeriodBasis',
+   'finishedPeriodNote'];
+ for(const key of keep) {
+   const old=book({...base,[key]:key==='finishedAt'?'2026-10':'本人の発言・過去記録'});
+   assert.throws(()=>makeReadingNext(old,draft({status:'reading',readingMode:'read-aloud'})),
+     /古い読了情報/,key+' must not be erased silently');
+ }
+ assert.throws(()=>makeReadingNext(
+   book({...base,finishPrecision:'month'}),
+   draft({status:'reading',readingMode:'read-aloud'})),/古い読了情報/);
+ assert.throws(()=>makeReadingNext(
+   book({...base,finishPrecision:'unknown',finishedPeriodNote:'本人の原文'}),
+   draft({status:'unread'})),/古い読了情報/);
+});
+
 test('v1 and browser concurrent writes require a fresh matching revision',()=>{
  const cached=book({status:'unread',readingMode:''});
  const v1Result={...cached,status:'reading',readingMode:'read-aloud',updatedAt:'2026-10-18T02:00:00.000Z'};

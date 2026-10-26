@@ -81,3 +81,22 @@ recovery; do not call it a recoverable backup.
 The private repository is **NOT YET SAFE TO DELETE** while the cutover
 and public deployment parity remain open. This file is architecture and
 handoff documentation, not a deletion authorization.
+
+
+## Audit update (2026-10-26): GitHub writer removal and private archive
+
+The following actions were performed **after** the original checklist was written:
+
+- Old bookshelf Firestore writer workflow deleted from `miyatayuuma/legacy-games` main. Previous private repository `miyatayuuma/yondene` main had **all four** obsolete workflows deleted: the v1/v2 writer dispatcher, v2 issue-intake workflow and two private-only CI workflows. Subsequent repository-tree inspection found **zero** workflows in that private main, and no bookshelf-writer workflow in the former legacy repository. Historic commits, credentials and GitHub Environment configuration were **not** purged and must not be presumed revoked. The legacy repo still has a non-writer command-validator workflow.
+- Public PR #3 (generic GAS adapter, tests and docs) was merged into public main. Public PWA source is established in public main and the owner reports a successful PUBLIC-source-only Hosting deploy plus a live reading-state edit. The private Firestore→Sheets mirror later independently confirmed the edited book and an immutable app edit event.
+- Private Google Sheets already archived the **68 current-main old-data files** and compared their complete text against fixed source Git blobs. The historical archive was expanded to **119 Issue/PR bodies, 83 PR metadata rows, 119 top-level issue comments, 34 inline PR review comments and 172 commit-message/index rows**. These records reside ONLY in the private Sheet and must never be published to GitHub. File bodies are still a historical archive, not the Firestore current value.
+- **Known limits:** Git object trees and full per-commit snapshots, Actions logs/artifacts, external/removed attachments, some review metadata and GitHub repo settings are not reconstructed by the Sheet index. The owner must accept loss of anything outside the preserved data before final deletion; Sheet is mutable, not a disaster recovery backup.
+- PUBLIC functional parity was checked against private PWA runtime files: the public version includes the approved reading-editor fix and privacy-safe anonymous shelf branding. Remaining private-only sources are historical docs and the obsolete writer setup script, not a required runtime dependency. Public CI PASS and device acceptance are distinct from authorization to enable any writer.
+
+### Gates still open
+
+1. **General GAS queue gate:** installed private Apps Script source/version, editor permissions, OAuth scopes, time triggers and `WRITE_ENABLED=false` must be checked on the live bound project. The owner has not approved the general writer. A limited production book patch and catalogue no-change are successful only in their scoped ranges; do not silently enable processing or multiple writers.
+2. **Service credential cutover:** deleting workflow files stops the current GitHub execution route but does not revoke the old GitHub OIDC Workload Identity provider or service-account authorization. Review and revoke unused GitHub-origin credentials through authenticated Google Cloud admin controls before final disposal, without accidentally removing GAS's needed permissions.
+3. **History disposition:** confirm that the preserved current-main file archive and Issue/PR/comment/commit indexes are sufficient; full Git DAG and past Actions evidence disappear on deletion. Then the owner must personally confirm and perform the irreversible private repository deletion. Do not interpret preliminary approval to migrate as authorization to delete.
+
+**Status:** private repo files are no longer an active bookshelf write path, but **final deletion is not yet authorized** while the ordinary GAS write permissions and external Google Cloud identities are not independently verified.

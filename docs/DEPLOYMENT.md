@@ -38,3 +38,11 @@ firebase deploy --only hosting --project kodomo-reading-shelf-87f11
 ## データ更新経路の別工程
 
 Sheets→GAS 更新キューの Stage A（コード・匿名テスト・Sheetsタブ準備）は実装済み。ただし GAS 書き込みはハードコードで無効、トリガーは未設定、受入は未実施。現状の同期は Firestore→Sheets の読み取りのみ。新しい GAS writer の権限・CAS・冪等性・監査を確認するまで旧 private writer を無効化しない。
+
+
+## Production acceptance record (2026-10-26)
+- After PR #5 merged to public main (`866aecd4`), the owner reported successfully running the documented `--only hosting` deployment using that pinned public commit. Device acceptance confirmed an owner reading-state edit.
+- The independent private read-only Firestore→Sheets mirror later contained the expected changed reading state and its `readingEditEvents` marker. This verifies persistence of that app edit; it does **not** prove the Firebase deployment's server-side release ID.
+- Subsequent public PR #3 integration (`a867a489`) adds **GAS/docs/test code only**, not deployable PWA assets; it does not require another Hosting redeploy.
+- Keep future public app updates separate from Firestore Rules, writer cutover, personal-data migration and other irreversible operations. Never deploy private archives to Hosting.
+- Prior Stage A-only assertions elsewhere in this file are historical, not current. GAS Stage L/M one-shot production acceptance passed; the general recurring writer remains **OFF** pending formal approval.

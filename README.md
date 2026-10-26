@@ -37,3 +37,11 @@ Firestore Rules のテストには Firebase CLI / Java とエミュレータが�
 ## Google Sheets 更新キュー（準備中）
 
 公開ソースと匿名のテストは gas/ に配置しています。書き込みゲートは無効のままで、既存のFirestore参照同期とprivate GitHub Actions書き込みは変更しません。手順・制限事項は gas/README.md を参照してください。
+
+
+## Current operating authority (2026-10-26)
+- The owner deployed the public PWA from a pinned public-main commit and accepted an actual owner-only reading status edit on a device. A subsequent read-only Firestore→Sheets mirror independently confirmed the change and an edit event. Public GitHub is now the authoritative PWA code repository.
+- **Firestore is the only current bookshelf data authority.** Private Google Sheets contains the read-only mirror, private update queue, and historical private-GitHub archives. Archived records must never be replayed into Firestore.
+- Real bookshelf data must **not** be sent to GitHub. Public CI is synthetic and must not have Firestore write credentials.
+- The GitHub Actions bookshelf-writer workflows were removed from the previous private repository and the earlier legacy repository. The normal GAS queue gate remains **disabled pending separate approval**; bounded GAS production proof is not an authorization for a scheduled writer.
+- The old private repository is pending **final deletion only after normal GAS operation and authorization review**. See [retirement readiness](docs/PRIVATE_REPO_RETIREMENT.md). GitHub backups are intentionally retired.

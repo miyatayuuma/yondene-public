@@ -13,13 +13,15 @@
  */
 const YONDENE_QUEUE = Object.freeze({
   sheet: '更新キュー',
+  settingsSheet: '設定',
   headers: ['コマンドID','登録時刻','操作','コマンドJSON','状態','処理日時',
     '結果コード','SHA256','試行回数','エラー概要'],
   maxRows: 3000,
   maxPendingPerRun: 10,
   maxCommandChars: 30000,
-  WRITE_ENABLED: false, // Stage A: permanently read-only until reviewed cutover.
-  ops: ['book.patch','series.patch'],
+  WRITE_ENABLED: false, // Stage C draft: write gate remains disabled.
+  ops: ['book.patch','series.patch','book.create','series.create',
+    'childRating.set','childReflection.create','catalog.audit'],
   bookFields: [
     'title','titleKana','author','authorKana','edition','originalAuthor','adaptedBy',
     'illustrator','translator','publisher','publicationYear','publicationDate','isbn',
@@ -29,7 +31,11 @@ const YONDENE_QUEUE = Object.freeze({
     'coverUrl','coverReferenceSource','coverEditionStatus','notes','editionNote','workType',
     'bibliographicSource','sourcePhotoNote','reportedAt'
   ],
-  seriesFields: ['name','note','totalVolumes']
+  seriesFields: ['name','note','totalVolumes'],
+  catalogFields: ['title','publicationYear','publicationDate','publicationYearBasis',
+    'isbn','isbnEditionStatus','pageCount','publisher','illustrator','translator',
+    'ageLabel','ageSource','volume','bibliographicSource','editionNote',
+    'coverUrl','coverReferenceSource','coverEditionStatus']
 });
 
 /** Explicit manual audit; never writes to Firestore or any Sheet cell. */
@@ -58,6 +64,17 @@ function yondeneQueueDryRun() {
         Logger.log('row=' + item.row + ' REVIEW ' + String(err.message || err).slice(0,300));
       }
     });
+    const setting=yondeneQueueSettingsCommand_(env);
+    if(setting) {
+      try {
+        const plan=yondeneQueuePreflight_(token,env,family,setting.parsed);
+        Logger.log('settings dry-run '+(plan.already?'ALREADY':'READY')+
+          ' name change (write disabled)');
+      } catch(err) {
+        conflicts++;
+        Logger.log('settings dry-run REVIEW: '+String(err.message||err).slice(0,300));
+      }
+    }
     Logger.log('queue dry-run pending=' + pending.length + ' ready=' + ready +
       ' review=' + conflicts + ' writeEnabled=' + YONDENE_QUEUE.WRITE_ENABLED);
     return {pending: pending.length, ready: ready, review: conflicts, writeEnabled: false};
@@ -67,6 +84,140 @@ function yondeneQueueDryRun() {
 }
 
 /** Not installed as a trigger. Hard-denied while WRITE_ENABLED is false. */
+/**
+ * Stage M: manual, single-command acceptance while the general writer stays OFF.
+ *
+ * The PRIVATE bound Apps Script project may define YONDENE_BOOK_PATCH_APPROVAL
+ * only after explicit approval of the exact field change. Do not put this
+ * object, book information, IDs, or JSON in PUBLIC GitHub. No trigger.
+ *
+ * Schema: {commandId,sourceDigest,bookId,field,previousValue,newValue,
+ *          expiresAt}. Only one nonempty bibliographic text field is accepted.
+ */
+function yondeneQueueOneShotBookPatchAuthorized_(parsed, approval) {
+  if (YONDENE_QUEUE.WRITE_ENABLED!==false ||
+      typeof YONDENE_BOOK_PATCH_APPROVAL==='undefined' ||
+      approval!==YONDENE_BOOK_PATCH_APPROVAL ||
+      !approval || typeof approval!=='object' || Array.isArray(approval))
+    return false;
+  const keys=['commandId','sourceDigest','bookId','field',
+    'previousValue','newValue','expiresAt'];
+  if (Object.keys(approval).sort().join(',')!==keys.slice().sort().join(','))
+    return false;
+  const c=parsed&&parsed.command;
+  if (!c||c.op!=='book.patch' ||
+      c.commandId!==approval.commandId ||
+      c.bookId!==approval.bookId ||
+      parsed.targetId!==approval.bookId ||
+      parsed.digest!==approval.sourceDigest ||
+      typeof approval.sourceDigest!=='string' ||
+      !/^[a-f0-9]{64}$/.test(approval.sourceDigest) ||
+      !['publisher','publicationDate','editionNote','ageLabel','ageSource',
+        'coverReferenceSource','coverEditionStatus','bibliographicSource']
+        .includes(approval.field) ||
+      typeof approval.previousValue!=='string' ||
+      typeof approval.newValue!=='string' ||
+      approval.previousValue===approval.newValue ||
+      Object.keys(c.patch||{}).length!==1 ||
+      c.patch[approval.field]!==approval.newValue)
+    return false;
+  // The acceptance expires automatically and cannot be kept armed indefinitely.
+  const expires=Date.parse(approval.expiresAt);
+  return typeof approval.expiresAt==='string' &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(approval.expiresAt) &&
+    Number.isFinite(expires) && expires>Date.now() &&
+    expires-Date.now()<=24*60*60*1000;
+}
+
+function yondeneQueueAcceptApprovedBookPatchOnce() {
+  if (YONDENE_QUEUE.WRITE_ENABLED!==false)
+    throw new Error('一般writerが有効です。限定受入を拒否します。');
+  if (typeof YONDENE_BOOK_PATCH_APPROVAL==='undefined')
+    throw new Error('非公開の1件限定承認設定がありません。');
+  const approval=YONDENE_BOOK_PATCH_APPROVAL;
+  const lock=LockService.getScriptLock();
+  if(!lock.tryLock(20000))throw new Error('別のGAS処理が実行中です。');
+  let item=null,parsed=null,commitAttempted=false;
+  try {
+    const env=yondeneQueueEnvironment_();
+    const pending=yondeneQueuePending_(env.sheet);
+    if(pending.length!==1)
+      throw new Error('PENDINGは承認済みの1件だけにしてください。');
+    item=pending[0];
+    if(item.cells.slice(5).some(function(x){return x!=='';}))
+      throw new Error('処理済み履歴のある行は実行できません。');
+    parsed=yondeneQueueParse_(item.cells);
+    if(!yondeneQueueOneShotBookPatchAuthorized_(parsed,approval))
+      throw new Error('コマンド・承認digest・対象フィールド・期限が不一致。');
+    const settings=yondeneQueueSettingsCommand_(env);
+    if(settings)throw new Error('本棚名の変更依頼が残っています。');
+    const token=ScriptApp.getOAuthToken();
+    const bookPath=env.familyPath+'/books/'+approval.bookId;
+    const before=yondeneQueueDocument_(token,bookPath);
+    if(!before || yondeneField_(before,'title')!==parsed.command.expectedTitle ||
+        yondeneQueueRevision_(before)!==parsed.command.expectedUpdatedAt ||
+        yondeneField_(before,approval.field)!==approval.previousValue)
+      throw new Error('対象書籍の更新前条件が変化しています。');
+    // Re-read row: the exact approved payload must remain unchanged.
+    if(JSON.stringify(env.sheet.getRange(item.row,1,1,10).getDisplayValues()[0])!==
+       JSON.stringify(item.cells))throw new Error('キュー行が変更されました。');
+    commitAttempted=true; // Any subsequent exception requires reconciliation.
+    const outcome=yondeneQueueApplyTransaction_(token,env,parsed,approval);
+    const marker=yondeneQueueDocument_(
+      token,env.familyPath+'/chatgptMutations/'+approval.commandId);
+    const after=yondeneQueueDocument_(token,bookPath);
+    if(!marker || yondeneField_(marker,'sourceDigest')!==parsed.digest ||
+        yondeneField_(marker,'op')!=='book.patch' || !after ||
+        yondeneField_(after,approval.field)!==approval.newValue)
+      throw new Error('SCOPED_UNCERTAIN: 永続マーカーまたは更新値の照合失敗。');
+    const allowed=new Set([approval.field,'updatedAt']);
+    const oldFields=before.fields||{},newFields=after.fields||{};
+    const same=function(x,y){return JSON.stringify(x)===JSON.stringify(y);};
+    // Legacy records may lack updatedAt: creating that operational field is
+    // permitted, but all *other* pre-existing fields must be byte-identical.
+    if(!same(Object.keys(oldFields).filter(function(k){return k!=='updatedAt';}).sort(),
+             Object.keys(newFields).filter(function(k){return k!=='updatedAt';}).sort()) ||
+       Object.keys(newFields).some(function(k){
+         return !allowed.has(k)&&!same(oldFields[k],newFields[k]);
+       }) || before.createTime!==after.createTime ||
+       yondeneField_(after,'updatedAt')===parsed.command.expectedUpdatedAt)
+      throw new Error('SCOPED_UNCERTAIN: 承認外フィールドの差分がありました。');
+    if(JSON.stringify(env.sheet.getRange(item.row,1,1,10).getDisplayValues()[0])!==
+       JSON.stringify(item.cells))throw new Error('SCOPED_UNCERTAIN: キュー行が変化。');
+    env.sheet.getRange(item.row,5,1,6).setValues([[
+      outcome==='ALREADY'?'ALREADY':'APPLIED',new Date().toISOString(),
+      outcome==='ALREADY'?'MARKER_MATCH':'COMMIT_OK',
+      parsed.digest,1,''
+    ]]);
+    SpreadsheetApp.flush();
+    Logger.log('SCOPED_BOOK_PATCH_PASS: commandId='+approval.commandId+
+      ' writes=1 marker=1 generalWriterEnabled=false');
+    return {status:'PASS',outcome:outcome,commandId:approval.commandId};
+  } catch(err) {
+    // Preflight rejection leaves PENDING for manual correction. Once a commit
+    // may have been sent, freeze the row as REVIEW; never automatically retry.
+    if(commitAttempted&&item){
+      try {
+        const env=yondeneQueueEnvironment_();
+        env.sheet.getRange(item.row,5,1,6).setValues([[
+          'REVIEW',new Date().toISOString(),'SCOPED_COMMIT_UNCERTAIN',
+          parsed?parsed.digest:'',1,'再実行禁止。マーカーと書籍を独立照合。'
+        ]]);
+        SpreadsheetApp.flush();
+      } catch(e){Logger.log('SCOPED_UNCERTAIN: queue reconciliation needed');}
+    }
+    throw err;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** Separate gates for normal writer vs the bounded, approved one-shot. */
+function yondeneQueueWriteGate_(parsed,approval) {
+  if(YONDENE_QUEUE.WRITE_ENABLED) return true;
+  return yondeneQueueOneShotBookPatchAuthorized_(parsed,approval);
+}
+
 function yondeneQueueProcess() {
   if (!YONDENE_QUEUE.WRITE_ENABLED)
     throw new Error('GAS書き込みは未承認・無効です。キュー監査のみ実行できます。');
@@ -83,20 +234,15 @@ function yondeneQueueProcess() {
       try {
         const cmd = yondeneQueueParse_(item.cells);
         digest = cmd.digest;
-        const plan = yondeneQueuePreflight_(token, env, family, cmd);
-        if (plan.already) {
-          state = 'ALREADY'; code = 'MARKER_MATCH'; already++;
+        const result = yondeneQueueApplyTransaction_(token,env,cmd);
+        if(result==='APPLIED') {
+          state='APPLIED';code='COMMIT_OK';applied++;
         } else {
-          const result = yondeneQueueCommit_(token, env, cmd, plan);
-          if (result === 'APPLIED') {
-            state = 'APPLIED'; code = 'COMMIT_OK'; applied++;
-          } else {
-            state = 'ALREADY'; code = 'MARKER_MATCH_AFTER_COMMIT'; already++;
-          }
+          state='ALREADY';code='MARKER_MATCH';already++;
         }
       } catch (err) {
         review++;
-        code = /^競合:/.test(String(err.message || err)) ? 'PRECONDITION_CONFLICT' : 'MANUAL_REVIEW';
+        code = /^(競合:|Firestore commit HTTP (409|412))/.test(String(err.message || err)) ? 'PRECONDITION_CONFLICT' : 'MANUAL_REVIEW';
         if (code === 'PRECONDITION_CONFLICT') state = 'CONFLICT';
         detail = String(err.message || err).slice(0,280);
         // A timed-out commit may have succeeded: never retry blind.
@@ -106,10 +252,61 @@ function yondeneQueueProcess() {
       ]]);
       SpreadsheetApp.flush();
     });
-    return {applied: applied, already: already, review: review};
+    let settingsResult='NO_CHANGE';
+    try {settingsResult=yondeneQueueProcessSettings_(token,env);}
+    catch(err) {
+      settingsResult='REVIEW';
+      Logger.log('settings write REVIEW: '+String(err.message||err).slice(0,300));
+    }
+    return {applied:applied,already:already,review:review,settings:settingsResult};
   } finally {
     lock.releaseLock();
   }
+}
+
+function yondeneQueueSettingsCommand_(env) {
+  const ss=SpreadsheetApp.openById(YONDENE.spreadsheetId);
+  const sheet=ss.getSheetByName(YONDENE_QUEUE.settingsSheet);
+  if(!sheet) throw new Error('設定シートが存在しません。');
+  const rows=sheet.getRange(1,1,2,3).getDisplayValues();
+  if(JSON.stringify(rows[0])!==JSON.stringify([
+    '項目','変更後の名前（入力）','確認済みの名前'
+  ]) || rows[1][0]!=='本棚名') throw new Error('設定シートの構造が不正です。');
+  const desired=String(rows[1][1]||''),current=String(rows[1][2]||'');
+  function valid(s){return s.trim()===s&&s.length>=1&&s.length<=80&&
+    !/[\u0000-\u001f\u007f]/.test(s);}
+  if(!valid(desired)||!valid(current))
+    throw new Error('本棚名は1〜80文字、前後空白・制御文字なしで入力してください。');
+  if(desired===current) return null;
+  const fingerprint=yondeneSha256_(JSON.stringify([
+    env.familyId,current,desired
+  ]));
+  const command={
+    schemaVersion:1,commandId:'shelf-name-'+fingerprint.slice(0,40),
+    op:'family.rename',expectedName:current,newName:desired,
+    reason:'非公開の設定シートから本棚名を変更'
+  };
+  return {sheet:sheet,desired:desired,
+    parsed:{command:command,
+      digest:yondeneSha256_(JSON.stringify(command)),targetId:env.familyId}};
+}
+
+function yondeneQueueProcessSettings_(token,env) {
+  if(!YONDENE_QUEUE.WRITE_ENABLED)
+    throw new Error('GAS書き込みは未承認・無効です。');
+  const setting=yondeneQueueSettingsCommand_(env);
+  if(!setting) return 'NO_CHANGE';
+  // The setting's original value must agree with Firestore inside the transaction.
+  // A matching immutable marker safely completes a Sheet update after a crash.
+  const result=yondeneQueueApplyTransaction_(token,env,setting.parsed);
+  if(result==='APPLIED'||result==='ALREADY') {
+    const verified=yondeneQueueDocument_(token,env.familyPath);
+    if(!verified||yondeneField_(verified,'name')!==setting.desired)
+      throw new Error('本棚名の永続化を検証できません。設定の確認済み値は更新しません。');
+    setting.sheet.getRange('C2').setValue(setting.desired);
+    SpreadsheetApp.flush();
+  }
+  return result;
 }
 
 function yondeneQueueEnvironment_() {
@@ -156,77 +353,211 @@ function yondeneQueuePending_(sheet) {
 }
 
 function yondeneQueueParse_(cells) {
-  const commandId = String(cells[0]).trim();
-  const op = String(cells[2]).trim();
-  const raw = String(cells[3]);
-  if (!raw || raw.length > YONDENE_QUEUE.maxCommandChars)
+  const commandId=String(cells[0]).trim(), op=String(cells[2]).trim();
+  const raw=String(cells[3]);
+  if (!raw || raw.length>YONDENE_QUEUE.maxCommandChars)
     throw new Error('コマンドJSONの長さが不正です。');
-  let command;
-  try { command = JSON.parse(raw); } catch(e) { throw new Error('コマンドJSONを解析できません。'); }
-  if (!command || typeof command !== 'object' || Array.isArray(command))
+  let c;
+  try { c=JSON.parse(raw); } catch(e) { throw new Error('コマンドJSONを解析できません。'); }
+  if (!c || typeof c!=='object' || Array.isArray(c))
     throw new Error('コマンドJSONはオブジェクトが必要です。');
-  const names = ['schemaVersion','commandId','op','bookId','seriesId',
-    'expectedTitle','expectedName','expectedUpdatedAt','patch','reason'];
-  Object.keys(command).forEach(function(key) {
-    if (names.indexOf(key) === -1) throw new Error('未知のコマンド項目: ' + key);
+  const allowed=['schemaVersion','commandId','op','bookId','seriesId','expectedTitle',
+    'expectedName','expectedUpdatedAt','patch','book','series','stars','quote',
+    'attribution','observedAt','reason','entries'];
+  Object.keys(c).forEach(function(key){
+    if (allowed.indexOf(key)===-1) throw new Error('未知のコマンド項目: '+key);
   });
-  if (command.schemaVersion !== 1 || command.commandId !== commandId ||
-      command.op !== op || YONDENE_QUEUE.ops.indexOf(op) === -1)
+  if (c.schemaVersion!==1 || c.commandId!==commandId ||
+      c.op!==op || YONDENE_QUEUE.ops.indexOf(op)===-1)
     throw new Error('コマンドID/操作/バージョンが一致しないか、未対応です。');
-  if (typeof command.reason !== 'string' || !command.reason.trim() ||
-      command.reason.length > 800) throw new Error('更新理由が必要です。');
-  if (typeof command.expectedUpdatedAt !== 'string' ||
-      !command.expectedUpdatedAt || command.expectedUpdatedAt.length > 40)
-    throw new Error('expectedUpdatedAtが必要です。');
-  const id = op === 'book.patch' ? command.bookId : command.seriesId;
-  if (typeof id !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(id))
+  if (typeof c.reason!=='string' || !c.reason.trim() || c.reason.length>800)
+    throw new Error('更新理由が必要です。');
+  // Never reuse a historical GitHub command ID: raw-file and parsed-JSON
+  // SHA-256 digests deliberately use different contracts.
+  if(!/^gas-[A-Za-z0-9][A-Za-z0-9._-]{0,123}$/.test(c.commandId))
+    throw new Error('新規GASキューのコマンドIDはgas-で始めてください。');
+  if(op==='catalog.audit') {
+    if(Object.keys(c).some(function(key){
+      return ['schemaVersion','commandId','op','reason','entries'].indexOf(key)===-1;
+    })) throw new Error('書誌監査に余分な項目があります。');
+    yondeneQueueValidateCatalogAudit_(c.entries);
+    return {command:c,digest:yondeneSha256_(JSON.stringify(c)),targetId:'catalog'};
+  }
+  if(c.entries!==undefined) throw new Error('書誌監査以外にentriesは指定できません。');
+  const bookOp=op.startsWith('book.') || op==='childRating.set' || op==='childReflection.create';
+  const id=bookOp?c.bookId:c.seriesId;
+  if (typeof id!=='string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(id))
     throw new Error('対象IDが不正です。');
-  if (op === 'book.patch' && command.seriesId !== undefined)
-    throw new Error('book.patchのトップレベルseriesIdは禁止です。');
-  if (op === 'series.patch' && command.bookId !== undefined)
-    throw new Error('series.patchのbookIdは禁止です。');
-  if (op === 'book.patch' && (typeof command.expectedTitle !== 'string' ||
-      !command.expectedTitle.trim() || command.expectedName !== undefined))
-    throw new Error('expectedTitleが必要です。');
-  if (op === 'series.patch' && (typeof command.expectedName !== 'string' ||
-      !command.expectedName.trim() || command.expectedTitle !== undefined))
-    throw new Error('expectedNameが必要です。');
-  const patch = command.patch;
-  if (!patch || typeof patch !== 'object' || Array.isArray(patch) ||
-      !Object.keys(patch).length) throw new Error('空のpatchは禁止です。');
-  const allowed = op === 'book.patch' ? YONDENE_QUEUE.bookFields : YONDENE_QUEUE.seriesFields;
-  Object.keys(patch).forEach(function(key) {
-    if (allowed.indexOf(key) === -1) throw new Error('変更不可フィールド: ' + key);
-    const value = patch[key];
-    if (['publicationYear','pageCount','volume','readOrder','totalVolumes'].indexOf(key)!==-1) {
-      if (value !== null && (!Number.isSafeInteger(value)||value<1||value>999999))
-        throw new Error(key + 'は正の整数またはnullが必要です。');
-    } else if (typeof value !== 'string' || value.length > 120000)
-      throw new Error(key + 'は文字列が必要です。');
+  if (bookOp && c.seriesId!==undefined)
+    throw new Error('seriesIdはbook内に格納してください。');
+  if (!bookOp && c.bookId!==undefined) throw new Error('series操作にbookIdは禁止です。');
+
+  const create=op==='book.create'||op==='series.create';
+  const patch=op==='book.patch'||op==='series.patch';
+  if (create) {
+    if (c.expectedUpdatedAt!==undefined || c.expectedTitle!==undefined ||
+        c.expectedName!==undefined || c.patch!==undefined ||
+        c.stars!==undefined || c.quote!==undefined ||
+        c.attribution!==undefined || c.observedAt!==undefined)
+      throw new Error('新規登録には更新前条件・patchを付与しないでください。');
+    if ((op==='book.create' && c.series!==undefined) ||
+        (op==='series.create' && c.book!==undefined))
+      throw new Error('新規登録の対象データが不正です。');
+    const data=op==='book.create'?c.book:c.series;
+    yondeneQueueValidateValues_(data,op==='book.create'?
+      YONDENE_QUEUE.bookFields:YONDENE_QUEUE.seriesFields);
+    if (op==='book.create') {
+      if (typeof data.title!=='string'||!data.title.trim())
+        throw new Error('書名は必須です。');
+      if (['read','reading','paused','unread'].indexOf(data.status)===-1)
+        throw new Error('状態が不正です。');
+      if (data.status==='read' && !yondeneQueueExplicitCompletion_(data))
+        throw new Error('読了時期を明示してください。報告日から推測しません。');
+      if (data.status!=='read' && yondeneQueueExplicitCompletion_(data))
+        throw new Error('未読了の本には読了時期を設定できません。');
+      if (!data.coverUrl) throw new Error('書影URLを確認してください。');
+    } else if (typeof data.name!=='string'||!data.name.trim())
+      throw new Error('シリーズ名は必須です。');
+  } else if (patch) {
+    if (c.book!==undefined || c.series!==undefined || c.stars!==undefined ||
+        c.quote!==undefined || c.attribution!==undefined || c.observedAt!==undefined)
+      throw new Error('patchに余分なペイロードがあります。');
+    if (typeof c.expectedUpdatedAt!=='string' || !c.expectedUpdatedAt ||
+        c.expectedUpdatedAt.length>40)
+      throw new Error('expectedUpdatedAtが必要です。');
+    if (op==='book.patch') {
+      if (typeof c.expectedTitle!=='string'||!c.expectedTitle.trim()||
+          c.expectedName!==undefined)
+        throw new Error('expectedTitleが必要です。');
+    } else {
+      if (typeof c.expectedName!=='string'||!c.expectedName.trim()||
+          c.expectedTitle!==undefined)
+        throw new Error('expectedNameが必要です。');
+    }
+    yondeneQueueValidateValues_(c.patch,op==='book.patch'?
+      YONDENE_QUEUE.bookFields:YONDENE_QUEUE.seriesFields);
+  } else {
+    if (c.book!==undefined||c.series!==undefined||c.patch!==undefined||
+        c.expectedUpdatedAt!==undefined||c.expectedName!==undefined)
+      throw new Error('子どもの記録コマンドに余分な項目があります。');
+    if (typeof c.expectedTitle!=='string'||!c.expectedTitle.trim()||
+        c.expectedTitle.length>250)
+      throw new Error('書名の事前条件が必要です。');
+    if (op==='childRating.set') {
+      if (c.quote!==undefined||c.attribution!==undefined||c.observedAt!==undefined||
+          !Number.isInteger(c.stars)||c.stars<1||c.stars>5)
+        throw new Error('星評価は1〜5のみです。');
+    } else {
+      if (c.stars!==undefined || typeof c.quote!=='string'||
+          !c.quote.trim()||c.quote.length>3000 ||
+          ['verbatim','parent-summary'].indexOf(c.attribution)===-1)
+        throw new Error('感想本文と記録区分が必要です。');
+      if (c.observedAt!==undefined &&
+          (typeof c.observedAt!=='string'||c.observedAt.length>100))
+        throw new Error('観察時期が不正です。');
+    }
+  }
+  return {command:c,digest:yondeneSha256_(JSON.stringify(c)),targetId:id};
+}
+
+/**
+ * Bibliographic-only multi-record audit. Identity edits (title/ISBN) must use
+ * a dedicated book.patch with full transactional duplicate checks.
+ */
+function yondeneQueueValidateCatalogAudit_(entries) {
+  if(!Array.isArray(entries)||entries.length<1||entries.length>50)
+    throw new Error('書誌監査は1〜50件で指定してください。');
+  const seen={};
+  entries.forEach(function(e){
+    if(!e||typeof e!=='object'||Array.isArray(e)||
+       Object.keys(e).some(function(k){
+         return ['id','expectedTitle','patch','expected'].indexOf(k)===-1;
+       })) throw new Error('書誌監査の項目が不正です。');
+    if(typeof e.id!=='string'||!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(e.id)||
+       seen[e.id]) throw new Error('書誌監査のIDが重複または不正です。');
+    seen[e.id]=true;
+    if(typeof e.expectedTitle!=='string'||!e.expectedTitle.trim())
+      throw new Error('書誌監査の照合書名が必要です。');
+    if(!e.patch||typeof e.patch!=='object'||Array.isArray(e.patch)||
+       !Object.keys(e.patch).length)
+      throw new Error('書誌監査の修正項目が必要です。');
+    Object.keys(e.patch).forEach(function(key){
+      const value=e.patch[key];
+      if(YONDENE_QUEUE.catalogFields.indexOf(key)===-1 ||
+         key==='title'||key==='isbn')
+        throw new Error('書誌監査では変更不可: '+key+'。書籍IDで個別訂正してください。');
+      if(['publicationYear','pageCount','volume'].indexOf(key)!==-1) {
+        if(!Number.isSafeInteger(value)||value<1||value>999999)
+          throw new Error('書誌監査の数値が不正です。');
+      } else if(typeof value!=='string'||value.length>1800)
+        throw new Error('書誌監査の文字列が不正です。');
+      if(key==='publicationDate' && !/^\d{4}-\d{2}(?:-\d{2})?$/.test(value))
+        throw new Error('出版日の形式が不正です。');
+      if(['bibliographicSource','coverUrl'].indexOf(key)!==-1 &&
+         !/^https:\/\//.test(value)) throw new Error('書誌出典はHTTPSが必要です。');
+      if(key==='publicationYearBasis' &&
+         ['reference-edition','photo-confirmed-edition'].indexOf(value)===-1)
+        throw new Error('出版年の根拠が不正です。');
+      if(key==='isbnEditionStatus' &&
+         ['reference-edition-unverified','photo-confirmed'].indexOf(value)===-1)
+        throw new Error('ISBN版の状態が不正です。');
+    });
+    if(e.expected!==undefined) {
+      if(!e.expected||typeof e.expected!=='object'||Array.isArray(e.expected))
+        throw new Error('期待値が不正です。');
+      Object.keys(e.expected).forEach(function(key){
+        if(YONDENE_QUEUE.catalogFields.indexOf(key)===-1)
+          throw new Error('書誌監査の期待値項目が不正です。');
+        const value=e.expected[key];
+        if(typeof value!=='string'&&typeof value!=='number'&&value!==null)
+          throw new Error('書誌監査の期待値の型が不正です。');
+      });
+    }
   });
-  if (patch.status !== undefined &&
-      ['read','reading','paused','unread'].indexOf(patch.status) === -1)
+}
+
+function yondeneQueueValidateValues_(data,allowed) {
+  if (!data||typeof data!=='object'||Array.isArray(data)||
+      !Object.keys(data).length) throw new Error('登録・更新データが空です。');
+  Object.keys(data).forEach(function(key){
+    if (allowed.indexOf(key)===-1) throw new Error('変更不可フィールド: '+key);
+    const value=data[key];
+    if (['publicationYear','pageCount','volume','readOrder','totalVolumes'].indexOf(key)!==-1) {
+      if (value!==null && (!Number.isSafeInteger(value)||value<1||value>999999))
+        throw new Error(key+'は正の整数またはnullが必要です。');
+    } else if (typeof value!=='string'||value.length>120000)
+      throw new Error(key+'は文字列が必要です。');
+  });
+  if (data.status!==undefined &&
+      ['read','reading','paused','unread'].indexOf(data.status)===-1)
     throw new Error('読書状態が無効です。');
-  if (patch.coverUrl && !/^https:\/\//i.test(patch.coverUrl) &&
-      !/^data:image\/(?:jpeg|png|webp);base64,/i.test(patch.coverUrl))
+  if (data.coverUrl && !/^https:\/\//i.test(data.coverUrl)&&
+      !/^data:image\/(?:jpeg|png|webp);base64,/i.test(data.coverUrl))
     throw new Error('coverUrlが不正です。');
-  if (patch.finishedAt && !/^\d{4}-(0[1-9]|1[0-2])(-([0-2]\d|3[01]))?$/.test(patch.finishedAt))
+  if (data.finishedAt && !/^\d{4}-(0[1-9]|1[0-2])$/.test(data.finishedAt) &&
+      !yondeneQueueCalendarDate_(data.finishedAt))
     throw new Error('finishedAtの形式が不正です。');
-  if (patch.reportedAt && !yondeneQueueCalendarDate_(patch.reportedAt))
+  if (data.reportedAt!==undefined && !yondeneQueueCalendarDate_(data.reportedAt))
     throw new Error('reportedAtが不正です。');
   ['finishedPeriodStart','finishedPeriodEnd'].forEach(function(key){
-    if (patch[key] && !/^\d{4}-(0[1-9]|1[0-2])$/.test(patch[key]))
+    if (data[key]&&!/^\d{4}-(0[1-9]|1[0-2])$/.test(data[key]))
       throw new Error(key+'はYYYY-MMが必要です。');
   });
-  if (patch.finishedPeriodStart && patch.finishedPeriodEnd &&
-      patch.finishedPeriodStart > patch.finishedPeriodEnd)
+  if (data.finishedPeriodStart&&data.finishedPeriodEnd&&
+      data.finishedPeriodStart>data.finishedPeriodEnd)
     throw new Error('読了期間が逆転しています。');
-  if (Object.prototype.hasOwnProperty.call(patch,'title') && !patch.title.trim())
+  if (Object.prototype.hasOwnProperty.call(data,'title')&&!data.title.trim())
     throw new Error('書名は空にできません。');
-  if (Object.prototype.hasOwnProperty.call(patch,'name') && !patch.name.trim())
+  if (Object.prototype.hasOwnProperty.call(data,'name')&&!data.name.trim())
     throw new Error('シリーズ名は空にできません。');
-  // Digest reflects the canonical parsed JSON, not arbitrary cell whitespace.
-  return {command:command, digest:yondeneSha256_(JSON.stringify(command)), targetId:id};
+}
+
+function yondeneQueueExplicitCompletion_(data) {
+  // A report date is a distinct fact and never proves when completion occurred.
+  return ['finishedAt','finishedPeriodLabel','finishedPeriodStart',
+    'finishedPeriodEnd'].some(function(key) {
+      return typeof data[key]==='string' && data[key].trim().length>0;
+    });
 }
 
 function yondeneQueueCalendarDate_(s) {
@@ -236,6 +567,79 @@ function yondeneQueueCalendarDate_(s) {
   return !isNaN(t.getTime()) && t.toISOString().slice(0,10) === s;
 }
 
+function yondeneQueueWithoutStaleProgressNotes_(value) {
+  if(typeof value!=='string'||!value) return value;
+  const pieces=value.split(/(?<=。)|(?<=\n)/u);
+  const progress=/^(?:(?:約\s*)?\d{1,3}(?:\.\d+)?\s*[%％](?:(?:まで)?(?:進行中|読書中|読んだ|読み進めた|進捗))?|半分まで(?:読んだ|読み進めた)|進捗は保護者による概算|読書中|読み始めた)。?$/u;
+  return pieces.filter(function(part){return !progress.test(part.trim());}).join('').trim();
+}
+
+function yondeneQueueDocumentName_(path) {
+  return 'projects/'+YONDENE.project+'/databases/(default)/documents/'+path;
+}
+
+function yondeneQueueDatabaseUrl_() {
+  return 'https://firestore.googleapis.com/v1/projects/' +
+    encodeURIComponent(YONDENE.project)+'/databases/(default)/documents';
+}
+
+function yondeneQueueBeginTransaction_(token) {
+  const response=UrlFetchApp.fetch(yondeneQueueDatabaseUrl_()+':beginTransaction',{
+    method:'post',contentType:'application/json',payload:'{}',
+    headers:{Authorization:'Bearer '+token},muteHttpExceptions:true
+  });
+  if(response.getResponseCode()!==200)
+    throw new Error('Firestore beginTransaction HTTP '+response.getResponseCode());
+  const transaction=JSON.parse(response.getContentText()).transaction;
+  if(typeof transaction!=='string'||!transaction||transaction.length>8192)
+    throw new Error('Firestore transaction IDの取得に失敗しました。');
+  return transaction;
+}
+
+function yondeneQueueRollback_(token,transaction) {
+  const response=UrlFetchApp.fetch(yondeneQueueDatabaseUrl_()+':rollback',{
+    method:'post',contentType:'application/json',
+    payload:JSON.stringify({transaction:transaction}),
+    headers:{Authorization:'Bearer '+token},muteHttpExceptions:true
+  });
+  if(response.getResponseCode()!==200)
+    throw new Error('Firestore rollback HTTP '+response.getResponseCode());
+}
+
+function yondeneQueueApplyTransaction_(token,env,parsed,approval) {
+  if(!yondeneQueueWriteGate_(parsed,approval))
+    throw new Error('GAS書き込みは未承認・無効です。');
+  const transaction=yondeneQueueBeginTransaction_(token);
+  let commitAttempted=false;
+  try {
+    const family=yondeneQueueDocument_(token,env.familyPath,transaction);
+    if(!family) throw new Error('家族ドキュメントが存在しません。');
+    const plan=yondeneQueuePreflight_(token,env,family,parsed,transaction);
+    if(plan.already) return 'ALREADY';
+    if (approval) {
+      // Verify previous value again inside the same Firestore transaction:
+      // currentDocument.updateTime enforces it atomically at commit.
+      const actual=yondeneQueueDocument_(
+        token,env.familyPath+'/books/'+approval.bookId,transaction);
+      if(!actual || yondeneField_(actual,approval.field)!==approval.previousValue)
+        throw new Error('限定受入の変更前フィールドが変化しました。');
+      const keys=Object.keys(plan.updates||{}).sort().join(',');
+      if(plan.action!=='patch' ||
+          plan.recordPath!==env.familyPath+'/books/'+approval.bookId ||
+          keys!==[approval.field,'updatedAt'].sort().join(',') ||
+          plan.updates[approval.field]!==approval.newValue)
+        throw new Error('限定承認の変更フィールドと実行プランが不一致。');
+    }
+    commitAttempted=true;
+    return yondeneQueueCommit_(token,env,parsed,plan,transaction,approval);
+  } finally {
+    if(!commitAttempted) {
+      try {yondeneQueueRollback_(token,transaction);}
+      catch(err){Logger.log('rollback warning: '+String(err.message||err).slice(0,160));}
+    }
+  }
+}
+
 function yondeneQueueFamily_(env, token) {
   const family = yondeneFirestoreRequest_(token, env.familyPath, 'GET', null, Date.now());
   if (yondeneField_(family,'ownerUid') !== env.ownerUid)
@@ -243,10 +647,11 @@ function yondeneQueueFamily_(env, token) {
   return family;
 }
 
-function yondeneQueueDocument_(token, path) {
+function yondeneQueueDocument_(token, path, transaction) {
   const url = 'https://firestore.googleapis.com/v1/projects/' +
     encodeURIComponent(YONDENE.project) + '/databases/(default)/documents/' +
-    path.split('/').map(encodeURIComponent).join('/');
+    path.split('/').map(encodeURIComponent).join('/') +
+    (transaction?'?transaction='+encodeURIComponent(transaction):'');
   const response = UrlFetchApp.fetch(url,{
     method:'get',headers:{Authorization:'Bearer '+token},muteHttpExceptions:true
   });
@@ -256,113 +661,344 @@ function yondeneQueueDocument_(token, path) {
   return JSON.parse(response.getContentText());
 }
 
-function yondeneQueuePreflight_(token, env, family, parsed) {
+function yondeneQueueQuery_(token, familyPath, collection, field, value, limit, transaction) {
+  const parent='https://firestore.googleapis.com/v1/projects/' +
+    encodeURIComponent(YONDENE.project)+'/databases/(default)/documents/' +
+    familyPath.split('/').map(encodeURIComponent).join('/')+':runQuery';
+  const payload={structuredQuery:{
+    from:[{collectionId:collection}],
+    where:{fieldFilter:{field:{fieldPath:field},op:'EQUAL',value:{stringValue:value}}},
+    limit:limit
+  }};
+  if(transaction) payload.transaction=transaction;
+  const response=UrlFetchApp.fetch(parent,{
+    method:'post',contentType:'application/json',
+    headers:{Authorization:'Bearer '+token},payload:JSON.stringify(payload),
+    muteHttpExceptions:true
+  });
+  if(response.getResponseCode()!==200)
+    throw new Error('Firestore query failed HTTP '+response.getResponseCode());
+  const entries=JSON.parse(response.getContentText());
+  if (!Array.isArray(entries)) throw new Error('Firestore queryの応答形式が不正です。');
+  return entries.filter(function(x){return x.document;}).map(function(x){return x.document;});
+}
+
+function yondeneQueueRevision_(record) {
+  const explicit=yondeneField_(record,'updatedAt');
+  if(explicit) return explicit;
+  if(record && typeof record.updateTime==='string' &&
+      /^\d{4}-\d{2}-\d{2}T/.test(record.updateTime))
+    return record.updateTime;
+  throw new Error('Firestoreの更新リビジョンを確認できません。');
+}
+
+function yondeneQueuePreflight_(token, env, family, parsed, transaction) {
   if (yondeneField_(family,'ownerUid')!==env.ownerUid)
     throw new Error('family ownerが変化しました。');
   const c=parsed.command;
   const markerPath=env.familyPath+'/chatgptMutations/'+c.commandId;
-  const marker=yondeneQueueDocument_(token,markerPath);
+  const marker=yondeneQueueDocument_(token,markerPath,transaction);
   if (marker) {
     if (yondeneField_(marker,'sourceDigest')!==parsed.digest)
       throw new Error('同一コマンドIDの適用証跡とダイジェストが不一致です。');
     return {already:true};
   }
+  if(c.op==='family.rename') {
+    if(yondeneField_(family,'name')!==c.expectedName)
+      throw new Error('競合: Firestoreの本棚名が変更されています。');
+    if(!family.updateTime) throw new Error('家族文書のupdateTimeがありません。');
+    return {already:false,action:'patch',recordPath:env.familyPath,
+      recordUpdateTime:family.updateTime,markerPath:markerPath,
+      updates:{name:c.newName}};
+  }
+  if(c.op==='catalog.audit') {
+    const patches=[],now=new Date().toISOString();
+    c.entries.forEach(function(e){
+      const path=env.familyPath+'/books/'+e.id;
+      const record=yondeneQueueDocument_(token,path,transaction);
+      if(!record||yondeneField_(record,'title')!==e.expectedTitle)
+        throw new Error('書誌監査の書籍ID・書名が一致しません。');
+      if(!record.updateTime)
+        throw new Error('書誌監査の更新時刻を取得できません。');
+      const delta={};
+      Object.keys(e.patch).forEach(function(key){
+        const field=(record.fields||{})[key];
+        let before;
+        if(!field) before=undefined;
+        else if(Object.prototype.hasOwnProperty.call(field,'stringValue'))
+          before=field.stringValue;
+        else if(Object.prototype.hasOwnProperty.call(field,'integerValue'))
+          before=Number(field.integerValue);
+        else if(Object.prototype.hasOwnProperty.call(field,'nullValue'))
+          before=null;
+        else throw new Error('書誌監査で未対応の既存データ型です。');
+        const after=e.patch[key];
+        if(before===after) return;
+        if(before!==undefined&&before!==null&&before!=='' &&
+           (!e.expected||!Object.prototype.hasOwnProperty.call(e.expected,key)||
+            e.expected[key]!==before))
+          throw new Error('書誌監査の既存値が変わっています。');
+        delta[key]=after;
+      });
+      if(Object.keys(delta).length) {
+        delta.updatedAt=now;
+        patches.push({recordPath:path,recordUpdateTime:record.updateTime,updates:delta});
+      }
+    });
+    return {already:false,action:'multi-patch',markerPath:markerPath,
+      patches:patches,markerExtra:{entryCount:c.entries.length,updatedCount:patches.length}};
+  }
+  if (c.op==='book.create'||c.op==='series.create') {
+    const isBook=c.op==='book.create';
+    const collection=isBook?'books':'series';
+    const recordPath=env.familyPath+'/'+collection+'/'+parsed.targetId;
+    if (yondeneQueueDocument_(token,recordPath,transaction))
+      throw new Error('対象IDの文書がすでに存在します。');
+    const data=Object.assign({},isBook?c.book:c.series);
+    const now=new Date().toISOString();
+    if(isBook) {
+      const sameTitle=yondeneQueueQuery_(token,env.familyPath,'books','title',data.title,10,transaction);
+      if(sameTitle.length===10)
+        throw new Error('同じ書名の本が多すぎます。版の照合が必要です。');
+      if(sameTitle.some(function(doc){
+        return yondeneField_(doc,'author')===(data.author||'');
+      })) throw new Error('同名・同著者の本が登録済みです。');
+      if(data.isbn) {
+        const sameIsbn=yondeneQueueQuery_(token,env.familyPath,'books','isbn',data.isbn,2,transaction);
+        if(sameIsbn.length) throw new Error('同じISBNの本が登録済みです。');
+      }
+      if(data.seriesId&&!yondeneQueueDocument_(token,env.familyPath+'/series/'+data.seriesId,transaction))
+        throw new Error('参照するシリーズがありません。');
+      // Never infer completion from the day the parent reported the book.
+      if(data.status==='read' && typeof data.notes==='string')
+        data.notes=yondeneQueueWithoutStaleProgressNotes_(data.notes);
+      if(!data.finishedAt)data.finishedAt='';
+      if(!data.seriesId)data.seriesId='';
+      data.id=parsed.targetId;
+      data.createdAt=now;
+    } else {
+      const sameName=yondeneQueueQuery_(token,env.familyPath,'series','name',data.name,2,transaction);
+      if(sameName.length) throw new Error('同名のシリーズが登録済みです。');
+      data.id=parsed.targetId;
+    }
+    data.updatedAt=now;
+    return {already:false,action:'create',recordPath:recordPath,markerPath:markerPath,
+      updates:data};
+  }
+  if (c.op==='childRating.set'||c.op==='childReflection.create') {
+    const book=yondeneQueueDocument_(token,env.familyPath+'/books/'+c.bookId,transaction);
+    if(!book || yondeneField_(book,'title')!==c.expectedTitle)
+      throw new Error('書籍ID・書名が一致しません。');
+    if (c.op==='childRating.set') {
+      if (['read','reading','paused'].indexOf(yondeneField_(book,'status'))===-1)
+        throw new Error('評価できる読書状態ではありません。');
+      const recordPath=env.familyPath+'/childBookRatings/'+c.bookId;
+      const rating=yondeneQueueDocument_(token,recordPath,transaction);
+      if(rating && yondeneField_(rating,'stars')!==c.stars)
+        throw new Error('既存の★評価と異なるため自動上書きしません。');
+      return {already:false,action:rating?'marker-only':'create',
+        recordPath:recordPath,markerPath:markerPath,
+        updates:rating?{}:{
+          stars:c.stars,enteredByUid:env.ownerUid,
+          createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()
+        },
+        markerExtra:{ratingCreated:!rating}};
+    }
+    const recordPath=env.familyPath+'/books/'+c.bookId+
+      '/childReflections/'+c.commandId;
+    const activityPath=env.familyPath+'/activity/reflection-'+c.commandId;
+    if (yondeneQueueDocument_(token,recordPath,transaction) ||
+        yondeneQueueDocument_(token,activityPath,transaction))
+      throw new Error('感想または活動履歴のIDがすでに存在します。');
+    const now=new Date().toISOString();
+    return {already:false,action:'create',recordPath:recordPath,markerPath:markerPath,
+      updates:{quote:c.quote,attribution:c.attribution,observedAt:c.observedAt||'',
+        createdAt:now,source:'chatgpt-gas'},
+      activityPath:activityPath,activityData:{
+        actorUid:env.ownerUid,kind:'reflection',title:c.expectedTitle,
+        bookId:c.bookId,sourceId:c.commandId,hidden:false,createdAt:now
+      }};
+  }
   const collection=c.op==='book.patch'?'books':'series';
   const recordPath=env.familyPath+'/'+collection+'/'+parsed.targetId;
-  const record=yondeneQueueDocument_(token,recordPath);
+  const record=yondeneQueueDocument_(token,recordPath,transaction);
   if (!record) throw new Error('対象文書が存在しません。');
-  const currentUpdatedAt=yondeneField_(record,'updatedAt')||'';
+  // Legacy book documents may have no updatedAt field. In that case bind the
+  // command to the authoritative Firestore document updateTime, then also
+  // enforce currentDocument.updateTime in the commit (no inferred revision).
+  const currentUpdatedAt=yondeneQueueRevision_(record);
   if (currentUpdatedAt!==c.expectedUpdatedAt)
-    throw new Error('競合: updatedAtが変わっています。');
+    throw new Error('競合: updatedAt/updateTimeが変わっています。');
   if (c.op==='book.patch' && yondeneField_(record,'title')!==c.expectedTitle)
     throw new Error('競合: 書名が変わっています。');
   if (c.op==='series.patch' && yondeneField_(record,'name')!==c.expectedName)
     throw new Error('競合: シリーズ名が変わっています。');
   if (!record.updateTime) throw new Error('Firestore updateTimeが取得できません。');
-  const updates=Object.assign({}, c.patch, {updatedAt:new Date().toISOString()});
+  const updates=Object.assign({},c.patch,{updatedAt:new Date().toISOString()});
   if (c.op==='book.patch') {
-    if (['title','author','isbn'].some(function(key) {
-      return Object.prototype.hasOwnProperty.call(updates,key) &&
-        updates[key] !== yondeneField_(record,key);
-    })) throw new Error('書名・著者・ISBN変更は重複チェック実装まで保留です。');
+    // Identity-changing bibliographic corrections need transactional uniqueness
+    // checks. Keep the current document ID stable and never infer an edition
+    // solely from a title match.
+    const title=Object.prototype.hasOwnProperty.call(updates,'title')?
+      updates.title:yondeneField_(record,'title');
+    const author=Object.prototype.hasOwnProperty.call(updates,'author')?
+      updates.author:yondeneField_(record,'author');
+    const isbn=Object.prototype.hasOwnProperty.call(updates,'isbn')?
+      updates.isbn:yondeneField_(record,'isbn');
+    if(title!==yondeneField_(record,'title') ||
+       author!==yondeneField_(record,'author')) {
+      const sameTitle=yondeneQueueQuery_(
+        token,env.familyPath,'books','title',title,10,transaction);
+      if(sameTitle.length===10)
+        throw new Error('同名書籍が多すぎます。版の個別照合が必要です。');
+      if(sameTitle.some(function(doc){
+        return doc.name!==yondeneQueueDocumentName_(recordPath) &&
+          yondeneField_(doc,'author')===author;
+      })) throw new Error('同名・同著者の別ID書籍が存在します。');
+    }
+    if(isbn && isbn!==yondeneField_(record,'isbn')) {
+      const sameIsbn=yondeneQueueQuery_(
+        token,env.familyPath,'books','isbn',isbn,2,transaction);
+      if(sameIsbn.length===2)
+        throw new Error('同じISBNの書籍が複数存在します。手動照合が必要です。');
+      if(sameIsbn.some(function(doc){
+        return doc.name!==yondeneQueueDocumentName_(recordPath);
+      })) throw new Error('同じISBNの別ID書籍が存在します。');
+    }
     const oldStatus=yondeneField_(record,'status');
     const newStatus=updates.status===undefined?oldStatus:updates.status;
     if (newStatus==='read' && oldStatus!=='read') {
       const period=['finishedAt','finishedPeriodLabel','finishedPeriodStart',
         'finishedPeriodEnd','finishedPeriodPrecision','finishedPeriodBasis',
         'finishedPeriodNote','finishPrecision'];
-      if (!period.some(function(key){return Object.prototype.hasOwnProperty.call(updates,key);}) &&
-          yondeneQueueCalendarDate_(updates.reportedAt)) {
-        updates.finishedAt=updates.reportedAt;
-        updates.finishedPeriodBasis='completion_report_date';
+      if (!yondeneQueueExplicitCompletion_(updates))
+        throw new Error('読了時期を明示してください。報告日から推測しません。');
+      const originalNotes=Object.prototype.hasOwnProperty.call(updates,'notes') ?
+        updates.notes : yondeneField_(record,'notes');
+      if(typeof originalNotes==='string') {
+        const withoutProgress=yondeneQueueWithoutStaleProgressNotes_(originalNotes);
+        if(withoutProgress!==originalNotes) updates.notes=withoutProgress;
       }
-      // Any old progress note needs human review before an automated completion.
-      if (typeof yondeneField_(record,'notes')==='string' &&
-          /(?:進捗|%|％|読書中|読み始めた)/.test(yondeneField_(record,'notes')) &&
-          !Object.prototype.hasOwnProperty.call(updates,'notes'))
-        throw new Error('進捗メモの整理が必要です。notesを明示してください。');
     }
-    if (newStatus!=='read' && updates.status!==undefined &&
-        !Object.prototype.hasOwnProperty.call(updates,'finishedAt'))
-      updates.finishedAt='';
-    if (newStatus!=='read' && updates.finishedAt)
-      throw new Error('未読了の本に読了日を残せません。');
+    if (newStatus!=='read') {
+      const period=['finishedAt','finishedPeriodLabel','finishedPeriodStart',
+        'finishedPeriodEnd','finishedPeriodPrecision','finishedPeriodBasis',
+        'finishedPeriodNote','finishPrecision'];
+      if (period.some(function(key){return !!updates[key];}))
+        throw new Error('未読了の本には読了時期を指定できません。');
+      if (updates.status!==undefined) {
+        // Preserve human observations: require an explicit decision before
+        // clearing a populated free-text completion-period note.
+        if(yondeneField_(record,'finishedPeriodNote') &&
+            !Object.prototype.hasOwnProperty.call(c.patch,'finishedPeriodNote'))
+          throw new Error('読了時期の補足に記録があります。退避・確認してから状態を変更してください。');
+        period.forEach(function(key){updates[key]='';});
+        // "きになる" has no observed reading mode; never carry over a stale one.
+        if (newStatus==='unread') updates.readingMode='';
+      }
+    }
     if (updates.seriesId) {
-      const target=yondeneQueueDocument_(token,env.familyPath+'/series/'+updates.seriesId);
+      const target=yondeneQueueDocument_(token,env.familyPath+'/series/'+updates.seriesId,transaction);
       if (!target) throw new Error('参照するシリーズがありません。');
     }
   }
-  if (c.op==='series.patch' && c.patch.name!==undefined &&
-      c.patch.name!==c.expectedName)
-    throw new Error('シリーズ改名は重複チェック未実装のため保留です。');
-  return {already:false,recordPath:recordPath,markerPath:markerPath,
-    recordUpdateTime:record.updateTime, updates:updates};
+  if(c.op==='series.patch' && c.patch.name!==undefined &&
+     c.patch.name!==c.expectedName) {
+    const names=yondeneQueueQuery_(
+      token,env.familyPath,'series','name',c.patch.name,2,transaction);
+    if(names.length===2)
+      throw new Error('同名シリーズが複数存在します。手動照合が必要です。');
+    if(names.some(function(doc){
+      return doc.name!==yondeneQueueDocumentName_(recordPath);
+    })) throw new Error('同名シリーズが別IDで登録済みです。');
+  }
+  return {already:false,action:'patch',recordPath:recordPath,markerPath:markerPath,
+    recordUpdateTime:record.updateTime,updates:updates};
 }
 
 function yondeneQueueValue_(v) {
   if (v===null) return {nullValue:null};
   if (typeof v==='string') return {stringValue:v};
   if (Number.isSafeInteger(v)) return {integerValue:String(v)};
+  if (typeof v==='boolean') return {booleanValue:v};
   throw new Error('未対応のFirestore値型です。');
 }
 
-function yondeneQueueCommit_(token, env, parsed, plan) {
+function yondeneQueueCommit_(token, env, parsed, plan, transaction, approval) {
+  if(!yondeneQueueWriteGate_(parsed,approval))
+    throw new Error('GAS書き込みは未承認・無効です。');
+  if(!transaction) throw new Error('Firestore transactionが必要です。');
   const c=parsed.command;
   const prefix='projects/'+YONDENE.project+'/databases/(default)/documents/';
-  const fields={};
-  Object.keys(plan.updates).forEach(function(key) {fields[key]=yondeneQueueValue_(plan.updates[key]);});
   const markerFields={
     source:{stringValue:'chatgpt-gas'},
     sourceRepository:{stringValue:'miyatayuuma/yondene-public'},
+    sourceCommandChannel:{stringValue:'private-google-sheet'},
+    sourceDigestScheme:{stringValue:'sha256-json-stringify-v1'},
     commandId:{stringValue:c.commandId},op:{stringValue:c.op},
     sourceDigest:{stringValue:parsed.digest},
     reason:{stringValue:c.reason},
-    targetCollection:{stringValue:c.op==='book.patch'?'books':'series'},
+    targetCollection:{stringValue:c.op==='family.rename'?'families':
+      c.op==='childRating.set'?'childBookRatings':
+      c.op==='childReflection.create'?'childReflections':
+      c.op==='catalog.audit'?'books':
+      c.op.startsWith('book.')?'books':'series'},
     targetId:{stringValue:parsed.targetId},
     appliedAt:{timestampValue:new Date().toISOString()}
   };
-  const writes=[
-    {update:{name:prefix+plan.recordPath,fields:fields},
-      updateMask:{fieldPaths:Object.keys(plan.updates)},
-      currentDocument:{updateTime:plan.recordUpdateTime}},
-    {update:{name:prefix+plan.markerPath,fields:markerFields},
-      currentDocument:{exists:false}}
-  ];
+  if(plan.markerExtra) Object.keys(plan.markerExtra).forEach(function(key){
+    markerFields[key]=yondeneQueueValue_(plan.markerExtra[key]);
+  });
+  const writes=[];
+  function encodeFields(data, useFirestoreTimestamp) {
+    const fields={};
+    Object.keys(data).forEach(function(key){
+      if(useFirestoreTimestamp && (key==='createdAt'||key==='updatedAt'))
+        fields[key]={timestampValue:data[key]};
+      else fields[key]=yondeneQueueValue_(data[key]);
+    });
+    return fields;
+  }
+  if(plan.action==='multi-patch') {
+    (plan.patches||[]).forEach(function(patch){
+      writes.push({update:{
+        name:prefix+patch.recordPath,fields:encodeFields(patch.updates,false)
+      },updateMask:{fieldPaths:Object.keys(patch.updates)},
+        currentDocument:{updateTime:patch.recordUpdateTime}});
+    });
+  } else if(plan.action!=='marker-only') {
+    const target={update:{
+      name:prefix+plan.recordPath,fields:encodeFields(plan.updates,
+        c.op==='childRating.set'||c.op==='childReflection.create')
+    }};
+    if(plan.action==='patch') {
+      target.updateMask={fieldPaths:Object.keys(plan.updates)};
+      target.currentDocument={updateTime:plan.recordUpdateTime};
+    } else if(plan.action==='create') {
+      target.currentDocument={exists:false};
+    } else throw new Error('不正なプラン操作です。');
+    writes.push(target);
+  }
+  if(plan.activityPath) writes.push({update:{
+    name:prefix+plan.activityPath,fields:encodeFields(plan.activityData,true)
+  },currentDocument:{exists:false}});
+  writes.push({update:{name:prefix+plan.markerPath,fields:markerFields},
+    currentDocument:{exists:false}});
   const response=UrlFetchApp.fetch(
     'https://firestore.googleapis.com/v1/projects/'+
       encodeURIComponent(YONDENE.project)+'/databases/(default)/documents:commit',
     {method:'post',contentType:'application/json',
-      payload:JSON.stringify({writes:writes}),
+      payload:JSON.stringify(transaction?{writes:writes,transaction:transaction}:{writes:writes}),
       headers:{Authorization:'Bearer '+token},muteHttpExceptions:true});
   const code=response.getResponseCode();
   if (code===200) {
     const out=JSON.parse(response.getContentText());
-    if (!out.writeResults || out.writeResults.length!==2)
+    if (!out.writeResults || out.writeResults.length!==writes.length)
       throw new Error('commit戻り値が不正: マーカーを再確認してください。');
     return 'APPLIED';
   }
-  // Network uncertainty, concurrent writer, lost Sheet update:
-  // only a durable marker with a matching digest can resolve to ALREADY.
+  // Network uncertainty or concurrent writer: only matching durable marker
+  // can resolve to ALREADY. No blind retries.
   const marker=yondeneQueueDocument_(token,plan.markerPath);
   if (marker && yondeneField_(marker,'sourceDigest')===parsed.digest)
     return 'ALREADY';

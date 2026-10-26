@@ -1,7 +1,7 @@
 name: Public PWA checks
 on:
   push:
-    branches: [main, "feature/**"]
+    branches: [main]
   pull_request:
 permissions:
   contents: read
@@ -19,7 +19,7 @@ jobs:
       - name: Check public data boundary
         run: node scripts/check-public-boundary.mjs
       - name: Test GAS queue safety with fake data
-        run: node --test gas/queue.test.mjs
+        run: node --test gas/queue.test.mjs gas/production-read-probe.test.mjs gas/production-commit-probe.test.mjs gas/production-cleanup-probe.test.mjs gas/production-rename-probe.test.mjs
       - name: Test app domain and PWA
         working-directory: reading-shelf-firebase
         run: >-

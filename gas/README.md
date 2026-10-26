@@ -7,8 +7,8 @@
 ## 通常writer
 
 - 旧GitHub Actions本棚writerは2026-10-26に撤去済み。
-- GAS限定本番受入はPASS。**通常writer `WRITE_ENABLED` はソース初期値false**。実際の非公開Apps Scriptに適用した設定はこの公開リポジトリだけからは確認できない。
-- 権限確認と正式な有効化が済むまでは、通常処理の自動トリガーを設置しない。
+- GAS限定本番受入はPASS。公開ソースの `WRITE_ENABLED` は意図的に初期値 `false`。実際の非公開Apps Scriptでは2026-10-26 23:05のdry-runログで `true` を確認済み（公開ソースを直接動かしても本番writerは有効にならない）。
+- 非公開Apps Scriptには `yondeneQueueProcess` を5分ごと、Firestore→Sheetsの `yondeneSyncNow` を1時間ごとに設置済み。23:10〜23:30の自動Queue実行は複数回正常終了、キューは0件。今後の通常 `book.create` 等のキュー適用は本番自動実行として未検証。
 - 実行処理は `yondeneQueueProcess`、読み取りだけの検査は `yondeneQueueDryRun`。
 - 操作は `book.create`, `book.patch`, `series.create`, `series.patch`, `childRating.set`, `childReflection.create`, `catalog.audit`、設定シートからの `family.rename` に対応。
 - 更新前リビジョン、書名・ISBN重複、適用マーカーを検査し、Firestoreへの書き込みは原則トランザクションで行う。結果不明のコマンドを自動再試行しない。
@@ -16,6 +16,6 @@
 
 ## 今後の保護
 
-Firestore正本と今後の更新だけを保護する。ネイティブFirestore日次バックアップの設定と初回生成確認が済むまで、復元用バックアップは未確認と扱う。旧GitHub履歴アーカイブとGitHubバックアップは不要。
+Firestore正本と今後の更新を保護する。ユーザーは課金設定を変更せず、1時間ごとの非公開Sheets現在値ミラーをバックアップ先に採用した。これは完全な世代管理・災害復旧バックアップではなく、誤更新の伝播や過去版の復元不可という残存リスクがある。ネイティブFirestore日次バックアップは採用しない。旧GitHub履歴アーカイブとGitHubバックアップは不要。旧GitHub専用OIDC Provider 2件と委任2件は2026-10-26に失効確認済み。
 
 [廃止チェック](../docs/PRIVATE_REPO_RETIREMENT.md)。

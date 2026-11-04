@@ -222,13 +222,25 @@ function yondeneQueueProcess() {
   if (!YONDENE_QUEUE.WRITE_ENABLED)
     throw new Error('GAS書き込みは未承認・無効です。キュー監査のみ実行できます。');
   const lock = LockService.getScriptLock();
-  if (!lock.tryLock(20000)) throw new Error('別のよんでね処理が実行中です。');
+  // The hourly mirror sync may hold this script lock longer than a queue tick.
+  // A later 5-minute trigger can safely pick up the same PENDING commands.
+  if (!lock.tryLock(1000)) {
+    Logger.log('queue SKIPPED_LOCK_BUSY: next time-driven run will retry');
+    return {applied:0,already:0,review:0,settings:'SKIPPED',
+      status:'SKIPPED_LOCK_BUSY'};
+  }
   try {
     const env = yondeneQueueEnvironment_();
+    const pending = yondeneQueuePending_(env.sheet);
+    // Keep settings changes independent of the regular command queue.
+    // When both are empty, avoid fetching OAuth credentials or Firestore data.
+    if (pending.length===0 && !yondeneQueueSettingsCommand_(env)) {
+      Logger.log('queue IDLE: pending=0 settings=NO_CHANGE');
+      return {applied:0,already:0,review:0,settings:'NO_CHANGE',status:'IDLE'};
+    }
     const token = ScriptApp.getOAuthToken();
-    const family = yondeneQueueFamily_(env, token);
     let applied = 0, already = 0, review = 0;
-    yondeneQueuePending_(env.sheet).forEach(function(item) {
+    pending.forEach(function(item) {
       const attempts = Number(item.cells[8] || 0) + 1;
       let state = 'REVIEW', code = 'UNKNOWN', digest = '', detail = '';
       try {
@@ -258,7 +270,10 @@ function yondeneQueueProcess() {
       settingsResult='REVIEW';
       Logger.log('settings write REVIEW: '+String(err.message||err).slice(0,300));
     }
-    return {applied:applied,already:already,review:review,settings:settingsResult};
+    Logger.log('queue PROCESSED applied='+applied+' already='+already+
+      ' review='+review+' settings='+settingsResult);
+    return {applied:applied,already:already,review:review,
+      settings:settingsResult,status:'PROCESSED'};
   } finally {
     lock.releaseLock();
   }

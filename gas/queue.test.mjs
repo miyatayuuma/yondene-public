@@ -8,9 +8,10 @@ const source = readFileSync(new URL('./Queue.gs', import.meta.url), 'utf8');
 const DATE = '2026-10-24T09:00:00Z';
 const FAM = 'families/example-family';
 
-function setup({mockRelease=false} = {}) {
+function setup({mockRelease=false,lockAvailable=true,emptyQueue=false} = {}) {
   let marker = null, updatedAt = DATE, committed = null, commits = 0;
   let begun=0, rolledBack=0, familyName='Demo Shelf', commitStatus=200;
+  let tokenCalls=0,lockReleases=0,lockWaitMs=null;
   const gets=[],queries=[];
   let settingsDesired='Demo Shelf',settingsConfirmed='Demo Shelf';
   const settingsSheet={
@@ -140,8 +141,12 @@ function setup({mockRelease=false} = {}) {
       }
       throw new Error('Unexpected HTTP method');
     }},
-    LockService:{getScriptLock:()=>({tryLock:()=>true,releaseLock:()=>{}})},
-    Logger:{log:()=>{}},ScriptApp:{getOAuthToken:()=>'fake'},
+    LockService:{getScriptLock:()=>({tryLock:ms=>{
+      lockWaitMs=ms;return lockAvailable;
+    },releaseLock:()=>{lockReleases++;}})},
+    Logger:{log:()=>{}},ScriptApp:{getOAuthToken:()=>{
+      tokenCalls++;return 'fake';
+    }},
     SpreadsheetApp:{flush:()=>{},
       openById:()=>({getSheetByName:name=>({
         '設定':settingsSheet,'更新キュー':queueSheet,'同期状態':syncSheet
@@ -169,7 +174,7 @@ function setup({mockRelease=false} = {}) {
     command.commandId,'2026-10-24 18:00','book.patch',
     JSON.stringify(command),'PENDING','','','','',''
   ];
-  queueRows=[cells];
+  queueRows=emptyQueue ? [] : [cells];
   const env = {familyPath:FAM,familyId:'example-family',ownerUid:'owner-1'};
   const family = {fields:{ownerUid:{stringValue:'owner-1'}}};
   return {api,command,cells,env,family,
@@ -182,6 +187,8 @@ function setup({mockRelease=false} = {}) {
     getCommitted:()=>committed,getCommitCount:()=>commits,
     getBeginCount:()=>begun,getRollbackCount:()=>rolledBack,
     getGets:()=>gets,getQueries:()=>queries,getFamilyName:()=>familyName,
+    getTokenCalls:()=>tokenCalls,getLockReleases:()=>lockReleases,
+    getLockWaitMs:()=>lockWaitMs,
     setFamilyName:v=>{familyName=v},setCommitStatus:v=>{commitStatus=v},
     setSettings:(desired,confirmed)=>{settingsDesired=desired;settingsConfirmed=confirmed},
     getSettingsConfirmed:()=>settingsConfirmed,
@@ -579,6 +586,51 @@ test('settings with unchanged shelf name cause no Firestore reads or writes',()=
   assert.equal(s.getBeginCount(),0);
   assert.equal(s.getCommitCount(),0);
   assert.equal(s.getSettingsConfirmed(),'Demo Shelf');
+});
+
+test('queue lock contention skips without failing or touching Firestore',()=>{
+  const s=setup({mockRelease:true,lockAvailable:false});
+  const result=s.api.process();
+  assert.equal(result.status,'SKIPPED_LOCK_BUSY');
+  assert.equal(result.applied,0);
+  assert.equal(s.getLockWaitMs(),1000);
+  assert.equal(s.getLockReleases(),0);
+  assert.equal(s.getTokenCalls(),0);
+  assert.equal(s.getBeginCount(),0);
+  assert.equal(s.getCommitCount(),0);
+  assert.equal(s.queueState()[0][4],'PENDING');
+});
+
+test('empty queue and unchanged settings avoid OAuth and Firestore',()=>{
+  const s=setup({mockRelease:true,emptyQueue:true});
+  const result=s.api.process();
+  assert.equal(result.status,'IDLE');
+  assert.equal(result.settings,'NO_CHANGE');
+  assert.equal(s.getTokenCalls(),0);
+  assert.equal(s.getGets().length,0);
+  assert.equal(s.getBeginCount(),0);
+  assert.equal(s.getLockReleases(),1);
+});
+
+test('settings-only update is not skipped when queue is empty',()=>{
+  const s=setup({mockRelease:true,emptyQueue:true});
+  s.setSettings('New Demo Shelf','Demo Shelf');
+  const result=s.api.process();
+  assert.equal(result.status,'PROCESSED');
+  assert.equal(result.settings,'APPLIED');
+  assert.equal(s.getFamilyName(),'New Demo Shelf');
+  assert.equal(s.getSettingsConfirmed(),'New Demo Shelf');
+  assert.equal(s.getCommitCount(),1);
+});
+
+test('pending command is still processed transactionally',()=>{
+  const s=setup({mockRelease:true});
+  const result=s.api.process();
+  assert.equal(result.status,'PROCESSED');
+  assert.equal(result.applied,1);
+  assert.equal(s.getCommitCount(),1);
+  assert.equal(s.queueState()[0][4],'APPLIED');
+  assert.equal(s.getLockReleases(),1);
 });
 
 

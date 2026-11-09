@@ -61,3 +61,27 @@ test('a scene that finishes loading after exit is disposed and never starts a lo
   dispose();finish(world);await Promise.resolve();await Promise.resolve();
   assert.equal(world.renderer.disposed,true);assert.equal(callbacks.size,0);
 });
+
+test('each twin is separately approachable with the same private sprite and dialogue context',async()=>{
+  const env=environment(),events=[];let api;
+  const ready=new Promise(resolve=>{
+    mountBookForest({familyId:'twins-test',privateSprites:{images},dialogue:{start(info){events.push(info);return {text:'やあ',choices:[]}}},
+      debug:{avatar:'player_cat',month:4,createScene:async()=>fakeWorld(),onReady(value){api=value;resolve()}}});
+  });
+  await ready;
+  assert.equal(api.characters.length,10);
+  const first=api.characters.find(c=>c.id==='twins'),second=api.characters.find(c=>c.id==='twins_second');
+  assert.equal(first.spriteId,'twins');assert.equal(second.spriteId,'twins');
+  assert.equal(first.scale,.8);assert.equal(second.scale,.8);
+  api.setView({x:second.x,z:second.z});
+  let now=performance.now()+50;env.tick(now);
+  assert.equal(api.getState().nearby,'twins_second');
+  const button=find(env.document.body,'bookForestChat');assert.equal(button.hidden,false);
+  button.click();await Promise.resolve();
+  assert.deepEqual(events[0],{characterId:'twins',displayName:'ふたご'});
+  const before=api.getState().npcs.find(c=>c.id==='twins_second');
+  for(let i=0;i<200;i++)env.tick(now+=50);
+  const after=api.getState().npcs.find(c=>c.id==='twins_second');
+  assert.deepEqual([after.x,after.z],[before.x,before.z],'talking sibling stays put');
+  find(env.document.body,'bookForestClose').click();
+});

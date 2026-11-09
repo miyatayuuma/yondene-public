@@ -19,15 +19,19 @@ export const HOUSES=[
   {x:69,z:72,type:'hall',scale:8,rotation:2.9}
 ];
 export const CHARACTERS=[
-  {id:'king',name:'王さま',x:-22,z:17},
-  {id:'cat',name:'ねこ',x:-49,z:23},
-  {id:'kiki',name:'キキ',x:24,z:9},
-  {id:'jiji',name:'ジジ',x:29,z:13},
-  {id:'skipper',name:'スキッパー',x:41,z:-10},
-  {id:'twins',name:'ふたご',x:52,z:30},
-  {id:'zorori',name:'ゾロリ',x:-72,z:-8},
-  {id:'ishishi',name:'イシシ',x:61,z:60},
-  {id:'noshishi',name:'ノシシ',x:66,z:62}
+  // Size is relative to the existing 6.8-unit NPC sprite baseline.
+  // Home positions also define each character's small, familiar roaming area.
+  {id:'king',name:'王さま',x:-22,z:17,scale:1.2,roamRadius:5,walkSpeed:1.1},
+  {id:'cat',name:'ねこ',x:-49,z:23,scale:.7,roamRadius:5,walkSpeed:1.35},
+  {id:'kiki',name:'キキ',x:24,z:9,scale:1,roamRadius:5,walkSpeed:1.3},
+  {id:'jiji',name:'ジジ',x:29,z:13,scale:.5,roamRadius:3.8,walkSpeed:1.65},
+  {id:'skipper',name:'スキッパー',x:41,z:-10,scale:.8,roamRadius:6,walkSpeed:1.15},
+  {id:'twins',name:'ふたご',x:52,z:30,scale:.8,roamRadius:4.5,walkSpeed:1.2},
+  // Both twins use the same private Drive sprite and the same dialogue identity.
+  {id:'twins_second',dialogueId:'twins',spriteId:'twins',name:'ふたご',x:56,z:33,scale:.8,roamRadius:4.5,walkSpeed:1.2},
+  {id:'zorori',name:'ゾロリ',x:-72,z:-8,scale:1.2,roamRadius:7,walkSpeed:1.35},
+  {id:'ishishi',name:'イシシ',x:61,z:60,scale:.8,roamRadius:4,walkSpeed:1.2},
+  {id:'noshishi',name:'ノシシ',x:66,z:62,scale:.8,roamRadius:4,walkSpeed:1.2}
 ];
 export const START={x:-22,z:27,yaw:.15};
 export const riverX=z=>5+4*Math.sin(z*.038)+1.4*Math.sin(z*.09);

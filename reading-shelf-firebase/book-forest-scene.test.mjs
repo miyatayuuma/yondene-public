@@ -4,6 +4,7 @@ import {readFile} from 'node:fs/promises';
 import {GLTFLoader} from './vendor/three/GLTFLoader.js';
 import {createForestScene} from './book-forest-scene.mjs';
 import {START,CHARACTERS,isWalkable} from './book-forest-world.mjs';
+import {createForestNpcMotion} from './book-forest-npc.mjs';
 
 test('actual GLB assets build and all representative months update without WebGL',async()=>{
   // Geometry, asset parsing and scene construction are real; the renderer and
@@ -34,5 +35,15 @@ test('actual GLB assets build and all representative months update without WebGL
     }
   }
   for(const c of CHARACTERS)assert.ok(queue.some(([x,z])=>Math.hypot(x-c.x,z-c.z)<6),c.id);
+  const canWalk=(x,z)=>isWalkable(x,z)&&!world.treeObstacles.some(t=>Math.hypot(x-t.x,z-t.z)<t.r);
+  const actors=CHARACTERS.map(c=>({...c,moving:false})),motion=createForestNpcMotion(actors,canWalk),moving=new Set();
+  for(let i=0;i<1600;i++){
+    motion.step(.05,{playerX:START.x,playerZ:START.z});
+    for(const actor of actors)if(actor.moving)moving.add(actor.id);
+  }
+  for(const actor of actors){
+    assert.ok(moving.has(actor.id),`${actor.id} should be able to roam around real tree obstacles`);
+    assert.ok(canWalk(actor.x,actor.z),`${actor.id} should not end up inside a tree`);
+  }
   world.dispose();assert.equal(renderer.disposed,true);
 });

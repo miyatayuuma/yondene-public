@@ -44,13 +44,15 @@ function loadChoice(key){
   try{return JSON.parse(localStorage.getItem(key)||'null')}catch{return null}
 }
 
-export function mountBookForest({familyId,books=[],ratings=new Map(),reflectedBookIds=new Set(),onClose=()=>{}}){
+export function mountBookForest({familyId,books=[],ratings=new Map(),reflectedBookIds=new Set(),privateSprites=null,onClose=()=>{}}){
   const growth=forestGrowth({books,ratings,reflectedBookIds});
   const readContext=characterReadingContext(books);
+  const spriteImages=privateSprites?.images||{};
   const saveKey='yondene-book-forest-prefs:'+familyId;
   const previous=loadChoice(saveKey)||{};
   let season=['spring','summer','autumn','dusk'].includes(previous.season)?previous.season:'spring';
   let planting=['flower','orchard'].includes(previous.planting)?previous.planting:'flower';
+  let avatar=['player_cat','player_rabbit'].includes(previous.avatar)?previous.avatar:'player_cat';
   let stage=growth.stage,preview=false,disposed=false,animationId=0,resizeObserver=null,cleanupWorld=()=>{};
   const keys=new Set();
   const layer=el('section','bookForest');
@@ -92,6 +94,14 @@ export function mountBookForest({familyId,books=[],ratings=new Map(),reflectedBo
   [['flower','花の小道'],['orchard','木の実の庭']].forEach(([v,t])=>{const option=el('option','',t);option.value=v;plantingSelect.append(option)});
   plantingSelect.value=planting;
   plantWrap.append(plantingSelect);
+  const avatarWrap=el('label','bookForestChoice');
+  avatarWrap.append(el('span','','主人公'));
+  const avatarSelect=el('select');
+  avatarSelect.setAttribute('aria-label','主人公を選ぶ');
+  [['player_cat','ねこ'],['player_rabbit','うさぎ']].forEach(([value,label])=>{
+    const option=el('option','',label);option.value=value;avatarSelect.append(option);
+  });
+  avatarSelect.value=avatar;avatarWrap.append(avatarSelect);
   const previewWrap=el('label','bookForestChoice bookForestPreview');
   previewWrap.append(el('span','','成長をためす'));
   const previewSelect=el('select');
@@ -99,7 +109,7 @@ export function mountBookForest({familyId,books=[],ratings=new Map(),reflectedBo
   previewSelect.value=String(stage);previewWrap.append(previewSelect);
   const resetPreview=el('button','bookForestReset','本の記録に戻す');
   resetPreview.hidden=true;
-  settings.append(seasonWrap,plantWrap,previewWrap,resetPreview);
+  settings.append(seasonWrap,plantWrap,avatarWrap,previewWrap,resetPreview);
   const bottom=el('div','bookForestBottom');
   const joystick=el('div','bookForestJoystick');
   joystick.setAttribute('aria-label','移動用スティック');
@@ -144,7 +154,7 @@ export function mountBookForest({familyId,books=[],ratings=new Map(),reflectedBo
   document.addEventListener('keyup',onKeyUp);
   document.addEventListener('visibilitychange',onVisibility);
   dismiss.onclick=()=>{chat.hidden=true};
-  const persist=()=>saveChoice(saveKey,{season,planting});
+  const persist=()=>saveChoice(saveKey,{season,planting,avatar});
 
   async function buildWorld(){
     let THREE;
@@ -183,6 +193,35 @@ export function mountBookForest({familyId,books=[],ratings=new Map(),reflectedBo
       cloth:material(0xc47665),skin:material(0xf8d7b0),eyes:material(0x313e41),
       sign:material(0x7a5841),leaf:material(0x83ae76),leaf2:material(0xa0c18a)
     };
+    const animatedSprites=[];
+    function addPixelSprite(parent,image,height=8.6){
+      if(!image)return null;
+      const frame=document.createElement('canvas');frame.width=64;frame.height=64;
+      const ctx=frame.getContext('2d',{alpha:true});
+      if(!ctx)return null;
+      ctx.imageSmoothingEnabled=false;
+      const texture=new THREE.CanvasTexture(frame);
+      texture.colorSpace=THREE.SRGBColorSpace;
+      texture.magFilter=THREE.NearestFilter;
+      texture.minFilter=THREE.NearestFilter;
+      texture.generateMipmaps=false;
+      const material=new THREE.SpriteMaterial({map:texture,transparent:true,depthWrite:false,toneMapped:false});
+      const sprite=new THREE.Sprite(material);
+      sprite.center.set(.5,0);
+      sprite.position.y=.18;
+      sprite.scale.set(height,height,1);
+      parent.add(sprite);
+      const animated={sprite,image,ctx,texture};
+      animatedSprites.push(animated);
+      return sprite;
+    }
+    function showPixelFrame(frameIndex){
+      for(const entry of animatedSprites){
+        entry.ctx.clearRect(0,0,64,64);
+        entry.ctx.drawImage(entry.image,(frameIndex%2)*64,Math.floor(frameIndex/2)*64,64,64,0,0,64,64);
+        entry.texture.needsUpdate=true;
+      }
+    }
     const box=(w,h,d,m,x,y,z,parent=scene)=>{
       const mesh=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m);
       mesh.position.set(x,y,z);parent.add(mesh);return mesh;
@@ -468,7 +507,8 @@ export function mountBookForest({familyId,books=[],ratings=new Map(),reflectedBo
     applyStage();applySky();
     orchard.visible=stage>=3&&planting==='orchard';
 
-    // Rounded hand-painted-feel traveler, distinct from licensed book heroes.
+    // Procedural models remain as a fallback when authorized Drive images are
+    // not available. The real book characters are never bundled in this repo.
     const player=new THREE.Group();scene.add(player);
     const boot=material(0x534d4e),shirt=material(0xd27e5a),hair=material(0x684d42);
     cylinder(1.45,3.6,shirt,0,3.1,0,player,1.2,10);
@@ -479,35 +519,58 @@ export function mountBookForest({familyId,books=[],ratings=new Map(),reflectedBo
     for(const x of [-.8,.8])box(.8,1.6,1.1,boot,x,1.1,0,player);
     const scarf=material(0xf6ce8c);
     cylinder(1.51,.55,scarf,0,4.85,0,player,1.55,12);
+    const playerModels=player.children.slice();
+    const playerPixelSprites=new Map();
+    for(const key of ['player_cat','player_rabbit']){
+      const sprite=addPixelSprite(player,spriteImages[key],9);
+      if(sprite)playerPixelSprites.set(key,sprite);
+    }
+    function chooseAvatar(){
+      const selected=playerPixelSprites.get(avatar);
+      playerModels.forEach(model=>model.visible=!selected);
+      for(const sprite of playerPixelSprites.values())sprite.visible=sprite===selected;
+    }
+    avatarSelect.onchange=()=>{avatar=avatarSelect.value;chooseAvatar();persist()};
+    chooseAvatar();
     let playerX=-11,playerZ=13,camYaw=-.48,motion=0,joystickX=0,joystickY=0,lookPointer=null;
     const npcs=[];
-    function npc(name,x,z,color,lines,stageNeed=0){
+    function npc(spriteId,name,x,z,color,lines,stageNeed=0){
       const marker=new THREE.Group();marker.position.set(x,heightAt(x,z),z);scene.add(marker);
       cylinder(1.45,3.7,material(color),0,2.9,0,marker,1.1,10);
       sphere(1.48,mat.skin,0,6.1,0,marker);
       for(const xx of [-.52,.52])sphere(.14,mat.eyes,xx,6.1,-1.34,marker);
       sphere(1.9,material(color),0,7.25,0,marker,1,.5,1);
       const glow=sphere(.43,lanternMat,0,9.8,0,marker);
+      const modelParts=marker.children.slice();
+      const sprite=addPixelSprite(marker,spriteImages[spriteId]);
+      if(sprite)modelParts.forEach(model=>model.visible=false);
       npcs.push({name,x,z,marker,glow,lines,stageNeed});
     }
     const lastRead=readContext.at(-1)?.title;
-    npc('森の案内人',-24,11,0x9a9277,[
+    npc('king','王さま',-24,11,0x9a9277,[
       'この谷には、読んだ本の数だけ小さな芽が生まれるんだ。',
       lastRead?`「${lastRead}」も、森の新しい思い出になったね。`:'いろんなお話を読んだら、またここへ来てね。',
       'どんな本も、好きなところがひとつ見つかれば十分だよ。'
     ]);
-    npc('橋の番人',28,10,0x8b9fc4,[
+    npc('cat','ねこ',-58,12,0xb9aa80,['ひなたの草の上は、いつも気持ちがいいんだ。','今日はどの本のお話をする？']);
+    npc('kiki','キキ',28,10,0x8b9fc4,[
       '水の音をきいてごらん。季節を変えると谷の表情も変わるよ。',
       '対岸の家は、読んだ本が増えると少しずつ灯りがつくんだ。'
     ],1);
-    npc('木の実屋さん',70,-8,0xc99176,[
+    npc('jiji','ジジ',34,16,0x7a778b,['橋の先も見てみようよ。','たまには立ち止まって、空を見上げよう。'],1);
+    npc('skipper','スキッパー',70,-8,0xc99176,[
       '花の小道と木の実の庭、どちらが好き？ 自分で選べるよ。',
       '感想を残すと、森にはもっとたくさんの実がなるんだ。'
     ],2);
-    npc('星の観測者',104,62,0x9c8dba,[
+    npc('twins','ふたご',58,40,0xb99b9f,['あっちの坂道、探検した？','ふたりで同じ本を読んでも、好きな場面は違うかもね。'],2);
+    npc('twins','ふたご',65,40,0xb9a8a0,['ねえ、今度はどこへ行こう？','森が育つと、知らない道が増えるんだって。'],2);
+    npc('zorori','ゾロリ',-100,55,0xcfa77a,['ここからは谷がよく見えるな。','読んだ本のこと、誰かに話すのも楽しいぜ。'],3);
+    npc('ishishi','イシシ',103,62,0x9c8dba,[
       '遠くまで歩いてきたね。いま見える景色も、次の本で変わるはず。',
       '読書には競争も締め切りもない。気が向いたらまた本を開こう。'
     ],4);
+    npc('noshishi','ノシシ',112,64,0xa6a18a,['ここで一休みしようよ。','星が出るまで、もうちょっと待ってみたいな。'],4);
+    if(animatedSprites.length)showPixelFrame(0);
     const nearest=()=>{
       let result=null,dist=Infinity;
       for(const candidate of npcs){
@@ -571,11 +634,13 @@ export function mountBookForest({familyId,books=[],ratings=new Map(),reflectedBo
       renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();
     };
     resizeObserver=new ResizeObserver(resize);resizeObserver.observe(layer);resize();
-    let last=performance.now(),clock=0,chatNearby=null;
+    let last=performance.now(),clock=0,chatNearby=null,lastPixelFrame=-1;
     function tick(now){
       if(disposed)return;
       const dt=Math.min((now-last)/1000,.05);last=now;
       if(!document.hidden){
+        const frame=Math.floor(now/250)%4;
+        if(frame!==lastPixelFrame){showPixelFrame(frame);lastPixelFrame=frame}
         const forward=(keys.has('KeyW')||keys.has('ArrowUp')?1:0)-
           (keys.has('KeyS')||keys.has('ArrowDown')?1:0)-joystickY;
         const right=(keys.has('KeyD')||keys.has('ArrowRight')?1:0)-
@@ -621,6 +686,7 @@ export function mountBookForest({familyId,books=[],ratings=new Map(),reflectedBo
     animationId=requestAnimationFrame(tick);
     cleanupWorld=()=>{
       resizeObserver?.disconnect();
+      animatedSprites.forEach(({texture})=>texture.dispose());
       scene.traverse(object=>{
         if(object.geometry)object.geometry.dispose();
         if(object.material){

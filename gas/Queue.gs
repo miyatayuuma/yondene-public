@@ -29,13 +29,13 @@ const YONDENE_QUEUE = Object.freeze({
     'finishedPeriodLabel','finishedPeriodStart','finishedPeriodEnd','finishedPeriodPrecision',
     'finishedPeriodBasis','finishedPeriodNote','finishPrecision','readOrder','readingMode',
     'coverUrl','coverReferenceSource','coverEditionStatus','notes','editionNote','workType',
-    'bibliographicSource','sourcePhotoNote','reportedAt'
+    'bibliographicSource','sourcePhotoNote','reportedAt','synopsis','synopsisSourceUrl'
   ],
   seriesFields: ['name','note','totalVolumes'],
   catalogFields: ['title','publicationYear','publicationDate','publicationYearBasis',
     'isbn','isbnEditionStatus','pageCount','publisher','illustrator','translator',
     'ageLabel','ageSource','volume','bibliographicSource','editionNote',
-    'coverUrl','coverReferenceSource','coverEditionStatus']
+    'coverUrl','coverReferenceSource','coverEditionStatus','synopsis','synopsisSourceUrl']
 });
 
 /** Explicit manual audit; never writes to Firestore or any Sheet cell. */
@@ -496,6 +496,7 @@ function yondeneQueueValidateCatalogAudit_(entries) {
     if(!e.patch||typeof e.patch!=='object'||Array.isArray(e.patch)||
        !Object.keys(e.patch).length)
       throw new Error('書誌監査の修正項目が必要です。');
+    yondeneQueueValidateSynopsis_(e.patch);
     Object.keys(e.patch).forEach(function(key){
       const value=e.patch[key];
       if(YONDENE_QUEUE.catalogFields.indexOf(key)===-1 ||
@@ -543,6 +544,7 @@ function yondeneQueueValidateValues_(data,allowed) {
     } else if (typeof value!=='string'||value.length>120000)
       throw new Error(key+'は文字列が必要です。');
   });
+  yondeneQueueValidateSynopsis_(data);
   if (data.status!==undefined &&
       ['read','reading','paused','unread'].indexOf(data.status)===-1)
     throw new Error('読書状態が無効です。');
@@ -565,6 +567,21 @@ function yondeneQueueValidateValues_(data,allowed) {
     throw new Error('書名は空にできません。');
   if (Object.prototype.hasOwnProperty.call(data,'name')&&!data.name.trim())
     throw new Error('シリーズ名は空にできません。');
+}
+
+function yondeneQueueValidateSynopsis_(data) {
+  const hasSynopsis=Object.prototype.hasOwnProperty.call(data,'synopsis');
+  const hasSource=Object.prototype.hasOwnProperty.call(data,'synopsisSourceUrl');
+  if(hasSynopsis!==hasSource)
+    throw new Error('あらすじと出典URLは同じコマンドで更新してください。');
+  if(!hasSynopsis)return;
+  if(typeof data.synopsis!=='string'||data.synopsis.length>500)
+    throw new Error('あらすじは500文字以内です。');
+  if(typeof data.synopsisSourceUrl!=='string'||data.synopsisSourceUrl.length>1800 ||
+     Boolean(data.synopsis.trim())!==Boolean(data.synopsisSourceUrl.trim()))
+    throw new Error('あらすじと出典URLは両方必要です。');
+  if(data.synopsisSourceUrl&&!/^https:\/\/[^\s]+$/i.test(data.synopsisSourceUrl))
+    throw new Error('あらすじの出典はHTTPS URLが必要です。');
 }
 
 function yondeneQueueExplicitCompletion_(data) {

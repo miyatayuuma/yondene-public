@@ -233,6 +233,12 @@ button:focus-visible,input:focus-visible,select:focus-visible,.book:focus-visibl
 .bookStatusPill{display:inline-flex;align-items:center;font-weight:750;font-size:12px;
   border-radius:999px;background:#ddf3e9;color:#1c654e;padding:4px 10px}
 .bookLeadLine{font-size:13px;color:var(--muted);margin:0;overflow-wrap:anywhere}
+.bookSynopsis{margin:14px 0 17px;padding:15px 16px;border-radius:15px;
+  background:#f6f8ed;border:1px solid #dfebd5}
+.bookSynopsis h3{font-size:15px;color:#365a42;margin:0 0 8px}
+.bookSynopsis p{font-size:14px;line-height:1.85;white-space:pre-wrap;overflow-wrap:anywhere;margin:0}
+.bookSynopsis a{display:inline-block;margin-top:10px;font-size:12px;color:#315e70;
+  text-underline-offset:2px;overflow-wrap:anywhere}
 .bookMetadataDetails{
   margin:22px 0 4px;padding:13px 14px;border:1px solid var(--line);
   background:#fff;border-radius:15px;

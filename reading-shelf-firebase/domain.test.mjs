@@ -41,6 +41,20 @@ test('rejects script URLs in cover and preserves book edition metadata',()=>{
   assert.equal(obj.edition,'ビジュアル特別版');
   assert.equal(obj.adaptedBy,'松本侑子');
 });
+test('independent synopsis is source-bound and does not overwrite reading notes',()=>{
+  const sample={title:'Synthetic Book',status:'read',notes:'読者の観察を保持',
+    synopsis:'登場人物が見知らぬ町を探検する物語。',synopsisSourceUrl:'https://example.org/book'};
+  const result=normalizeBook(sample);
+  assert.equal(result.synopsis,sample.synopsis);
+  assert.equal(result.synopsisSourceUrl,sample.synopsisSourceUrl);
+  assert.equal(result.notes,sample.notes);
+  assert.throws(()=>normalizeBook({...sample,synopsisSourceUrl:''}),/一緒/);
+  assert.throws(()=>normalizeBook({...sample,synopsisSourceUrl:'javascript:alert(1)'}),/HTTPS/);
+  assert.throws(()=>normalizeBook({...sample,synopsis:'a'.repeat(501)}),/500文字/);
+  const legacy=normalizeBook({title:'Legacy',status:'read'});
+  assert.equal(legacy.synopsis,'');
+  assert.equal(legacy.synopsisSourceUrl,'');
+});
 
 test('school terms preserve unknown month instead of inventing a completion date',()=>{
   const b=normalizeBook({title:'ねこと王さま',status:'read',finishedAt:'',finishedPeriodLabel:'2026年度・小1・2学期',

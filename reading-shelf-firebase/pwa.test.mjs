@@ -96,7 +96,7 @@ test('no removed DOM ID can silently cause a null property assignment',()=>{
 test('PWA cannot combine stale JS with current HTML after deployment',()=>{
   const html=text('index.html'),sw=text('sw.js');
   const config=JSON.parse(text('firebase.json'));
-  assert.match(html,/app\.mjs\?build=20261025-reading-legacy-v1/);
+  assert.match(html,/app\.mjs\?build=20261109-synopsis-v1/);
   assert.match(sw,/const ARTWORK_PATHS=new Set\(ARTWORK\)/);
   assert.ok(!sw.includes('PUBLIC_ASSETS'));
   for(const path of ['/app.mjs','/index.html','/domain.mjs','/book-community.mjs','/recommendations.mjs']){
@@ -128,6 +128,11 @@ test('book detail exposes conversation before collapsed complete catalog data',(
   assert.match(block,/ISBN/);
   assert.match(block,/読書・観察メモ/);
   assert.match(block,/dialog\.scrollTop=0/);
+  assert.match(block,/book\.synopsis/);
+  assert.match(block,/book\.synopsisSourceUrl/);
+  assert.match(block,/description\.textContent=synopsis/);
+  assert.ok(block.indexOf('root.append(section)')<block.indexOf('mountReadingRecordEditor('));
+  assert.match(css,/\.bookSynopsis/);
   assert.match(css,/#bookInfoDialog \.dialogTop/);
   assert.match(css,/position:sticky/);
 });
@@ -150,17 +155,18 @@ test('single-step sorting options have distinct clear Japanese descriptions',()=
   assert.match(app,/filter:view==='series'\?'all':\$\('filter'\)\.value/);
   assert.match(app,/sort:\$\('sort'\)\.value/);
 });
-test('PWA build isolates the reading-editor hotfix from unchanged module assets',()=>{
+test('PWA build isolates the synopsis update from unchanged module assets',()=>{
   const html=text('index.html'),app=text('app.mjs'),recs=text('recommendations.mjs');
-  const build='20261025-reading-legacy-v1',unchanged='20261019-shelf-v28';
+  const build='20261109-synopsis-v1',unchanged='20261019-shelf-v28',readingBuild='20261025-reading-legacy-v1';
   assert.match(html,new RegExp('data-app-build="'+build+'"'));
   assert.match(html,new RegExp('app\\.mjs\\?build='+build));
-  assert.match(html,new RegExp('style\\.css\\?build='+unchanged));
+  assert.match(html,new RegExp('style\\.css\\?build='+build));
   assert.match(app,new RegExp("const APP_BUILD='"+build+"'"));
   assert.match(app,/document\.documentElement\.dataset\.appBuild!==APP_BUILD/);
-  assert.ok(app.includes("'./reading-record-editor.mjs?build="+build+"'"));
-  assert.ok(text('reading-record-editor.mjs').includes("'./reading-record-domain.mjs?build="+build+"'"));
-  for(const module of ['domain','book-community','recommendations','bibliography-identity','firebase-config','activity','invite-links','cover-thumbnails','nickname','reader-name','pending-reflections','startup-recovery']){
+  assert.ok(app.includes("'./reading-record-editor.mjs?build="+readingBuild+"'"));
+  assert.ok(text('reading-record-editor.mjs').includes("'./reading-record-domain.mjs?build="+readingBuild+"'"));
+  assert.ok(app.includes("'./domain.mjs?build="+build+"'"));
+  for(const module of ['book-community','recommendations','bibliography-identity','firebase-config','activity','invite-links','cover-thumbnails','nickname','reader-name','pending-reflections','startup-recovery']){
     assert.ok(app.includes("'./"+module+".mjs?build="+unchanged+"'"),'unchanged versioned import: '+module);
   }
   assert.ok(recs.includes("'./domain.mjs?build="+unchanged+"'"));

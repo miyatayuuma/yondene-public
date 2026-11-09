@@ -14,12 +14,13 @@ import {mountFamilyActivity} from './activity.mjs?build=20261019-shelf-v28';
 import {mountChildRating} from './child-rating.mjs?build=20261019-shelf-v28';
 import {mountReadingRecordEditor} from './reading-record-editor.mjs?build=20261025-reading-legacy-v1';
 import {readerNameFromShelf} from './reader-name.mjs?build=20261019-shelf-v28';
-import {STATUSES,ACTIVE_READ_FILTER,filteredBooks,readPeriodLabel,compactReadPeriodLabel,readingModeLabel,emptyStateMessage} from './domain.mjs?build=20261019-shelf-v28';
+import {STATUSES,ACTIVE_READ_FILTER,filteredBooks,readPeriodLabel,compactReadPeriodLabel,readingModeLabel,emptyStateMessage} from './domain.mjs?build=20261109-synopsis-v1';
 
-const APP_BUILD='20261025-reading-legacy-v1';
+const APP_BUILD='20261109-synopsis-v1';
 const $=id=>{const element=document.getElementById(id);if(!element)throw new Error('APP_DOM_MISMATCH: missing #'+id);return element};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const safeCover=url=>/^(https:\/\/|data:image\/(jpeg|png|webp);base64,)/i.test(String(url||''))?String(url):'';
+const safeSourceUrl=url=>/^https:\/\/[^\s]+$/i.test(String(url||''))?String(url):'';
 const SHOW=['loading','loginPanel','setupPanel','shelfPanel'];
 let auth,db,user=null,fid='',role='',household=null,books=[],series=[],members=[],profiles=[],invites=[],openInvites=[],lastInviteLink='';
 let unsubs=[],view='shelf',generation=0,ratings=new Map(),closeRating=null,refreshRating=null,closeReadingEdit=null;
@@ -444,6 +445,22 @@ function openBookInfo(book,focusCommentId=''){
     lead.append(caveat);
   }
   summary.append(art,lead);root.append(summary);
+  // Independently researched plot descriptions are not reading memories or
+  // the child's own words. Keep them visible but clearly sourced and separate.
+  const synopsis=String(book.synopsis||'').trim();
+  if(synopsis){
+    const section=document.createElement('section');section.className='bookSynopsis';
+    const title=document.createElement('h3');title.textContent='あらすじ';
+    const description=document.createElement('p');description.textContent=synopsis;
+    section.append(title,description);
+    const sourceUrl=safeSourceUrl(book.synopsisSourceUrl);
+    if(sourceUrl){
+      const link=document.createElement('a');link.href=sourceUrl;link.target='_blank';
+      link.rel='noopener noreferrer';link.textContent='あらすじの参考資料（外部サイト）';
+      section.append(link);
+    }
+    root.append(section);
+  }
   const editArea=document.createElement('div');editArea.className='readingRecordEditSection';root.append(editArea);
   const readingEditor=mountReadingRecordEditor({
     db,fid,book,user,owner:role==='owner',container:editArea,

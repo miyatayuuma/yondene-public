@@ -14,11 +14,11 @@ import {mountFamilyActivity} from './activity.mjs?build=20261019-shelf-v28';
 import {mountChildRating} from './child-rating.mjs?build=20261019-shelf-v28';
 import {mountReadingRecordEditor} from './reading-record-editor.mjs?build=20261025-reading-legacy-v1';
 import {readerNameFromShelf} from './reader-name.mjs?build=20261019-shelf-v28';
-import {mountBookForest} from './book-forest.mjs?build=20261109-drive-sprites-v1';
-import {authorizeForestDrive,loadPrivateForestSprites} from './book-forest-drive.mjs?build=20261109-drive-sprites-v1';
-import {STATUSES,ACTIVE_READ_FILTER,filteredBooks,readPeriodLabel,compactReadPeriodLabel,readingModeLabel,emptyStateMessage} from './domain.mjs?build=20261109-drive-sprites-v1';
+import {mountBookForest,getForestAvatar,setForestAvatar} from './book-forest.mjs?build=20261109-forest-world-v2';
+import {authorizeForestDrive,loadPrivateForestSprites} from './book-forest-drive.mjs?build=20261109-forest-world-v2';
+import {STATUSES,ACTIVE_READ_FILTER,filteredBooks,readPeriodLabel,compactReadPeriodLabel,readingModeLabel,emptyStateMessage} from './domain.mjs?build=20261109-forest-world-v2';
 
-const APP_BUILD='20261109-drive-sprites-v1';
+const APP_BUILD='20261109-forest-world-v2';
 const $=id=>{const element=document.getElementById(id);if(!element)throw new Error('APP_DOM_MISMATCH: missing #'+id);return element};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const safeCover=url=>/^(https:\/\/|data:image\/(jpeg|png|webp);base64,)/i.test(String(url||''))?String(url):'';
@@ -593,42 +593,34 @@ function renderFamily(){
       const forestArea=document.createElement('section');forestArea.className='forestSettingsEntry';
       const forestTitle=document.createElement('h3');forestTitle.textContent='🌿 本の森';forestArea.append(forestTitle);
       const forestDescription=document.createElement('p');
-      forestDescription.textContent='読んだ本・★・感想で育つ小さな谷。登場人物の画像は非公開Google Driveから読み込みます（初回にDriveの読み取り許可が必要です）。';
+      forestDescription.textContent='小さな森を歩いて、登場人物に会いに行こう。画像は非公開Google Driveから読み込みます（初回にDriveの読み取り許可が必要です）。';
       forestArea.append(forestDescription);
+      const avatarLabel=document.createElement('label');avatarLabel.className='forestAvatarChoice';
+      avatarLabel.append('いっしょに歩く ');
+      const avatarSelect=document.createElement('select');avatarSelect.setAttribute('aria-label','本の森の主人公');
+      for(const [value,label] of [['player_cat','ねこ'],['player_rabbit','うさぎ']]){
+        const option=document.createElement('option');option.value=value;option.textContent=label;avatarSelect.append(option);
+      }
+      avatarSelect.value=getForestAvatar(fid);avatarSelect.onchange=()=>setForestAvatar(fid,avatarSelect.value);
+      avatarLabel.append(avatarSelect);forestArea.append(avatarLabel);
       const forestLaunch=document.createElement('button');forestLaunch.className='primary';
       forestLaunch.type='button';forestLaunch.textContent='本の森へ行く';
       forestLaunch.onclick=async()=>{
         if(role!=='owner'||!fid||closeForest)return;
         forestLaunch.disabled=true;forestLaunch.textContent='森を準備しています…';
         const familyId=fid,ownerUid=user.uid;
-        const currentBooks=books.slice(),read=currentBooks.filter(b=>b.status==='read');
-        const reflectedBookIds=new Set();
         try{
           if(!forestSpriteCache){
             forestLaunch.textContent='Google Driveへのアクセスを確認しています…';
-            // Request OAuth while still in the explicit button gesture, before
-            // the Firestore reflection scan. Neither token nor PNG is persisted.
+            // Request OAuth from the button gesture. Neither token nor PNG is persisted.
             const token=await authorizeForestDrive({user,GoogleAuthProvider,reauthenticateWithPopup});
             forestLaunch.textContent='非公開ドット絵を読み込んでいます…';
             const loaded=await loadPrivateForestSprites(token);
             if(role!=='owner'||fid!==familyId||user?.uid!==ownerUid){loaded.dispose();return}
             forestSpriteCache=loaded;
           }
-          forestLaunch.textContent='読書記録を確認しています…';
-          // The existing collection is per-book, not a publicly readable index.
-          // The first document is enough to count a book with a reflection.
-          let cursor=0;
-          await Promise.all(Array.from({length:Math.min(4,read.length)},async()=>{
-            while(cursor<read.length){
-              const book=read[cursor++];
-              try{
-                const found=await getDocs(query(collection(db,'families',familyId,'books',book.id,'childReflections'),limit(1)));
-                if(!found.empty)reflectedBookIds.add(book.id);
-              }catch(error){console.warn('Forest reflection progress unavailable',error)}
-            }
-          }));
           if(role!=='owner'||fid!==familyId||user?.uid!==ownerUid)return;
-          closeForest=mountBookForest({familyId,books:currentBooks,ratings:new Map(ratings),reflectedBookIds,privateSprites:forestSpriteCache,
+          closeForest=mountBookForest({familyId,privateSprites:forestSpriteCache,
             onClose:()=>{closeForest=null}});
         }catch(error){statusError(error)}
         finally{forestLaunch.disabled=false;forestLaunch.textContent='本の森へ行く'}

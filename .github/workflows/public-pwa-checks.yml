@@ -26,6 +26,10 @@ jobs:
           node --test
           activity.test.mjs
           bibliography-identity.test.mjs
+          book-forest-drive.test.mjs
+          book-forest-world.test.mjs
+          book-forest-lifecycle.test.mjs
+          book-forest-scene.test.mjs
           cover-thumbnails.test.mjs
           domain.test.mjs
           invite-links.test.mjs

@@ -7,8 +7,10 @@ const manifest={schemaVersion:1,columns:2,rows:2,frameSize:64,frameDurationMs:25
 
 test('only declared private Drive pixel sprites are accepted',()=>{
   assert.equal(validateForestSpriteManifest(manifest),assets);
+  assert.equal(validateForestSpriteManifest({...manifest,schemaVersion:2,frameSize:627}),assets);
   assert.throws(()=>validateForestSpriteManifest({...manifest,assets:{...assets,evil:'1234567890123456789012'}}));
   assert.throws(()=>validateForestSpriteManifest({...manifest,frameSize:32}));
+  assert.throws(()=>validateForestSpriteManifest({...manifest,schemaVersion:2,frameSize:64}));
 });
 
 test('fetches only the manifest and its validated PNGs via bearer headers',async()=>{
@@ -29,4 +31,18 @@ test('fetches only the manifest and its validated PNGs via bearer headers',async
   }
   result.dispose();
   assert.equal(decoded.length,11);
+});
+
+test('accepts full-resolution 2-by-2 image sheets from the private Drive manifest',async()=>{
+  let calls=0;
+  const fetchImpl=async()=>{
+    calls++;
+    return calls===1?{ok:true,json:async()=>({...manifest,schemaVersion:2,frameSize:627})}:
+      {ok:true,blob:async()=>({size:1000000,type:'image/png'})};
+  };
+  const result=await loadPrivateForestSprites('test-token',{
+    fetchImpl,decodeImage:async()=>({width:1254,height:1254,close(){}})
+  });
+  assert.equal(Object.keys(result.images).length,11);
+  result.dispose();
 });

@@ -89,13 +89,17 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
       const shadowTex=new THREE.CanvasTexture(shadowCanvas),shadow=new THREE.Mesh(new THREE.PlaneGeometry(5,3),new THREE.MeshBasicMaterial({map:shadowTex,transparent:true,depthWrite:false,opacity:.7}));
       shadow.rotation.x=-Math.PI/2;shadow.position.y=.08;group.add(shadow);
       if(image){
-        const frame=document.createElement('canvas');frame.width=64;frame.height=64;
+        // Keep the original high-resolution PNG in private Drive. A smaller
+        // GPU texture is sufficient at the sprite's on-screen size on phones.
+        const sourceFrameSize=image.width/2;
+        const displayFrameSize=Math.min(sourceFrameSize,256);
+        const frame=document.createElement('canvas');frame.width=displayFrameSize;frame.height=displayFrameSize;
         const ctx=frame.getContext('2d');ctx.imageSmoothingEnabled=false;
         const texture=new THREE.CanvasTexture(frame);texture.colorSpace=THREE.SRGBColorSpace;texture.magFilter=THREE.NearestFilter;texture.minFilter=THREE.NearestFilter;texture.generateMipmaps=false;
         const material=new THREE.SpriteMaterial({map:texture,transparent:true,depthWrite:false,toneMapped:false});
         const sprite=new THREE.Sprite(material);sprite.center.set(.5,0);sprite.position.y=.13;sprite.scale.set(height,height,1);group.add(sprite);
         const entry={ctx,texture,image,current:-1};animated.push(entry);
-        function frameAt(i){if(entry.current===i)return;entry.current=i;ctx.clearRect(0,0,64,64);ctx.drawImage(image,(i%2)*64,Math.floor(i/2)*64,64,64,0,0,64,64);texture.needsUpdate=true}
+        function frameAt(i){if(entry.current===i)return;entry.current=i;ctx.clearRect(0,0,displayFrameSize,displayFrameSize);ctx.drawImage(image,(i%2)*sourceFrameSize,Math.floor(i/2)*sourceFrameSize,sourceFrameSize,sourceFrameSize,0,0,displayFrameSize,displayFrameSize);texture.needsUpdate=true}
         frameAt(0);return {group,frameAt};
       }
       // Neutral placeholder is used only if the caller has no authorized sprite.

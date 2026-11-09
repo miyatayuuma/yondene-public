@@ -1,6 +1,6 @@
 import {initializeApp} from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-app.js';
 import {getAuth,GoogleAuthProvider,signInWithPopup,signInWithRedirect,getRedirectResult,setPersistence,browserLocalPersistence,onAuthStateChanged,signOut} from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-auth.js';
-import {getFirestore,doc,collection,getDoc,setDoc,deleteDoc,onSnapshot,Timestamp,serverTimestamp,runTransaction,writeBatch} from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-firestore.js';
+import {getFirestore,doc,collection,getDoc,getDocs,query,limit,setDoc,deleteDoc,onSnapshot,Timestamp,serverTimestamp,runTransaction,writeBatch} from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-firestore.js';
 import {firebaseConfig} from './firebase-config.mjs?build=20261019-shelf-v28';
 import {isPermissionDenied,staleMembershipRoute} from './startup-recovery.mjs?build=20261019-shelf-v28';
 import {newInviteToken,parseInviteHash,oneTimeInviteUrl} from './invite-links.mjs?build=20261019-shelf-v28';
@@ -14,9 +14,10 @@ import {mountFamilyActivity} from './activity.mjs?build=20261019-shelf-v28';
 import {mountChildRating} from './child-rating.mjs?build=20261019-shelf-v28';
 import {mountReadingRecordEditor} from './reading-record-editor.mjs?build=20261025-reading-legacy-v1';
 import {readerNameFromShelf} from './reader-name.mjs?build=20261019-shelf-v28';
-import {STATUSES,ACTIVE_READ_FILTER,filteredBooks,readPeriodLabel,compactReadPeriodLabel,readingModeLabel,emptyStateMessage} from './domain.mjs?build=20261109-synopsis-v1';
+import {mountBookForest} from './book-forest.mjs?build=20261109-book-forest-v1';
+import {STATUSES,ACTIVE_READ_FILTER,filteredBooks,readPeriodLabel,compactReadPeriodLabel,readingModeLabel,emptyStateMessage} from './domain.mjs?build=20261109-forest-v1';
 
-const APP_BUILD='20261109-synopsis-v1';
+const APP_BUILD='20261109-forest-v1';
 const $=id=>{const element=document.getElementById(id);if(!element)throw new Error('APP_DOM_MISMATCH: missing #'+id);return element};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const safeCover=url=>/^(https:\/\/|data:image\/(jpeg|png|webp);base64,)/i.test(String(url||''))?String(url):'';
@@ -24,7 +25,7 @@ const safeSourceUrl=url=>/^https:\/\/[^\s]+$/i.test(String(url||''))?String(url)
 const SHOW=['loading','loginPanel','setupPanel','shelfPanel'];
 let auth,db,user=null,fid='',role='',household=null,books=[],series=[],members=[],profiles=[],invites=[],openInvites=[],lastInviteLink='';
 let unsubs=[],view='shelf',generation=0,ratings=new Map(),closeRating=null,refreshRating=null,closeReadingEdit=null;
-let closeCommunity=null,closeRecommendations=null,closeActivity=null,pendingUI=null;
+let closeCommunity=null,closeRecommendations=null,closeActivity=null,pendingUI=null,closeForest=null;
 const inviteFromUrl=new URLSearchParams(location.search).get('family')||'';
 const openInviteFromUrl=parseInviteHash(location.hash);
 
@@ -84,7 +85,7 @@ function updateShelfHeading(){
   $('shelfBrand').textContent=household?name:'家族のほんだな';
   document.title=household?'よんでね | '+name:'よんでね';
 }
-function closeListeners(){pendingUI?.dispose();pendingUI=null;closeActivity?.();closeActivity=null;closeRecommendations?.();closeRecommendations=null;closeCommunity?.();closeCommunity=null;closeRating?.();closeRating=null;refreshRating=null;closeReadingEdit?.();closeReadingEdit=null;ratings=new Map();unsubs.forEach(u=>u());unsubs=[];fid='';books=[];series=[];members=[];profiles=[];invites=[];openInvites=[];lastInviteLink='';household=null;role='';view='shelf';delete $('content').dataset.screen;$('content').replaceChildren();updateShelfHeading()}
+function closeListeners(){closeForest?.();closeForest=null;pendingUI?.dispose();pendingUI=null;closeActivity?.();closeActivity=null;closeRecommendations?.();closeRecommendations=null;closeCommunity?.();closeCommunity=null;closeRating?.();closeRating=null;refreshRating=null;closeReadingEdit?.();closeReadingEdit=null;ratings=new Map();unsubs.forEach(u=>u());unsubs=[];fid='';books=[];series=[];members=[];profiles=[];invites=[];openInvites=[];lastInviteLink='';household=null;role='';view='shelf';delete $('content').dataset.screen;$('content').replaceChildren();updateShelfHeading()}
 function familyDoc(...a){return doc(db,'families',fid,...a)}
 function familyCollection(...a){return collection(db,'families',fid,...a)}
 async function login(){
@@ -587,6 +588,41 @@ function renderFamily(){
       }catch(error){statusError(error)}
       finally{nicknameSave.disabled=false;nicknameInput.disabled=false}
     };
+    if(role==='owner'){
+      const forestArea=document.createElement('section');forestArea.className='forestSettingsEntry';
+      const forestTitle=document.createElement('h3');forestTitle.textContent='🌿 本の森';forestArea.append(forestTitle);
+      const forestDescription=document.createElement('p');
+      forestDescription.textContent='読んだ本・★・感想が増えると育つ、歩いて遊べる小さな谷。景色や庭を変えて楽しめます。';
+      forestArea.append(forestDescription);
+      const forestLaunch=document.createElement('button');forestLaunch.className='primary';
+      forestLaunch.type='button';forestLaunch.textContent='本の森へ行く';
+      forestLaunch.onclick=async()=>{
+        if(role!=='owner'||!fid||closeForest)return;
+        forestLaunch.disabled=true;forestLaunch.textContent='森を準備しています…';
+        const familyId=fid,ownerUid=user.uid;
+        const currentBooks=books.slice(),read=currentBooks.filter(b=>b.status==='read');
+        const reflectedBookIds=new Set();
+        try{
+          // The existing collection is per-book, not a publicly readable index.
+          // The first document is enough to count a book with a reflection.
+          let cursor=0;
+          await Promise.all(Array.from({length:Math.min(4,read.length)},async()=>{
+            while(cursor<read.length){
+              const book=read[cursor++];
+              try{
+                const found=await getDocs(query(collection(db,'families',familyId,'books',book.id,'childReflections'),limit(1)));
+                if(!found.empty)reflectedBookIds.add(book.id);
+              }catch(error){console.warn('Forest reflection progress unavailable',error)}
+            }
+          }));
+          if(role!=='owner'||fid!==familyId||user?.uid!==ownerUid)return;
+          closeForest=mountBookForest({familyId,books:currentBooks,ratings:new Map(ratings),reflectedBookIds,
+            onClose:()=>{closeForest=null}});
+        }catch(error){statusError(error)}
+        finally{forestLaunch.disabled=false;forestLaunch.textContent='本の森へ行く'}
+      };
+      forestArea.append(forestLaunch);root.append(forestArea);
+    }
     if(role==='owner'){
       pendingUI=mountPendingReflections({db,fid,books:()=>books,container:root,
         onBook:id=>{

@@ -172,13 +172,18 @@ export function normalizeBook(src){
   const cover=String(src.coverUrl||'').trim();
   if(cover&&!/^https:\/\//i.test(cover)&&!/^data:image\/(?:jpeg|png|webp);base64,/i.test(cover))throw Error('表紙はHTTPS画像URLまたは画像データのみ指定できます');
   if(cover.length>650000)throw Error('表紙画像が大きすぎます');
+  const synopsis=String(src.synopsis||'').trim();
+  const synopsisSourceUrl=String(src.synopsisSourceUrl||'').trim();
+  if(synopsis.length>500)throw Error('あらすじは500文字以内です');
+  if(Boolean(synopsis)!==Boolean(synopsisSourceUrl))throw Error('あらすじと出典URLは一緒に指定してください');
+  if(synopsisSourceUrl&&!/^https:\/\/[^\s]+$/i.test(synopsisSourceUrl))throw Error('あらすじの出典はHTTPS URLが必要です');
   const toNum=v=>v?Number(v):null;
   return {...src,title,status,finishedAt,finishedPeriodStart:start,finishedPeriodEnd:end,
-    finishedPeriodLabel:label,coverUrl:cover,
+    finishedPeriodLabel:label,coverUrl:cover,synopsis,synopsisSourceUrl,
     publicationYear:toNum(src.publicationYear),volume:toNum(src.volume),
     pageCount:toNum(src.pageCount),updatedAt:new Date().toISOString()};
 }
-export function newBook(){return {id:crypto.randomUUID(),title:'',titleKana:'',author:'',authorKana:'',status:'unread',publicationYear:null,finishedAt:'',finishedPeriodStart:'',finishedPeriodEnd:'',finishedPeriodLabel:'',isbn:'',seriesId:'',volume:null,edition:'',publisher:'',ageLabel:'',ageSource:'',coverUrl:'',notes:'',readOrder:null,readingMode:''}}
+export function newBook(){return {id:crypto.randomUUID(),title:'',titleKana:'',author:'',authorKana:'',status:'unread',publicationYear:null,finishedAt:'',finishedPeriodStart:'',finishedPeriodEnd:'',finishedPeriodLabel:'',isbn:'',seriesId:'',volume:null,edition:'',publisher:'',ageLabel:'',ageSource:'',coverUrl:'',synopsis:'',synopsisSourceUrl:'',notes:'',readOrder:null,readingMode:''}}
 
 // Patch-only import: never overwrites the book record, status, or family notes.
 export function validatePeriodUpdates(raw){

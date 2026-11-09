@@ -231,6 +231,34 @@ test('unsafe operations and unknown fields rejected',()=>{
   assert.throws(()=>s.api.parse(cells),/変更不可/);
 });
 
+test('synopsis metadata is bibliographic, source-bound, and strictly validated',()=>{
+  const s=setup({mockRelease:true});
+  const cmd={schemaVersion:1,commandId:'gas-synopsis-demo-001',op:'catalog.audit',
+    reason:'Synthetic synopsis example',entries:[{id:'demo-book',expectedTitle:'Demo Book',
+      patch:{synopsis:'A child explores an unfamiliar town.',
+        synopsisSourceUrl:'https://example.org/publisher/book'},
+      expected:{synopsis:'',synopsisSourceUrl:''}}]};
+  assert.equal(s.api.apply('fake',s.env,withCommand(s,cmd)),'APPLIED');
+  const writes=s.getCommitted().writes;
+  assert.equal(writes[0].update.fields.synopsis.stringValue,cmd.entries[0].patch.synopsis);
+  assert.equal(writes[0].update.fields.synopsisSourceUrl.stringValue,cmd.entries[0].patch.synopsisSourceUrl);
+  assert.deepEqual(Object.keys(writes[0].update.fields).sort(),['synopsis','synopsisSourceUrl','updatedAt']);
+  for(const badPatch of [
+    {synopsis:'Missing URL'},
+    {synopsis:'Body',synopsisSourceUrl:'http://example.org/'},
+    {synopsis:'Body',synopsisSourceUrl:'javascript:alert(1)'},
+    {synopsis:'x'.repeat(501),synopsisSourceUrl:'https://example.org'},
+    {synopsis:'',synopsisSourceUrl:'https://example.org'}
+  ]){
+    assert.throws(()=>withCommand(s,{...cmd,entries:[{...cmd.entries[0],patch:badPatch}]}),
+      /あらすじ|HTTPS/);
+  }
+  const patch={...s.command,commandId:'gas-synopsis-patch-002',
+    patch:{synopsis:'The tale begins in a distant village.',
+      synopsisSourceUrl:'https://example.org/publisher/book'}};
+  assert.equal(withCommand(s,patch).command.patch.synopsis,patch.patch.synopsis);
+});
+
 test('duplicate IDs stop queue scan',()=>{
   const s=setup();
   const sheet={getLastRow:()=>3,getRange:()=>({getDisplayValues:()=>[s.cells,s.cells]})};

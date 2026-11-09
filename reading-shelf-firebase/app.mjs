@@ -1,5 +1,5 @@
 import {initializeApp} from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-app.js';
-import {getAuth,GoogleAuthProvider,signInWithPopup,signInWithRedirect,getRedirectResult,setPersistence,browserLocalPersistence,onAuthStateChanged,signOut} from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-auth.js';
+import {getAuth,GoogleAuthProvider,signInWithPopup,signInWithRedirect,reauthenticateWithPopup,getRedirectResult,setPersistence,browserLocalPersistence,onAuthStateChanged,signOut} from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-auth.js';
 import {getFirestore,doc,collection,getDoc,getDocs,query,limit,setDoc,deleteDoc,onSnapshot,Timestamp,serverTimestamp,runTransaction,writeBatch} from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-firestore.js';
 import {firebaseConfig} from './firebase-config.mjs?build=20261019-shelf-v28';
 import {isPermissionDenied,staleMembershipRoute} from './startup-recovery.mjs?build=20261019-shelf-v28';
@@ -14,10 +14,11 @@ import {mountFamilyActivity} from './activity.mjs?build=20261019-shelf-v28';
 import {mountChildRating} from './child-rating.mjs?build=20261019-shelf-v28';
 import {mountReadingRecordEditor} from './reading-record-editor.mjs?build=20261025-reading-legacy-v1';
 import {readerNameFromShelf} from './reader-name.mjs?build=20261019-shelf-v28';
-import {mountBookForest} from './book-forest.mjs?build=20261109-book-forest-v1';
-import {STATUSES,ACTIVE_READ_FILTER,filteredBooks,readPeriodLabel,compactReadPeriodLabel,readingModeLabel,emptyStateMessage} from './domain.mjs?build=20261109-forest-v1';
+import {mountBookForest} from './book-forest.mjs?build=20261109-drive-sprites-v1';
+import {authorizeForestDrive,loadPrivateForestSprites} from './book-forest-drive.mjs?build=20261109-drive-sprites-v1';
+import {STATUSES,ACTIVE_READ_FILTER,filteredBooks,readPeriodLabel,compactReadPeriodLabel,readingModeLabel,emptyStateMessage} from './domain.mjs?build=20261109-drive-sprites-v1';
 
-const APP_BUILD='20261109-forest-v1';
+const APP_BUILD='20261109-drive-sprites-v1';
 const $=id=>{const element=document.getElementById(id);if(!element)throw new Error('APP_DOM_MISMATCH: missing #'+id);return element};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const safeCover=url=>/^(https:\/\/|data:image\/(jpeg|png|webp);base64,)/i.test(String(url||''))?String(url):'';
@@ -25,7 +26,7 @@ const safeSourceUrl=url=>/^https:\/\/[^\s]+$/i.test(String(url||''))?String(url)
 const SHOW=['loading','loginPanel','setupPanel','shelfPanel'];
 let auth,db,user=null,fid='',role='',household=null,books=[],series=[],members=[],profiles=[],invites=[],openInvites=[],lastInviteLink='';
 let unsubs=[],view='shelf',generation=0,ratings=new Map(),closeRating=null,refreshRating=null,closeReadingEdit=null;
-let closeCommunity=null,closeRecommendations=null,closeActivity=null,pendingUI=null,closeForest=null;
+let closeCommunity=null,closeRecommendations=null,closeActivity=null,pendingUI=null,closeForest=null,forestSpriteCache=null;
 const inviteFromUrl=new URLSearchParams(location.search).get('family')||'';
 const openInviteFromUrl=parseInviteHash(location.hash);
 
@@ -85,7 +86,7 @@ function updateShelfHeading(){
   $('shelfBrand').textContent=household?name:'家族のほんだな';
   document.title=household?'よんでね | '+name:'よんでね';
 }
-function closeListeners(){closeForest?.();closeForest=null;pendingUI?.dispose();pendingUI=null;closeActivity?.();closeActivity=null;closeRecommendations?.();closeRecommendations=null;closeCommunity?.();closeCommunity=null;closeRating?.();closeRating=null;refreshRating=null;closeReadingEdit?.();closeReadingEdit=null;ratings=new Map();unsubs.forEach(u=>u());unsubs=[];fid='';books=[];series=[];members=[];profiles=[];invites=[];openInvites=[];lastInviteLink='';household=null;role='';view='shelf';delete $('content').dataset.screen;$('content').replaceChildren();updateShelfHeading()}
+function closeListeners(){closeForest?.();closeForest=null;forestSpriteCache?.dispose();forestSpriteCache=null;pendingUI?.dispose();pendingUI=null;closeActivity?.();closeActivity=null;closeRecommendations?.();closeRecommendations=null;closeCommunity?.();closeCommunity=null;closeRating?.();closeRating=null;refreshRating=null;closeReadingEdit?.();closeReadingEdit=null;ratings=new Map();unsubs.forEach(u=>u());unsubs=[];fid='';books=[];series=[];members=[];profiles=[];invites=[];openInvites=[];lastInviteLink='';household=null;role='';view='shelf';delete $('content').dataset.screen;$('content').replaceChildren();updateShelfHeading()}
 function familyDoc(...a){return doc(db,'families',fid,...a)}
 function familyCollection(...a){return collection(db,'families',fid,...a)}
 async function login(){
@@ -592,7 +593,7 @@ function renderFamily(){
       const forestArea=document.createElement('section');forestArea.className='forestSettingsEntry';
       const forestTitle=document.createElement('h3');forestTitle.textContent='🌿 本の森';forestArea.append(forestTitle);
       const forestDescription=document.createElement('p');
-      forestDescription.textContent='読んだ本・★・感想が増えると育つ、歩いて遊べる小さな谷。景色や庭を変えて楽しめます。';
+      forestDescription.textContent='読んだ本・★・感想で育つ小さな谷。登場人物の画像は非公開Google Driveから読み込みます（初回にDriveの読み取り許可が必要です）。';
       forestArea.append(forestDescription);
       const forestLaunch=document.createElement('button');forestLaunch.className='primary';
       forestLaunch.type='button';forestLaunch.textContent='本の森へ行く';
@@ -603,6 +604,17 @@ function renderFamily(){
         const currentBooks=books.slice(),read=currentBooks.filter(b=>b.status==='read');
         const reflectedBookIds=new Set();
         try{
+          if(!forestSpriteCache){
+            forestLaunch.textContent='Google Driveへのアクセスを確認しています…';
+            // Request OAuth while still in the explicit button gesture, before
+            // the Firestore reflection scan. Neither token nor PNG is persisted.
+            const token=await authorizeForestDrive({user,GoogleAuthProvider,reauthenticateWithPopup});
+            forestLaunch.textContent='非公開ドット絵を読み込んでいます…';
+            const loaded=await loadPrivateForestSprites(token);
+            if(role!=='owner'||fid!==familyId||user?.uid!==ownerUid){loaded.dispose();return}
+            forestSpriteCache=loaded;
+          }
+          forestLaunch.textContent='読書記録を確認しています…';
           // The existing collection is per-book, not a publicly readable index.
           // The first document is enough to count a book with a reflection.
           let cursor=0;
@@ -616,7 +628,7 @@ function renderFamily(){
             }
           }));
           if(role!=='owner'||fid!==familyId||user?.uid!==ownerUid)return;
-          closeForest=mountBookForest({familyId,books:currentBooks,ratings:new Map(ratings),reflectedBookIds,
+          closeForest=mountBookForest({familyId,books:currentBooks,ratings:new Map(ratings),reflectedBookIds,privateSprites:forestSpriteCache,
             onClose:()=>{closeForest=null}});
         }catch(error){statusError(error)}
         finally{forestLaunch.disabled=false;forestLaunch.textContent='本の森へ行く'}

@@ -43,7 +43,7 @@ test('each character and both banks can be reached from the start on the navigat
       if(!seen.has(key)&&isWalkable(nx,nz)){seen.add(key);queue.push([nx,nz])}
     }
   }
-  assert.equal(new Set(CHARACTERS.map(c=>c.id)).size,9);
+  assert.equal(new Set(CHARACTERS.map(c=>c.id)).size,10);
   for(const c of CHARACTERS)assert.ok(queue.some(([x,z])=>Math.hypot(x-c.x,z-c.z)<6),c.id);
 });
 

@@ -1,4 +1,5 @@
 import {CHARACTERS,START,isWalkable,walkHeight,heightAt,monthInJapan,MONTHS} from './book-forest-world.mjs';
+import {createForestNpcMotion} from './book-forest-npc.mjs';
 
 const clamp=(n,a,b)=>Math.min(b,Math.max(a,n));
 function el(tag,klass,text){const node=document.createElement(tag);if(klass)node.className=klass;if(text!==undefined)node.textContent=text;return node}
@@ -34,7 +35,7 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
   function endDialogue(){
     if(!chatOpen)return;
     const previous=activeCharacter;chatSession++;chatOpen=false;activeCharacter=null;chat.hidden=true;
-    try{dialogue?.end?.({characterId:previous?.id,displayName:previous?.name})}catch(error){console.warn('Forest dialogue end failed',error)}
+    try{dialogue?.end?.({characterId:previous?.dialogueId||previous?.id,displayName:previous?.name})}catch(error){console.warn('Forest dialogue end failed',error)}
   }
   function dispose(){
     if(disposed)return;disposed=true;endDialogue();cancelAnimationFrame(animationId);stopInput();cleanupWorld();resizeObserver?.disconnect();
@@ -54,7 +55,7 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
   async function showDialogue(character){
     if(chatOpen||disposed)return;
     stopInput();chatOpen=true;chat.hidden=false;activeCharacter=character;speaker.textContent=character.name;message.textContent='…';replies.replaceChildren();
-    const session=++chatSession,identity={characterId:character.id,displayName:character.name};
+    const session=++chatSession,identity={characterId:character.dialogueId||character.id,displayName:character.name};
     try{
       const result=await (dialogue?.start||defaultDialogue.start)(identity);
       if(!chatOpen||session!==chatSession||disposed)return;
@@ -87,7 +88,7 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
       const shadowCtx=shadowCanvas.getContext('2d'),gradient=shadowCtx.createRadialGradient(32,32,1,32,32,31);
       gradient.addColorStop(0,'rgba(31,47,32,.42)');gradient.addColorStop(1,'rgba(31,47,32,0)');shadowCtx.fillStyle=gradient;shadowCtx.fillRect(0,0,64,64);
       const shadowTex=new THREE.CanvasTexture(shadowCanvas),shadow=new THREE.Mesh(new THREE.PlaneGeometry(5,3),new THREE.MeshBasicMaterial({map:shadowTex,transparent:true,depthWrite:false,opacity:.7}));
-      shadow.rotation.x=-Math.PI/2;shadow.position.y=.08;group.add(shadow);
+      shadow.rotation.x=-Math.PI/2;shadow.position.y=.08;shadow.scale.setScalar(height/7);group.add(shadow);
       if(image){
         // Keep the original high-resolution PNG in private Drive. A smaller
         // GPU texture is sufficient at the sprite's on-screen size on phones.
@@ -107,9 +108,10 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
       return {group,frameAt:()=>{}};
     }
     const player=spriteFor(avatar,7.2);scene.add(player.group);
-    const npcs=CHARACTERS.map(info=>{const model=spriteFor(info.id,6.8);model.group.position.set(info.x,walkHeight(info.x,info.z),info.z);scene.add(model.group);return {...info,model}});
+    const npcs=CHARACTERS.map(info=>{const model=spriteFor(info.spriteId||info.id,6.8*info.scale);model.group.position.set(info.x,walkHeight(info.x,info.z),info.z);scene.add(model.group);return {...info,model,moving:false}});
     let playerX=START.x,playerZ=START.z,yaw=START.yaw,targetYaw=yaw,pitch=.53,targetPitch=pitch,clock=0,last=performance.now(),frames=0,frameTime=0,lastPerf=last,checkMonth=0;
     const canWalk=(x,z)=>isWalkable(x,z)&&!treeObstacles.some(t=>Math.hypot(x-t.x,z-t.z)<t.r);
+    const npcMotion=createForestNpcMotion(npcs,canWalk);
     const nearby=()=>{
       let candidate=null,distance=7.2;
       for(const npc of npcs){const d=Math.hypot(playerX-npc.x,playerZ-npc.z);if(d<distance){candidate=npc;distance=d}}
@@ -162,6 +164,11 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
         const moving=Math.hypot(playerX-oldX,playerZ-oldZ)>.001;
         player.group.position.set(playerX,walkHeight(playerX,playerZ),playerZ);
         player.frameAt(moving?Math.floor(now/250)%4:0);
+        npcMotion.step(dt,{playerX,playerZ,activeId:chatOpen?activeCharacter?.id:null});
+        for(const npc of npcs){
+          npc.model.group.position.set(npc.x,walkHeight(npc.x,npc.z),npc.z);
+          npc.model.frameAt(npc.moving?Math.floor(now/250)%4:0);
+        }
         moveCamera(dt);world.animate(clock);
         chatButton.hidden=chatOpen||!nearby();
         renderer.render(scene,camera);
@@ -180,8 +187,9 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
     if(debug?.onReady)debug.onReady({
       setView({x,z,yaw:angle=0,pitch:vertical=.53}){playerX=x;playerZ=z;yaw=targetYaw=angle;pitch=targetPitch=vertical;player.group.position.set(x,walkHeight(x,z),z);moveCamera(1,true)},
       setMonth(month){if(MONTHS[month])world.setMonth(month)},
-      getState(){return {x:playerX,z:playerZ,chatOpen,drawCalls:renderer.info.render.calls,triangles:renderer.info.render.triangles,pixelRatio:renderer.getPixelRatio(),nearby:nearby()?.id||null}},
-      characters:npcs.map(({id,name,x,z})=>({id,name,x,z}))
+      getState(){return {x:playerX,z:playerZ,chatOpen,drawCalls:renderer.info.render.calls,triangles:renderer.info.render.triangles,pixelRatio:renderer.getPixelRatio(),nearby:nearby()?.id||null,
+        npcs:npcs.map(({id,x,z,moving})=>({id,x,z,moving}))}},
+      characters:npcs.map(({id,name,x,z,scale,spriteId,dialogueId})=>({id,name,x,z,scale,spriteId:spriteId||id,dialogueId:dialogueId||id}))
     });
     loading.remove();animationId=requestAnimationFrame(tick);
   }

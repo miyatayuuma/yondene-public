@@ -10,8 +10,11 @@ export const FOREST_SPRITE_NAMES=[
 const FILE_ID=/^[A-Za-z0-9_-]{20,120}$/;
 
 export function validateForestSpriteManifest(manifest){
-  if(manifest?.schemaVersion!==1||manifest?.columns!==2||manifest?.rows!==2||
-    manifest?.frameSize!==64||manifest?.frameDurationMs!==250||
+  const legacy=manifest?.schemaVersion===1&&manifest?.frameSize===64;
+  const highres=manifest?.schemaVersion===2&&Number.isInteger(manifest?.frameSize)&&
+    manifest.frameSize>=128&&manifest.frameSize<=1024;
+  if((!legacy&&!highres)||manifest?.columns!==2||manifest?.rows!==2||
+    manifest?.frameDurationMs!==250||
     !manifest.assets||typeof manifest.assets!=='object')throw Error('ドット絵の一覧が正しくありません');
   const entries=Object.entries(manifest.assets);
   if(entries.length!==FOREST_SPRITE_NAMES.length||
@@ -51,15 +54,16 @@ export async function loadPrivateForestSprites(token,{fetchImpl=fetch,decodeImag
   const manifestResponse=await get(FOREST_MANIFEST_ID);
   const manifest=await manifestResponse.json();
   const assets=validateForestSpriteManifest(manifest);
+  const sheetSize=manifest.frameSize*2;
   const images={};
   try{
     // At 128x128 and 64 colors the 11 images collectively weigh ~30 KiB.
     await Promise.all(FOREST_SPRITE_NAMES.map(async name=>{
       const response=await get(assets[name]);
       const blob=await response.blob();
-      if(blob.size>160000||blob.type&&!blob.type.includes('image/png'))throw Error('PNG画像の形式が正しくありません');
+      if(blob.size>2000000||blob.type&&!blob.type.includes('image/png'))throw Error('PNG画像の形式が正しくありません');
       const decoded=await decodeImage(blob);
-      if(decoded.width!==128||decoded.height!==128){
+      if(decoded.width!==sheetSize||decoded.height!==sheetSize){
         decoded.close?.();
         throw Error('画像のコマ配置が正しくありません');
       }

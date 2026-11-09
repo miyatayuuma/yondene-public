@@ -1,0 +1,128 @@
+.bookForestOpen{overflow:hidden}
+.bookForest{
+  position:fixed;inset:0;z-index:1000;overflow:hidden;isolation:isolate;
+  background:#b8dcd3;color:#30483d;font-family:system-ui,-apple-system,"Noto Sans JP",sans-serif;
+  touch-action:none;user-select:none;-webkit-user-select:none;
+}
+.bookForestCanvas{display:block;width:100%;height:100%;touch-action:none;outline:none}
+.bookForestVignette{
+  position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(180deg,#203d4a25 0%,transparent 28%,transparent 71%,#163a282d 100%);
+}
+.bookForestTop{
+  position:absolute;top:max(13px,env(safe-area-inset-top));left:clamp(15px,3vw,42px);
+  right:clamp(15px,3vw,42px);display:flex;justify-content:space-between;align-items:flex-start;
+  gap:12px;pointer-events:none;background:none!important;border:none!important;backdrop-filter:none!important;
+}
+.bookForestBrand{color:#fff;text-shadow:0 2px 11px #173c4266}
+.bookForestEyebrow{font-size:10px;letter-spacing:.29em;font-weight:850}
+.bookForestBrand h2{margin:0;font:800 clamp(29px,4.8vw,49px)/1.18 serif;letter-spacing:.08em}
+.bookForestClose,.bookForestReset{
+  pointer-events:auto;color:#38594a;background:#fffefaeb;border:1px solid #e4e8d6;
+  box-shadow:0 6px 18px #283d3740;border-radius:100px;padding:10px 19px;font-weight:750;white-space:nowrap;
+}
+.bookForestClose:hover,.bookForestReset:hover{background:white}
+.bookForestStatus{
+  position:absolute;top:clamp(94px,13vh,135px);left:clamp(15px,3vw,42px);
+  padding:13px 16px;display:flex;flex-direction:column;gap:3px;max-width:min(320px,60vw);
+  border-radius:18px;background:#fffdf0df;border:1px solid #ffffffa9;
+  box-shadow:0 8px 28px #25413d20;backdrop-filter:blur(12px);font-size:12px;
+}
+.bookForestStage{font-weight:850;font-size:17px;letter-spacing:.02em;color:#3c6949}
+.bookForestSeeds{color:#567664;font-weight:750}
+.bookForestHint{color:#728471;font-size:11px}
+.bookForestControls{
+  position:absolute;top:clamp(96px,13vh,135px);right:clamp(15px,3vw,42px);
+  display:grid;gap:8px;width:min(212px,34vw);
+}
+.bookForestChoice{
+  border:1px solid #ffffffaa;border-radius:13px;padding:7px 10px;
+  background:#fffdf0dd;box-shadow:0 7px 22px #26423719;backdrop-filter:blur(10px);
+  display:grid;gap:3px;
+}
+.bookForestChoice span{font-size:10px;font-weight:780;color:#748477}
+.bookForestChoice select{
+  font-size:12px;min-width:0;width:100%;padding:3px 23px 3px 1px;background:transparent;
+  color:#365648;font-weight:750;border:0;border-radius:0;box-shadow:none;
+  touch-action:manipulation;cursor:pointer;
+}
+.bookForestReset{font-size:10px;padding:7px 9px}
+.bookForestBottom{
+  position:absolute;left:max(20px,env(safe-area-inset-left));right:max(18px,env(safe-area-inset-right));
+  bottom:max(18px,env(safe-area-inset-bottom));display:flex;align-items:end;justify-content:space-between;
+  pointer-events:none;gap:15px;
+}
+.bookForestJoystick{
+  pointer-events:auto;touch-action:none;position:relative;display:grid;place-items:center;
+  width:122px;height:122px;border-radius:50%;flex:none;
+  background:#fdfef364;border:2px solid #ffffff9e;box-shadow:0 7px 20px #284c4151;
+  backdrop-filter:blur(8px);
+}
+.bookForestJoystick::before{
+  content:'';width:72px;height:72px;position:absolute;border-radius:50%;
+  border:1px dashed #ffffffb9;
+}
+.bookForestNub{
+  position:relative;width:46px;height:46px;border-radius:50%;background:#fefef4d9;
+  border:2px solid white;box-shadow:0 3px 10px #36564954;pointer-events:none;
+}
+.bookForestInstruction{
+  color:#fff;font-size:11px;text-shadow:0 2px 8px #152b27a8;
+  text-align:center;margin:auto 0 14px;max-width:230px;
+}
+.bookForestChat{
+  pointer-events:auto;border-radius:99px;background:#fff9e9ed;color:#3e6750;
+  font-size:13px;font-weight:850;border:1px solid #fff;
+  padding:13px 19px;box-shadow:0 6px 25px #294b3e55;white-space:nowrap;
+}
+.bookForestConversation{
+  position:absolute;left:50%;bottom:max(155px,calc(env(safe-area-inset-bottom) + 130px));
+  transform:translateX(-50%);width:min(490px,calc(100vw - 40px));
+  background:#fffaf0f5;border:2px solid white;border-radius:23px;
+  box-shadow:0 16px 45px #1e423b66;padding:16px 20px 17px;backdrop-filter:blur(12px);
+  color:#324b3d;
+}
+.bookForestConversation[hidden]{display:none!important}
+.bookForestSpeaker{font-size:14px;color:#507d5e}
+.bookForestMessage{font-size:15px;line-height:1.75;margin:6px 0 12px}
+.bookForestReplies{display:flex;gap:8px;flex-wrap:wrap}
+.bookForestReplies button,.bookForestDismiss{
+  border:1px solid #d1e0c6;border-radius:99px;background:#e9f4dc;color:#436c48;
+  font-size:12px;padding:7px 14px;touch-action:manipulation;
+}
+.bookForestDismiss{position:absolute;top:10px;right:11px;font-size:10px;background:#fff}
+.bookForestLoading{
+  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  color:#365a4a;font-weight:750;text-align:center;line-height:1.8;
+  background:#fffef4ef;border:1px solid white;box-shadow:0 10px 34px #254c3855;
+  border-radius:18px;padding:22px 27px;min-width:210px;max-width:88vw;
+}
+.forestSettingsEntry{
+  background:linear-gradient(112deg,#eff9e9,#fff8e7);
+  border:1px solid #d7e7d3;border-radius:20px;padding:17px 19px;display:grid;gap:6px;
+}
+.forestSettingsEntry h3{margin:0;color:#316849;font-size:19px}
+.forestSettingsEntry p{margin:0 0 6px;color:#56715f;font-size:12px}
+.forestSettingsEntry .primary{width:fit-content}
+@media(max-width:670px){
+  .bookForestBrand h2{font-size:31px}
+  .bookForestTop{top:max(12px,env(safe-area-inset-top))}
+  .bookForestClose{font-size:12px;padding:9px 12px}
+  .bookForestStatus{top:max(74px,calc(env(safe-area-inset-top) + 61px));font-size:11px;max-width:58vw;padding:10px 11px}
+  .bookForestStage{font-size:14px}
+  .bookForestControls{top:max(75px,calc(env(safe-area-inset-top) + 61px));width:min(154px,37vw);gap:5px}
+  .bookForestChoice{padding:4px 8px;gap:0}
+  .bookForestChoice span{font-size:9px}
+  .bookForestChoice select{font-size:11px;padding:4px 18px 4px 0}
+  .bookForestJoystick{width:110px;height:110px}
+  .bookForestInstruction{display:none}
+  .bookForestChat{font-size:12px;padding:11px 12px;max-width:170px;white-space:normal}
+  .bookForestConversation{bottom:max(145px,calc(env(safe-area-inset-bottom) + 132px))}
+}
+@media(max-height:540px){
+  .bookForestStatus{top:62px;max-width:210px}
+  .bookForestControls{top:60px;grid-template-columns:1fr 1fr;width:min(350px,53vw)}
+  .bookForestPreview{grid-column:1/-1}
+  .bookForestJoystick{width:87px;height:87px}
+  .bookForestConversation{bottom:100px}
+}

@@ -137,8 +137,9 @@ test('legacy generic synopsis templates are rejected instead of voiced by a char
 
 test('relays never reveal unreviewed memory text without a receiver-specific line',async()=>{
   const {director}=setup({cues:[kikiStory,jijiRelay,jijiAmbient]});
-  await director.start({characterId:'kiki'});
-  await director.select({characterId:'kiki',choiceId:'to-jiji'});
+  const first=await director.start({characterId:'kiki'});
+  assert.equal(first.choices.some(choice=>choice.id==='to-jiji'),false);
+  assert.equal(await director.select({characterId:'kiki',choiceId:'to-jiji'}),null);
   director.end();
   const reply=await director.start({characterId:'jiji'});
   assert.match(reply.text,/静かなところ/);

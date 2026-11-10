@@ -10,8 +10,8 @@
 ```sh
 cd cloudflare/forest-ai
 npx wrangler@latest login
-npx wrangler@latest secret put OWNER_UID
 npx wrangler@latest deploy
+npx wrangler@latest secret put OWNER_UID
 ```
 
 `OWNER_UID` は Firebase Console → Authentication → Users にある **管理者の Firebase Auth UID** です。

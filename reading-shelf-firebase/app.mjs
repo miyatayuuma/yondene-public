@@ -32,7 +32,7 @@ const safeSourceUrl=url=>/^https:\/\/[^\s]+$/i.test(String(url||''))?String(url)
 const SHOW=['loading','loginPanel','setupPanel','shelfPanel'];
 let auth,db,firebaseApp=null,user=null,fid='',role='',household=null,books=[],series=[],members=[],profiles=[],invites=[],openInvites=[],lastInviteLink='';
 let unsubs=[],view='shelf',generation=0,ratings=new Map(),closeRating=null,refreshRating=null,closeReadingEdit=null;
-let closeCommunity=null,closeRecommendations=null,closeActivity=null,pendingUI=null,closeForest=null,forestSpriteCache=null,forestDialogueCache=null;
+let closeCommunity=null,closeRecommendations=null,closeActivity=null,pendingUI=null,closeForest=null,forestSpriteCache=null,forestDialogueCache=null,forestAIGeneratorPromise=null;
 const inviteFromUrl=new URLSearchParams(location.search).get('family')||'';
 const openInviteFromUrl=parseInviteHash(location.hash);
 
@@ -700,8 +700,13 @@ function renderFamily(){
           let dialogueEngine=conversation;
           if(conversation&&forestAIConfig.enabled===true){
             try{
-              const generate=await createForestAIGenerator({firebaseApp,
-                siteKey:forestAIConfig.appCheckSiteKey,modelId:forestAIConfig.modelId});
+              // App Check is initialized once for the app, not on every forest visit.
+              if(!forestAIGeneratorPromise){
+                forestAIGeneratorPromise=createForestAIGenerator({firebaseApp,
+                  siteKey:forestAIConfig.appCheckSiteKey,modelId:forestAIConfig.modelId})
+                  .catch(error=>{forestAIGeneratorPromise=null;throw error});
+              }
+              const generate=await forestAIGeneratorPromise;
               dialogueEngine=createForestLiveDialogueDirector({base:conversation,generate,
                 storage:localStorage,storageKey:'yondene-forest-ai-local-v1:'+ownerUid+':'+familyId});
             }catch(error){

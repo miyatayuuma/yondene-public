@@ -168,8 +168,11 @@ test('a sourced daily thought produces a new character-specific opening and logs
   director.onDisplayed(first,identity);
   director.onDisplayed(first,identity);
   assert.equal(JSON.parse(storage.getItem('forest-ai-local-v1:thought:events')).length,2);
-  director.end();
   books[0].status='unread';
+  const revoked=await director.select({...identity,choiceId:first.choices[0].id});
+  assert.equal(revoked.conversationComplete,true);
+  assert.equal(prompts.length,1,'a revoked book cannot enter another model prompt');
+  director.end();
   await director.start(identity);
   assert.equal(prompts.length,2);
   assert.equal(prompts[1].context.topic,undefined,'unread book cannot be forwarded');

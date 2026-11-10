@@ -1,6 +1,7 @@
 // Optional, bounded runtime dialogue on top of approved local NPC scripts.
 // The generator is injected: this module never holds a key or makes a network call.
-import {createForestThoughtSession,forestThoughtPrompt} from './book-forest-thought-seeds.mjs';
+import {createForestThoughtSession,forestThoughtPrompt,
+  availableForestThoughtSeeds} from './book-forest-thought-seeds.mjs';
 const CHARACTERS=new Set(['king','cat','kiki','jiji','skipper','zorori','ishishi','noshishi']);
 const VOICES={
   king:'王さま。自分のことは「余」。大げさで好奇心があり、子どもを歓迎する。',
@@ -173,6 +174,16 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     }
     pending=null;
     const label=current.choices.find(choice=>choice.id===choiceId).label;
+    if(activeThought?.seed){
+      try{
+        const authorized=availableForestThoughtSeeds({books:await getBooks(),
+          catalog:await getCatalog(),seeds:await getSeeds()});
+        if(!authorized.some(seed=>seed.id===activeThought.seed.id)){
+          return {text:GOODBYE[characterId]||'また森で会おうね。',choices:[],
+            conversationComplete:true};
+        }
+      }catch{return {text:'続きはまた今度ね。',choices:[],conversationComplete:true}}
+    }
     history.push({playerChoice:label});history=history.slice(-2);
     if(activeThought)thoughts.noteChoice(activeThought,characterId,label);
     record({event:'selected-offered-choice',characterId,label});

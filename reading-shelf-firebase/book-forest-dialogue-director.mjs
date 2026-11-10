@@ -198,7 +198,7 @@ export function createForestDialogueDirector({getBooks=()=>[],getCatalog=()=>[],
       .filter(choice=>!choice.relayTo||!memory||relayTargets?.get(memory.id)?.has(choice.relayTo))
       .map(choice=>({id:choice.id,label:choice.label}));
     if(!choices.length)choices.push({id:'another-topic',label:'ほかの話も聞く'});
-    return {text,choices};
+    return {text,choices,sourceKind:cue.kind};
   }
   function selectOption(option,characterId){
     const response=render(option);if(!response)return null;

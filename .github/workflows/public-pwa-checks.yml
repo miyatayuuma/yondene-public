@@ -28,6 +28,7 @@ jobs:
           bibliography-identity.test.mjs
           book-forest-ai-provider.test.mjs
           book-forest-cloudflare-provider.test.mjs
+          book-forest-conversation-log.test.mjs
           book-forest-cache.test.mjs
           book-forest-dialogue-director.test.mjs
           book-forest-dialogue-generation.test.mjs

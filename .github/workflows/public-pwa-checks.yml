@@ -39,6 +39,8 @@ jobs:
           book-forest-world.test.mjs
           book-forest-lifecycle.test.mjs
           book-forest-live-dialogue.test.mjs
+          book-forest-thought-seeds.test.mjs
+          book-forest-thought-sync.test.mjs
           book-forest-scene.test.mjs
           cover-thumbnails.test.mjs
           domain.test.mjs

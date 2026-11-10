@@ -213,9 +213,11 @@ export function createForestDialogueDirector({getBooks=()=>[],getCatalog=()=>[],
     if(option.cue.kind==='relay')state.pendingRelay=null;
     persist();return response;
   }
-  async function nextTopic(characterId,excludeKey=''){
+  async function nextTopic(characterId,excludeKey='',preferredMemoryId=''){
     const options=await candidates(characterId);
-    const picked=options.find(option=>`${option.cue.id}:${option.memory?.id||option.review?.id||''}`!==excludeKey&&render(option))||
+    const preferred=preferredMemoryId&&options.find(option=>option.cue.kind==='story'&&
+      option.memory?.id===preferredMemoryId&&render(option));
+    const picked=preferred||options.find(option=>`${option.cue.id}:${option.memory?.id||option.review?.id||''}`!==excludeKey&&render(option))||
       options.find(option=>render(option));
     if(picked)return selectOption(picked,characterId);
     active=null;
@@ -223,7 +225,7 @@ export function createForestDialogueDirector({getBooks=()=>[],getCatalog=()=>[],
       'いまは、森をいっしょに歩いてみよう。',choices:[]};
   }
   return {
-    async start({characterId}={}){
+    async start({characterId,preferredMemoryId=''}={}){
       if(!CHARACTERS.has(characterId))return {text:'また、森で会おうね。',choices:[]};
       active=null;
       if(characterId==='twins'){
@@ -231,7 +233,7 @@ export function createForestDialogueDirector({getBooks=()=>[],getCatalog=()=>[],
         if(result){state.visits.twins=numbers((state.visits.twins||0)+1,0,100000);
           persist();return result}
       }
-      const result=await nextTopic(characterId);
+      const result=await nextTopic(characterId,'',preferredMemoryId);
       state.visits[characterId]=numbers((state.visits[characterId]||0)+1,0,100000);
       persist();return result;
     },

@@ -117,6 +117,10 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
       twinHistory.hidden=true;twinHistory.replaceChildren();message.hidden=false;
       message.textContent=typeof result?.text==='string'?result.text:'';chat.scrollTop=0;
     }
+    // A seed counts as experienced only after a real conversation frame renders.
+    try{dialogue?.onDisplayed?.(result,identity)}catch(error){
+      console.warn('Forest thought display log unavailable',error)
+    }
     replies.replaceChildren();
     let choosing=false;
     for(const choice of Array.isArray(result?.choices)?result.choices:[]){

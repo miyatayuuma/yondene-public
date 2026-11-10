@@ -37,7 +37,7 @@ test('generates contextual reply choices, then a character reply only after a ch
   const log=JSON.parse(storage.getItem('forest-ai-local-v1:log'));
   assert.deepEqual(log.map(x=>x.event),['generated-choices','selected-offered-choice','generated-reply']);
   assert.equal(log[0].text,'今日はいい風がふいているね。','export can reconstruct the initial line');
-  assert.equal(log[0].promptVersion,'forest-short-exchange-v5');
+  assert.equal(log[0].promptVersion,'forest-thought-exchange-v6');
   assert.equal(log[1].label,'風の音を聞く');
   director.end();
 });
@@ -144,4 +144,36 @@ test('a previously generated choice cannot be replayed after a new encounter',as
   await director.start(identity);
   const result=await director.select({...identity,choiceId:prior.choices[0].id});
   assert.equal(result.text,'また遊ぼうね。','old choice is passed only to the local director');
+});
+
+test('a sourced daily thought produces a new character-specific opening and logs only actual display',async()=>{
+  const storage=memoryStorage(),prompts=[];
+  const books=[{id:'book-1',status:'read'}];
+  const catalog=[{schemaVersion:1,id:'mem-1',bookId:'book-1',text:'花を植えた',
+    spoilerLevel:1,evidenceStatus:'approved',confidence:'high',sourceUrl:'https://example.org'}];
+  const seeds=[{id:'seed-1',bookId:'book-1',title:'テストの本',memoryId:'mem-1',
+    fact:'花を植えた',question:'ひとりでやるのはえらい？',contrast:'助けてもらうのも勇気',
+    tags:'協力',lenses:'',spoiler:1,status:'使用可',sourceUrl:'https://example.org',
+    selectedCount:0,displayedCount:0}];
+  const director=createForestLiveDialogueDirector({base:base(),storage,startDelayMs:0,
+    now:()=>Date.UTC(2026,10,10,13),getBooks:()=>books,getCatalog:()=>catalog,getSeeds:()=>seeds,
+    generate:async prompt=>{prompts.push(prompt);return {text:'ひとりで飛んでみたけど、助けを求めるのも勇気ね。',
+      choices:['自分でやりたい','助けてもらう']}}});
+  const first=await director.start(identity);
+  assert.equal(first.text,'ひとりで飛んでみたけど、助けを求めるのも勇気ね。');
+  assert.equal(prompts[0].context.topic.question,'ひとりでやるのはえらい？');
+  assert.equal(prompts[0].context.topic.philosophy.axis,'自立と信頼');
+  assert.equal(JSON.stringify(prompts[0]).includes('book-1'),false);
+  assert.equal(JSON.parse(storage.getItem('forest-ai-local-v1:thought:events')).length,1);
+  director.onDisplayed(first,identity);
+  director.onDisplayed(first,identity);
+  assert.equal(JSON.parse(storage.getItem('forest-ai-local-v1:thought:events')).length,2);
+  books[0].status='unread';
+  const revoked=await director.select({...identity,choiceId:first.choices[0].id});
+  assert.equal(revoked.conversationComplete,true);
+  assert.equal(prompts.length,1,'a revoked book cannot enter another model prompt');
+  director.end();
+  await director.start(identity);
+  assert.equal(prompts.length,2);
+  assert.equal(prompts[1].context.topic,undefined,'unread book cannot be forwarded');
 });

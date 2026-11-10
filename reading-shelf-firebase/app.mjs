@@ -1,7 +1,7 @@
 import {initializeApp} from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-app.js';
 import {getAuth,getIdToken,GoogleAuthProvider,signInWithPopup,signInWithRedirect,reauthenticateWithPopup,getRedirectResult,setPersistence,browserLocalPersistence,onAuthStateChanged,signOut} from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-auth.js';
 import {getFirestore,doc,collection,getDoc,getDocs,query,limit,orderBy,setDoc,deleteDoc,onSnapshot,Timestamp,serverTimestamp,runTransaction,writeBatch} from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-firestore.js';
-import {firebaseConfig,forestAIConfig} from './firebase-config.mjs?build=20261110-forest-ai-v5';
+import {firebaseConfig,forestAIConfig} from './firebase-config.mjs?build=20261110-forest-ai-v6';
 import {isPermissionDenied,staleMembershipRoute} from './startup-recovery.mjs?build=20261019-shelf-v28';
 import {newInviteToken,parseInviteHash,oneTimeInviteUrl} from './invite-links.mjs?build=20261019-shelf-v28';
 import {shelfThumbnailUrl} from './cover-thumbnails.mjs?build=20261019-shelf-v28';
@@ -14,20 +14,22 @@ import {mountFamilyActivity} from './activity.mjs?build=20261019-shelf-v28';
 import {mountChildRating} from './child-rating.mjs?build=20261019-shelf-v28';
 import {mountReadingRecordEditor} from './reading-record-editor.mjs?build=20261025-reading-legacy-v1';
 import {readerNameFromShelf} from './reader-name.mjs?build=20261019-shelf-v28';
-import {mountBookForest,getForestAvatar,setForestAvatar} from './book-forest.mjs?build=20261110-forest-ai-v5';
-import {authorizeForestDrive,loadPrivateForestSprites} from './book-forest-drive.mjs?build=20261110-forest-ai-v5';
-import {saveCachedForestSprites,loadCachedForestSprites,clearCachedForestSprites} from './book-forest-cache.mjs?build=20261110-forest-ai-v5';
-import {loadPrivateForestDialogue} from './book-forest-private-dialogue.mjs?build=20261110-forest-ai-v5';
-import {saveCachedForestDialogue,loadCachedForestDialogue,clearCachedForestDialogue} from './book-forest-dialogue-cache.mjs?build=20261110-forest-ai-v5';
-import {createForestDialogueDirector} from './book-forest-dialogue-director.mjs?build=20261110-forest-ai-v5';
-import {createForestLiveDialogueDirector} from './book-forest-live-dialogue.mjs?build=20261110-forest-ai-v5';
-import {resetForestConversationHistoryOnce} from './book-forest-conversation-reset.mjs?build=20261110-forest-ai-v5';
-import {forestConversationLog} from './book-forest-conversation-log.mjs?build=20261110-forest-ai-v5';
-import {createForestAIGenerator} from './book-forest-ai-provider.mjs?build=20261110-forest-ai-v5';
-import {createForestCloudflareGenerator} from './book-forest-cloudflare-provider.mjs?build=20261110-forest-ai-v5';
-import {STATUSES,ACTIVE_READ_FILTER,filteredBooks,readPeriodLabel,compactReadPeriodLabel,readingModeLabel,emptyStateMessage} from './domain.mjs?build=20261110-forest-ai-v5';
+import {mountBookForest,getForestAvatar,setForestAvatar} from './book-forest.mjs?build=20261110-forest-ai-v6';
+import {authorizeForestDrive,loadPrivateForestSprites} from './book-forest-drive.mjs?build=20261110-forest-ai-v6';
+import {saveCachedForestSprites,loadCachedForestSprites,clearCachedForestSprites} from './book-forest-cache.mjs?build=20261110-forest-ai-v6';
+import {loadPrivateForestDialogue} from './book-forest-private-dialogue.mjs?build=20261110-forest-ai-v6';
+import {saveCachedForestDialogue,loadCachedForestDialogue,clearCachedForestDialogue} from './book-forest-dialogue-cache.mjs?build=20261110-forest-ai-v6';
+import {createForestDialogueDirector} from './book-forest-dialogue-director.mjs?build=20261110-forest-ai-v6';
+import {createForestLiveDialogueDirector} from './book-forest-live-dialogue.mjs?build=20261110-forest-ai-v6';
+import {createForestThoughtSession} from './book-forest-thought-seeds.mjs?build=20261110-forest-ai-v6';
+import {authorizeForestThoughtUsageWrite,syncForestThoughtUsage} from './book-forest-thought-sync.mjs?build=20261110-forest-ai-v6';
+import {resetForestConversationHistoryOnce} from './book-forest-conversation-reset.mjs?build=20261110-forest-ai-v6';
+import {forestConversationLog} from './book-forest-conversation-log.mjs?build=20261110-forest-ai-v6';
+import {createForestAIGenerator} from './book-forest-ai-provider.mjs?build=20261110-forest-ai-v6';
+import {createForestCloudflareGenerator} from './book-forest-cloudflare-provider.mjs?build=20261110-forest-ai-v6';
+import {STATUSES,ACTIVE_READ_FILTER,filteredBooks,readPeriodLabel,compactReadPeriodLabel,readingModeLabel,emptyStateMessage} from './domain.mjs?build=20261110-forest-ai-v6';
 
-const APP_BUILD='20261110-forest-ai-v5';
+const APP_BUILD='20261110-forest-ai-v6';
 const $=id=>{const element=document.getElementById(id);if(!element)throw new Error('APP_DOM_MISMATCH: missing #'+id);return element};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const safeCover=url=>/^(https:\/\/|data:image\/(jpeg|png|webp);base64,)/i.test(String(url||''))?String(url):'';
@@ -723,6 +725,8 @@ function renderFamily(){
                 storage:localStorage,storageKey:'yondene-forest-ai-local-v2:'+ownerUid+':'+familyId,
                 dailyLimit:forestAIConfig.workerUrl?150:12,
                 sessionLimit:3,maxReplies:2,
+                getBooks:()=>books,getCatalog:()=>forestDialogueCache?.catalog||[],
+                getSeeds:()=>forestDialogueCache?.thoughtSeeds||[],
                 modelId:forestAIConfig.workerUrl?'@cf/google/gemma-4-26b-a4b-it':forestAIConfig.modelId});
             }catch(error){
               console.warn('Forest AI unavailable; approved dialogue remains available',error);
@@ -750,6 +754,23 @@ function renderFamily(){
         finally{forestRefresh.disabled=false}
       };
       forestArea.append(forestLaunch,forestRefresh);root.append(forestArea);
+      const seedSync=document.createElement('button');seedSync.type='button';
+      seedSync.className='forestRefresh';seedSync.textContent='思考の種の利用回数を記録';
+      seedSync.onclick=async()=>{
+        if(role!=='owner'||!fid||closeForest)return;
+        seedSync.disabled=true;
+        try{
+          const session=createForestThoughtSession({storage:localStorage,
+            storageKey:'yondene-forest-ai-local-v2:'+user.uid+':'+fid+':thought'});
+          const events=session.events();
+          if(!events.length){notice('思考の種の新しい利用履歴はありません。');return}
+          const token=await authorizeForestThoughtUsageWrite({user,GoogleAuthProvider,reauthenticateWithPopup});
+          const result=await syncForestThoughtUsage({token,events});
+          notice('思考の種台帳の使用履歴を確認しました。新規 '+result.uploaded+
+            ' 件、記録済み '+result.skipped+' 件。');
+        }catch(error){statusError(error)}finally{seedSync.disabled=false}
+      };
+      root.append(seedSync);
       const forestLog=document.createElement('button');forestLog.type='button';
       forestLog.className='forestRefresh';forestLog.textContent='会話ログを保存';
       forestLog.onclick=()=>{

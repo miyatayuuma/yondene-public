@@ -1,4 +1,5 @@
 import {parseStoryMemoryRows} from './book-forest-story-memory.mjs';
+import {parseForestThoughtSeeds} from './book-forest-thought-seeds.mjs';
 import {validateForestDialogueCues} from './book-forest-dialogue-director.mjs';
 import {validateTwinNamePairs,validateTwinScenes} from './book-forest-twins.mjs';
 
@@ -71,7 +72,7 @@ async function authorizedJson(url,token,fetchImpl){
   return JSON.parse(body);
 }
 
-export async function loadPrivateForestDialogue(token,{fetchImpl=fetch}={}){
+export async function findPrivateForestDialogueSheet(token,{fetchImpl=fetch}={}){
   if(typeof token!=='string'||!token)throw Error('Google Driveの認証が必要です');
   const q=`name = '${PRIVATE_CATALOG_NAME.replaceAll("'","\\'")}' and mimeType = '${SHEET_MIME}' and trashed = false`;
   const driveUrl=new URL('https://www.googleapis.com/drive/v3/files');
@@ -81,18 +82,25 @@ export async function loadPrivateForestDialogue(token,{fetchImpl=fetch}={}){
   const files=(Array.isArray(found.files)?found.files:[]).filter(file=>
     file?.name===PRIVATE_CATALOG_NAME&&file.mimeType===SHEET_MIME&&FILE_ID.test(file.id));
   if(found.nextPageToken||files.length!==1)throw Error('非公開の会話台帳を一意に特定できませんでした');
-  const sheetUrl=new URL('https://sheets.googleapis.com/v4/spreadsheets/'+files[0].id+'/values:batchGet');
+  return files[0].id;
+}
+
+export async function loadPrivateForestDialogue(token,{fetchImpl=fetch}={}){
+  const spreadsheetId=await findPrivateForestDialogueSheet(token,{fetchImpl});
+  const sheetUrl=new URL('https://sheets.googleapis.com/v4/spreadsheets/'+spreadsheetId+'/values:batchGet');
   sheetUrl.searchParams.append('ranges',"'物語記憶'!A1:N140");
   sheetUrl.searchParams.append('ranges',"'会話台本'!A1:J250");
   sheetUrl.searchParams.append('ranges',"'ふたご名前'!A1:E40");
   sheetUrl.searchParams.append('ranges',"'ふたご会話'!A1:I200");
+  sheetUrl.searchParams.append('ranges',"'思考の種'!A1:R190");
   const data=await authorizedJson(sheetUrl.href,token,fetchImpl);
-  if(!Array.isArray(data.valueRanges)||data.valueRanges.length!==4)
+  if(!Array.isArray(data.valueRanges)||data.valueRanges.length!==5)
     throw Error('非公開の会話台本の形式が正しくありません');
   const catalog=parseStoryMemoryRows(data.valueRanges[0]?.values);
   const cues=parseForestDialogueRows(data.valueRanges[1]?.values);
   if(!cues.length)throw Error('承認済みの会話台本が見つかりません');
   const twinNames=parseTwinNameRows(data.valueRanges[2]?.values);
   const twinScenes=parseTwinSceneRows(data.valueRanges[3]?.values);
-  return {catalog,cues,twinNames,twinScenes};
+  const thoughtSeeds=parseForestThoughtSeeds(data.valueRanges[4]?.values);
+  return {catalog,cues,twinNames,twinScenes,thoughtSeeds};
 }

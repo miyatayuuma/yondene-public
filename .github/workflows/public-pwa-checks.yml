@@ -26,7 +26,11 @@ jobs:
           node --test
           activity.test.mjs
           bibliography-identity.test.mjs
+          book-forest-cache.test.mjs
+          book-forest-dialogue-director.test.mjs
           book-forest-drive.test.mjs
+          book-forest-private-dialogue.test.mjs
+          book-forest-story-memory.test.mjs
           book-forest-world.test.mjs
           book-forest-lifecycle.test.mjs
           book-forest-scene.test.mjs

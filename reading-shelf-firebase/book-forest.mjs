@@ -63,14 +63,23 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
     }catch(error){if(chatOpen&&session===chatSession){message.textContent='また あとで はなそうね。';console.warn('Forest dialogue failed',error)}}
   }
   function renderDialogue(result,identity,session){
-    message.textContent=typeof result?.text==='string'?result.text:'';replies.replaceChildren();
+    message.textContent=typeof result?.text==='string'?result.text:'';replies.replaceChildren();chat.scrollTop=0;
+    let choosing=false;
     for(const choice of Array.isArray(result?.choices)?result.choices:[]){
       if(typeof choice?.label!=='string')continue;
       const button=el('button','',choice.label);button.type='button';
-      button.onclick=async()=>{try{
+      button.onclick=async()=>{
+        if(choosing)return;
+        choosing=true;
+        for(const item of replies.children)item.disabled=true;
+        try{
         const next=await dialogue?.select?.({...identity,choiceId:choice.id});
         if(chatOpen&&session===chatSession&&next)renderDialogue(next,identity,session);
-      }catch(error){console.warn('Forest dialogue choice failed',error)}};replies.append(button);
+        else if(chatOpen&&session===chatSession){choosing=false;for(const item of replies.children)item.disabled=false}
+      }catch(error){
+        console.warn('Forest dialogue choice failed',error);
+        if(chatOpen&&session===chatSession){choosing=false;for(const item of replies.children)item.disabled=false}
+      }};replies.append(button);
     }
   }
   async function buildWorld(){

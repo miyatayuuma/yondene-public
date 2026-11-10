@@ -1,6 +1,6 @@
 import {initializeApp} from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-app.js';
 import {getAuth,GoogleAuthProvider,signInWithPopup,signInWithRedirect,reauthenticateWithPopup,getRedirectResult,setPersistence,browserLocalPersistence,onAuthStateChanged,signOut} from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-auth.js';
-import {getFirestore,doc,collection,getDoc,getDocs,query,limit,setDoc,deleteDoc,onSnapshot,Timestamp,serverTimestamp,runTransaction,writeBatch} from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-firestore.js';
+import {getFirestore,doc,collection,getDoc,getDocs,query,limit,orderBy,setDoc,deleteDoc,onSnapshot,Timestamp,serverTimestamp,runTransaction,writeBatch} from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-firestore.js';
 import {firebaseConfig} from './firebase-config.mjs?build=20261019-shelf-v28';
 import {isPermissionDenied,staleMembershipRoute} from './startup-recovery.mjs?build=20261019-shelf-v28';
 import {newInviteToken,parseInviteHash,oneTimeInviteUrl} from './invite-links.mjs?build=20261019-shelf-v28';
@@ -14,12 +14,15 @@ import {mountFamilyActivity} from './activity.mjs?build=20261019-shelf-v28';
 import {mountChildRating} from './child-rating.mjs?build=20261019-shelf-v28';
 import {mountReadingRecordEditor} from './reading-record-editor.mjs?build=20261025-reading-legacy-v1';
 import {readerNameFromShelf} from './reader-name.mjs?build=20261019-shelf-v28';
-import {mountBookForest,getForestAvatar,setForestAvatar} from './book-forest.mjs?build=20261110-forest-npc-v1';
-import {authorizeForestDrive,loadPrivateForestSprites} from './book-forest-drive.mjs?build=20261110-forest-cache-v1';
-import {saveCachedForestSprites,loadCachedForestSprites,clearCachedForestSprites} from './book-forest-cache.mjs?build=20261110-forest-cache-v1';
-import {STATUSES,ACTIVE_READ_FILTER,filteredBooks,readPeriodLabel,compactReadPeriodLabel,readingModeLabel,emptyStateMessage} from './domain.mjs?build=20261110-forest-cache-v1';
+import {mountBookForest,getForestAvatar,setForestAvatar} from './book-forest.mjs?build=20261110-forest-dialogue-v1';
+import {authorizeForestDrive,loadPrivateForestSprites} from './book-forest-drive.mjs?build=20261110-forest-dialogue-v1';
+import {saveCachedForestSprites,loadCachedForestSprites,clearCachedForestSprites} from './book-forest-cache.mjs?build=20261110-forest-dialogue-v1';
+import {loadPrivateForestDialogue} from './book-forest-private-dialogue.mjs?build=20261110-forest-dialogue-v1';
+import {saveCachedForestDialogue,loadCachedForestDialogue,clearCachedForestDialogue} from './book-forest-dialogue-cache.mjs?build=20261110-forest-dialogue-v1';
+import {createForestDialogueDirector} from './book-forest-dialogue-director.mjs?build=20261110-forest-dialogue-v1';
+import {STATUSES,ACTIVE_READ_FILTER,filteredBooks,readPeriodLabel,compactReadPeriodLabel,readingModeLabel,emptyStateMessage} from './domain.mjs?build=20261110-forest-dialogue-v1';
 
-const APP_BUILD='20261110-forest-cache-v1';
+const APP_BUILD='20261110-forest-dialogue-v1';
 const $=id=>{const element=document.getElementById(id);if(!element)throw new Error('APP_DOM_MISMATCH: missing #'+id);return element};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const safeCover=url=>/^(https:\/\/|data:image\/(jpeg|png|webp);base64,)/i.test(String(url||''))?String(url):'';
@@ -27,7 +30,7 @@ const safeSourceUrl=url=>/^https:\/\/[^\s]+$/i.test(String(url||''))?String(url)
 const SHOW=['loading','loginPanel','setupPanel','shelfPanel'];
 let auth,db,user=null,fid='',role='',household=null,books=[],series=[],members=[],profiles=[],invites=[],openInvites=[],lastInviteLink='';
 let unsubs=[],view='shelf',generation=0,ratings=new Map(),closeRating=null,refreshRating=null,closeReadingEdit=null;
-let closeCommunity=null,closeRecommendations=null,closeActivity=null,pendingUI=null,closeForest=null,forestSpriteCache=null;
+let closeCommunity=null,closeRecommendations=null,closeActivity=null,pendingUI=null,closeForest=null,forestSpriteCache=null,forestDialogueCache=null;
 const inviteFromUrl=new URLSearchParams(location.search).get('family')||'';
 const openInviteFromUrl=parseInviteHash(location.hash);
 
@@ -64,8 +67,13 @@ function initUI(){
   registerInstallAction();
   $('googleLogin').onclick=login;
   $('signOut').onclick=async()=>{
+    const leavingUid=user?.uid,leavingFamily=fid;
     closeListeners();
     try{await clearCachedForestSprites()}catch(error){console.warn('Could not clear private forest images',error)}
+    try{await clearCachedForestDialogue()}catch(error){console.warn('Could not clear private forest conversation',error)}
+    if(leavingUid&&leavingFamily){
+      try{localStorage.removeItem('yondene-forest-dialogue-state-v1:'+leavingUid+':'+leavingFamily)}catch{}
+    }
     await signOut(auth);
   };
   const resetShelf=()=>{$('filter').value=ACTIVE_READ_FILTER;$('search').value=''};
@@ -91,7 +99,7 @@ function updateShelfHeading(){
   $('shelfBrand').textContent=household?name:'家族のほんだな';
   document.title=household?'よんでね | '+name:'よんでね';
 }
-function closeListeners(){closeForest?.();closeForest=null;forestSpriteCache?.dispose();forestSpriteCache=null;pendingUI?.dispose();pendingUI=null;closeActivity?.();closeActivity=null;closeRecommendations?.();closeRecommendations=null;closeCommunity?.();closeCommunity=null;closeRating?.();closeRating=null;refreshRating=null;closeReadingEdit?.();closeReadingEdit=null;ratings=new Map();unsubs.forEach(u=>u());unsubs=[];fid='';books=[];series=[];members=[];profiles=[];invites=[];openInvites=[];lastInviteLink='';household=null;role='';view='shelf';delete $('content').dataset.screen;$('content').replaceChildren();updateShelfHeading()}
+function closeListeners(){closeForest?.();closeForest=null;forestSpriteCache?.dispose();forestSpriteCache=null;forestDialogueCache=null;pendingUI?.dispose();pendingUI=null;closeActivity?.();closeActivity=null;closeRecommendations?.();closeRecommendations=null;closeCommunity?.();closeRating?.();closeRating=null;refreshRating=null;closeReadingEdit?.();closeReadingEdit=null;ratings=new Map();unsubs.forEach(u=>u());unsubs=[];fid='';books=[];series=[];members=[];profiles=[];invites=[];openInvites=[];lastInviteLink='';household=null;role='';view='shelf';delete $('content').dataset.screen;$('content').replaceChildren();updateShelfHeading()}
 function familyDoc(...a){return doc(db,'families',fid,...a)}
 function familyCollection(...a){return collection(db,'families',fid,...a)}
 async function login(){
@@ -598,7 +606,7 @@ function renderFamily(){
       const forestArea=document.createElement('section');forestArea.className='forestSettingsEntry';
       const forestTitle=document.createElement('h3');forestTitle.textContent='🌿 本の森';forestArea.append(forestTitle);
       const forestDescription=document.createElement('p');
-      forestDescription.textContent='小さな森を歩いて、登場人物に会いに行こう。画像は初回のみ非公開Google Driveから読み込み、この端末に保存します。';
+      forestDescription.textContent='小さな森を歩いて、登場人物に会いに行こう。画像と会話台本は初回のみ非公開Google Driveから読み込み、この端末に保存します。';
       forestArea.append(forestDescription);
       const avatarLabel=document.createElement('label');avatarLabel.className='forestAvatarChoice';
       avatarLabel.append('いっしょに歩く ');
@@ -615,6 +623,7 @@ function renderFamily(){
         forestLaunch.disabled=true;forestLaunch.textContent='森を準備しています…';
         const familyId=fid,ownerUid=user.uid;
         try{
+          let token='';
           if(!forestSpriteCache){
             try{
               forestSpriteCache=await loadCachedForestSprites({uid:ownerUid,familyId});
@@ -622,7 +631,7 @@ function renderFamily(){
             if(!forestSpriteCache){
               forestLaunch.textContent='Google Driveへのアクセスを確認しています…';
               // A Drive popup is needed only if the private images are not on this device.
-              const token=await authorizeForestDrive({user,GoogleAuthProvider,reauthenticateWithPopup});
+              token=await authorizeForestDrive({user,GoogleAuthProvider,reauthenticateWithPopup});
               forestLaunch.textContent='非公開ドット絵を読み込んでいます…';
               const loaded=await loadPrivateForestSprites(token,{
                 onValidatedAssets:async(manifest,blobs)=>{
@@ -642,23 +651,63 @@ function renderFamily(){
               forestSpriteCache=loaded;
             }
           }
+          if(!forestDialogueCache){
+            try{
+              forestDialogueCache=await loadCachedForestDialogue({uid:ownerUid,familyId});
+              if(!forestDialogueCache){
+                forestLaunch.textContent='非公開の会話台本を読み込んでいます…';
+                if(!token)token=await authorizeForestDrive({user,GoogleAuthProvider,reauthenticateWithPopup});
+                const loaded=await loadPrivateForestDialogue(token);
+                if(role!=='owner'||fid!==familyId||user?.uid!==ownerUid)return;
+                forestDialogueCache=loaded;
+                try{
+                  await saveCachedForestDialogue({uid:ownerUid,familyId,packageData:loaded});
+                  if(role!=='owner'||fid!==familyId||user?.uid!==ownerUid){
+                    await clearCachedForestDialogue({uid:ownerUid,familyId});
+                  }
+                }
+                catch(error){console.warn('Private dialogue cache unavailable',error)}
+              }
+            }catch(error){
+              // A missing/unapproved script or disabled Sheets API must not
+              // prevent children from exploring the visual forest.
+              console.warn('Forest dialogue data unavailable:',error);
+              notice('本の森の会話データを読めませんでした。景色の探索は利用できます。会話の更新は「森の素材を更新」から行えます。');
+            }
+          }
           if(role!=='owner'||fid!==familyId||user?.uid!==ownerUid){
             forestSpriteCache?.dispose();forestSpriteCache=null;return;
           }
+          const conversation=forestDialogueCache?createForestDialogueDirector({
+            getBooks:()=>books,
+            getCatalog:()=>forestDialogueCache?.catalog||[],
+            getCues:()=>forestDialogueCache?.cues||[],
+            getReflections:async bookId=>{
+              if(!books.some(book=>book.id===bookId&&book.status==='read'))return [];
+              const snap=await getDocs(query(familyCollection('books',bookId,'childReflections'),
+                orderBy('createdAt','desc'),limit(5)));
+              if(role!=='owner'||fid!==familyId||user?.uid!==ownerUid)return [];
+              return snap.docs.map(record=>({id:record.id,...record.data()}));
+            },
+            storage:localStorage,storageKey:'yondene-forest-dialogue-state-v1:'+ownerUid+':'+familyId
+          }):null;
           closeForest=mountBookForest({familyId,privateSprites:forestSpriteCache,
+            ...(conversation?{dialogue:conversation}:{}),
             onClose:()=>{closeForest=null}});
         }catch(error){statusError(error)}
         finally{forestLaunch.disabled=false;forestLaunch.textContent='本の森へ行く'}
       };
       const forestRefresh=document.createElement('button');forestRefresh.className='forestRefresh';
-      forestRefresh.type='button';forestRefresh.textContent='画像を更新';
+      forestRefresh.type='button';forestRefresh.textContent='森の素材を更新';
       forestRefresh.onclick=async()=>{
         if(role!=='owner'||!fid||closeForest)return;
         forestRefresh.disabled=true;
         try{
           await clearCachedForestSprites({uid:user.uid,familyId:fid});
+          await clearCachedForestDialogue({uid:user.uid,familyId:fid});
           forestSpriteCache?.dispose();forestSpriteCache=null;
-          notice('保存済みの森の画像を削除しました。次回はGoogle Driveから最新版を読み込みます。');
+          forestDialogueCache=null;
+          notice('保存済みの森の画像と会話台本を削除しました。次回は非公開Google Driveから最新版を読み込みます。');
         }catch(error){statusError(error)}
         finally{forestRefresh.disabled=false}
       };

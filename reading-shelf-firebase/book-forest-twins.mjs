@@ -74,38 +74,28 @@ export function createTwinConversationDirector({getBooks=()=>[],getCatalog=()=>[
       .replaceAll('{secondName}',active.names.secondName);
     const choices=(line.choices||[]).map(choice=>({id:choice.id,label:choice.label}));
     active.pendingChoices=line.choices||[];
+    const hasNext=active.offset<active.scene.lines.length;
     return {mode:'twins',speakerName:nameFor(line.speakerSlot),speakerSlot:line.speakerSlot,text,choices,
-      ...nextSpeaker(),
-      autoNext:true,autoDelayMs:choices.length?11500:
+      ...nextSpeaker(),conversationComplete:!hasNext,
+      autoNext:hasNext,autoDelayMs:choices.length?11500:
         Math.min(7700,Math.max(3400,2500+text.length*90))};
   }
-  function peekNextScene(){
-    const all=active.scenes.filter(scene=>scene.id!=='intro');
+  function chooseEncounterScene(scenes,encounter){
+    const all=scenes.filter(scene=>scene.id!=='intro');
     const ambient=all.filter(scene=>!scene.memoryId),story=all.filter(scene=>scene.memoryId);
-    const preferStory=active.sceneIndex%3===1;
+    const preferStory=encounter%3===2;
     let pool=preferStory&&story.length?story:ambient.length?ambient:story;
     if(!pool.length)return null;
-    // Stable variety across encounters, while avoiding immediate repeats.
-    let index=(active.encounter+active.sceneIndex)%pool.length;
-    if(pool.length>1&&pool[index].id===active.lastScene)index=(index+1)%pool.length;
-    return pool[index];
+    return pool[(encounter-1)%pool.length];
   }
   function nextSpeaker(){
-    const next=active.scene.lines[active.offset]||peekNextScene()?.lines[0];
+    const next=active.scene.lines[active.offset];
     return next?{nextSpeakerName:nameFor(next.speakerSlot),nextSpeakerSlot:next.speakerSlot}:{};
-  }
-  function chooseScene(){
-    const chosen=peekNextScene();
-    if(!chosen)return null;
-    active.lastScene=chosen.id;active.sceneIndex++;
-    return chosen;
   }
   function advanceLocal(){
     if(!active)return null;
     if(active.offset>=active.scene.lines.length){
-      const scene=chooseScene();
-      if(!scene){active=null;return null}
-      active.scene=scene;active.offset=0;
+      active=null;return null;
     }
     return render(active.scene.lines[active.offset++]);
   }
@@ -115,8 +105,9 @@ export function createTwinConversationDirector({getBooks=()=>[],getCatalog=()=>[
       const scenes=await allowedScenes();
       const introduction=scenes.find(scene=>scene.id==='intro');
       if(!names.length||!introduction||scenes.length<2){active=null;return null}
-      active={names:names[encounter%names.length],encounter,scenes,scene:introduction,
-        offset:0,sceneIndex:0,lastScene:'intro',pendingChoices:[]};
+      const scene=encounter===0?introduction:chooseEncounterScene(scenes,encounter);
+      if(!scene){active=null;return null}
+      active={names:names[encounter%names.length],scenes,scene,offset:0,pendingChoices:[]};
       return advanceLocal();
     },
     async advance(){
@@ -125,7 +116,7 @@ export function createTwinConversationDirector({getBooks=()=>[],getCatalog=()=>[
       active.scenes=await allowedScenes();
       if(active.scene.memoryId){
         const stillAllowed=active.scenes.some(scene=>scene.id===active.scene.id);
-        if(!stillAllowed)active.offset=active.scene.lines.length;
+        if(!stillAllowed){active=null;return null}
       }
       return advanceLocal();
     },
@@ -136,8 +127,10 @@ export function createTwinConversationDirector({getBooks=()=>[],getCatalog=()=>[
       active.pendingChoices=[];
       const text=choice.text.replaceAll('{firstName}',active.names.firstName)
         .replaceAll('{secondName}',active.names.secondName);
+      const hasNext=active.offset<active.scene.lines.length;
       return {mode:'twins',speakerName:nameFor(choice.speakerSlot),speakerSlot:choice.speakerSlot,text,
-        ...nextSpeaker(),choices:[],autoNext:true,autoDelayMs:Math.min(6600,3200+text.length*80)};
+        ...nextSpeaker(),choices:[],conversationComplete:!hasNext,autoNext:hasNext,
+        autoDelayMs:Math.min(6600,3200+text.length*80)};
     },
     end(){active=null},
     getActiveNames(){return active?{...active.names}:null}

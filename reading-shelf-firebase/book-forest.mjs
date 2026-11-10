@@ -16,6 +16,7 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
   const images=privateSprites?.images||{};
   let avatar=debug?.avatar||getForestAvatar(familyId),disposed=false,animationId=0,cleanupWorld=()=>{},resizeObserver=null;
   let joystickX=0,joystickY=0,stickPointer=null,lookPointer=null,chatOpen=false,chatSession=0,activeCharacter=null;
+  let autoDialogueTimer=null,dialogueRender=0,currentDialogue=null;
   const keys=new Set();
   const layer=el('section','bookForest');layer.setAttribute('role','dialog');layer.setAttribute('aria-modal','true');layer.setAttribute('aria-label','本の森');layer.tabIndex=-1;
   const canvas=el('canvas','bookForestCanvas');canvas.setAttribute('aria-label','本の森の3Dフィールド');
@@ -28,13 +29,28 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
   bottom.append(joystick,chatButton);
   const chat=el('section','bookForestConversation');chat.hidden=true;chat.setAttribute('aria-live','polite');
   const speaker=el('strong','bookForestSpeaker'),message=el('p','bookForestMessage'),replies=el('div','bookForestReplies');
-  const dismiss=el('button','bookForestDismiss','とじる');dismiss.type='button';chat.append(speaker,message,replies,dismiss);
+  const twinHistory=el('div','bookForestTwinHistory');twinHistory.hidden=true;
+  const dismiss=el('button','bookForestDismiss','とじる');dismiss.type='button';chat.append(speaker,message,twinHistory,replies,dismiss);
   const loading=el('div','bookForestLoading','森を準備しています…');
   layer.append(canvas,vignette,close,bottom,chat,loading);document.body.append(layer);document.body.classList.add('bookForestOpen');layer.focus({preventScroll:true});
   function stopInput(){keys.clear();joystickX=0;joystickY=0;stickPointer=null;lookPointer=null;nub.style.transform='translate(0,0)'}
+  function cancelAutoDialogue(){clearTimeout(autoDialogueTimer);autoDialogueTimer=null;dialogueRender++}
+  function scheduleAutoDialogue(result,identity,session){
+    if(result?.mode!=='twins'||result.autoNext!==true||typeof dialogue?.advance!=='function'||document.hidden)return;
+    const renderId=dialogueRender;
+    autoDialogueTimer=setTimeout(async()=>{
+      if(!chatOpen||disposed||chatSession!==session||renderId!==dialogueRender||document.hidden)return;
+      try{
+        const next=await dialogue.advance(identity);
+        if(chatOpen&&!disposed&&chatSession===session&&renderId===dialogueRender&&next)
+          renderDialogue(next,identity,session);
+      }catch(error){console.warn('Forest twin conversation advance failed',error)}
+    },Math.max(2800,Math.min(14000,Number(result.autoDelayMs)||4600)));
+  }
   function endDialogue(){
     if(!chatOpen)return;
-    const previous=activeCharacter;chatSession++;chatOpen=false;activeCharacter=null;chat.hidden=true;
+    const previous=activeCharacter;chatSession++;cancelAutoDialogue();currentDialogue=null;
+    chatOpen=false;activeCharacter=null;chat.hidden=true;
     try{dialogue?.end?.({characterId:previous?.dialogueId||previous?.id,displayName:previous?.name})}catch(error){console.warn('Forest dialogue end failed',error)}
   }
   function dispose(){
@@ -50,11 +66,16 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
     if((event.code==='Space'||event.code==='Enter')&&!event.repeat){if(!chatButton.hidden)chatButton.click();return}
     keys.add(event.code);
   };
-  const onKeyUp=event=>keys.delete(event.code),onVisibility=()=>{if(document.hidden)stopInput()},onBlur=()=>stopInput();
+  const onKeyUp=event=>keys.delete(event.code),onVisibility=()=>{
+    if(document.hidden){stopInput();cancelAutoDialogue()}
+    else if(chatOpen&&currentDialogue)scheduleAutoDialogue(...currentDialogue);
+  },onBlur=()=>stopInput();
   document.addEventListener('keydown',onKeyDown);document.addEventListener('keyup',onKeyUp);document.addEventListener('visibilitychange',onVisibility);window.addEventListener('blur',onBlur);
   async function showDialogue(character){
     if(chatOpen||disposed)return;
-    stopInput();chatOpen=true;chat.hidden=false;activeCharacter=character;speaker.textContent=character.name;message.textContent='…';replies.replaceChildren();
+    stopInput();cancelAutoDialogue();currentDialogue=null;chatOpen=true;chat.hidden=false;activeCharacter=character;
+    speaker.textContent=character.name;message.hidden=false;message.textContent='…';twinHistory.hidden=true;
+    twinHistory.replaceChildren();replies.replaceChildren();
     const session=++chatSession,identity={characterId:character.dialogueId||character.id,displayName:character.name};
     try{
       const result=await (dialogue?.start||defaultDialogue.start)(identity);
@@ -63,24 +84,41 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
     }catch(error){if(chatOpen&&session===chatSession){message.textContent='また あとで はなそうね。';console.warn('Forest dialogue failed',error)}}
   }
   function renderDialogue(result,identity,session){
-    message.textContent=typeof result?.text==='string'?result.text:'';replies.replaceChildren();chat.scrollTop=0;
+    cancelAutoDialogue();currentDialogue=[result,identity,session];
+    if(result?.mode==='twins'){
+      speaker.textContent='ふたご';message.hidden=true;twinHistory.hidden=false;
+      const turn=el('div','bookForestTwinTurn');turn.dataset.speaker=String(result.speakerSlot??0);
+      turn.append(el('strong','bookForestTwinName',result.speakerName||'ふたご'),
+        el('p','bookForestTwinText',typeof result.text==='string'?result.text:''));
+      twinHistory.append(turn);
+      while(twinHistory.children.length>4)twinHistory.firstChild.remove();
+      chat.scrollTop=chat.scrollHeight;
+    }else{
+      speaker.textContent=activeCharacter?.name||identity.displayName;
+      twinHistory.hidden=true;twinHistory.replaceChildren();message.hidden=false;
+      message.textContent=typeof result?.text==='string'?result.text:'';chat.scrollTop=0;
+    }
+    replies.replaceChildren();
     let choosing=false;
     for(const choice of Array.isArray(result?.choices)?result.choices:[]){
       if(typeof choice?.label!=='string')continue;
       const button=el('button','',choice.label);button.type='button';
       button.onclick=async()=>{
         if(choosing)return;
-        choosing=true;
+        choosing=true;cancelAutoDialogue();
         for(const item of replies.children)item.disabled=true;
         try{
         const next=await dialogue?.select?.({...identity,choiceId:choice.id});
         if(chatOpen&&session===chatSession&&next)renderDialogue(next,identity,session);
-        else if(chatOpen&&session===chatSession){choosing=false;for(const item of replies.children)item.disabled=false}
+        else if(chatOpen&&session===chatSession){choosing=false;for(const item of replies.children)item.disabled=false;
+          scheduleAutoDialogue(result,identity,session)}
       }catch(error){
         console.warn('Forest dialogue choice failed',error);
-        if(chatOpen&&session===chatSession){choosing=false;for(const item of replies.children)item.disabled=false}
+        if(chatOpen&&session===chatSession){choosing=false;for(const item of replies.children)item.disabled=false;
+          scheduleAutoDialogue(result,identity,session)}
       }};replies.append(button);
     }
+    scheduleAutoDialogue(result,identity,session);
   }
   async function buildWorld(){
     let world;

@@ -26,9 +26,9 @@ export const CHARACTERS=[
   {id:'kiki',name:'キキ',x:24,z:9,scale:1,roamRadius:5,walkSpeed:1.3},
   {id:'jiji',name:'ジジ',x:29,z:13,scale:.5,roamRadius:3.8,walkSpeed:1.65},
   {id:'skipper',name:'スキッパー',x:41,z:-10,scale:.8,roamRadius:6,walkSpeed:1.15},
-  {id:'twins',name:'ふたご',x:52,z:30,scale:.8,roamRadius:4.5,walkSpeed:1.2},
+  {id:'twins',name:'ふたご',groupId:'twins',x:52,z:30,scale:.8,roamRadius:4.5,walkSpeed:1.2},
   // Both twins use the same private Drive sprite and the same dialogue identity.
-  {id:'twins_second',dialogueId:'twins',spriteId:'twins',name:'ふたご',x:56,z:33,scale:.8,roamRadius:4.5,walkSpeed:1.2},
+  {id:'twins_second',dialogueId:'twins',spriteId:'twins',name:'ふたご',groupId:'twins',x:56,z:33,scale:.8,roamRadius:4.5,walkSpeed:1.2},
   {id:'zorori',name:'ゾロリ',x:-72,z:-8,scale:1.2,roamRadius:7,walkSpeed:1.35},
   {id:'ishishi',name:'イシシ',x:61,z:60,scale:.8,roamRadius:4,walkSpeed:1.2},
   {id:'noshishi',name:'ノシシ',x:66,z:62,scale:.8,roamRadius:4,walkSpeed:1.2}

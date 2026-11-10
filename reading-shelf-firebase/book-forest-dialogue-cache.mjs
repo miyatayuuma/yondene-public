@@ -1,8 +1,9 @@
 import {validateForestDialogueCues} from './book-forest-dialogue-director.mjs';
 import {unlockedStoryMemories} from './book-forest-story-memory.mjs';
+import {validateTwinNamePairs,validateTwinScenes} from './book-forest-twins.mjs';
 
-const PREFIX='private-book-forest-dialogue-v2-';
-const LEGACY_PREFIX='private-book-forest-dialogue-v1-';
+const PREFIX='private-book-forest-dialogue-v3-';
+const LEGACY_PREFIXES=['private-book-forest-dialogue-v1-','private-book-forest-dialogue-v2-'];
 const IDS=/^[A-Za-z0-9_-]{1,160}$/u;
 const pathname='/__book_forest_private_dialogue__/package';
 const scopedName=(uid,familyId)=>{
@@ -16,6 +17,9 @@ export async function saveCachedForestDialogue({uid,familyId,packageData,cacheSt
   if(!validateForestDialogueCues(packageData?.cues).length)throw Error('会話台本が空です');
   if(!Array.isArray(packageData?.catalog)||packageData.catalog.length>140)
     throw Error('物語記憶の件数が正しくありません');
+  if(!validateTwinNamePairs(packageData?.twinNames).length||
+    validateTwinScenes(packageData?.twinScenes).length<2)
+    throw Error('ふたご会話の承認済みデータが足りません');
   const body=JSON.stringify(packageData);
   if(body.length>160000)throw Error('会話台本が大きすぎます');
   const name=scopedName(uid,familyId);
@@ -36,9 +40,11 @@ export async function loadCachedForestDialogue({uid,familyId,cacheStorage=global
     const data=JSON.parse(text);
     if(!Array.isArray(data.catalog)||data.catalog.length>140||!validateForestDialogueCues(data.cues).length)
       throw Error('invalid');
+    const twinNames=validateTwinNamePairs(data.twinNames),twinScenes=validateTwinScenes(data.twinScenes);
+    if(!twinNames.length||twinScenes.length<2)throw Error('invalid twins');
     // Fact-level authorization still happens with the current Firestore shelf
     // snapshot in the director. Never persist reading state or review quotes.
-    return {catalog:data.catalog,cues:validateForestDialogueCues(data.cues)};
+    return {catalog:data.catalog,cues:validateForestDialogueCues(data.cues),twinNames,twinScenes};
   }catch{
     await cacheStorage.delete(name);return null;
   }
@@ -47,13 +53,13 @@ export async function loadCachedForestDialogue({uid,familyId,cacheStorage=global
 export async function clearCachedForestDialogue({uid,familyId,cacheStorage=globalThis.caches}={}){
   if(!cacheStorage?.delete)return;
   if(uid&&familyId){
-    const oldName=LEGACY_PREFIX+uid+'-'+familyId;
-    await Promise.all([cacheStorage.delete(scopedName(uid,familyId)),cacheStorage.delete(oldName)]);
+    await Promise.all([cacheStorage.delete(scopedName(uid,familyId)),
+      ...LEGACY_PREFIXES.map(prefix=>cacheStorage.delete(prefix+uid+'-'+familyId))]);
     return;
   }
   if(cacheStorage.keys){
     await Promise.all((await cacheStorage.keys()).filter(name=>
-      name.startsWith(PREFIX)||name.startsWith(LEGACY_PREFIX))
+      name.startsWith(PREFIX)||LEGACY_PREFIXES.some(prefix=>name.startsWith(prefix)))
       .map(name=>cacheStorage.delete(name)));
   }
 }

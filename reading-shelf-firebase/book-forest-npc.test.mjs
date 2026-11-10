@@ -40,3 +40,23 @@ test('the conversation partner and approached actors stop without freezing the w
   assert.deepEqual([king.x,king.z],[kingBefore.x,kingBefore.z]);
   assert.ok(Math.hypot(cat.x-catBefore.x,cat.z-catBefore.z)>0.1,'other actors remain free');
 });
+
+test('twins wander together and both stop when either twin is approached',()=>{
+  const actors=CHARACTERS.map(c=>({...c,moving:false})),motion=createForestNpcMotion(actors,isWalkable);
+  const first=actors.find(a=>a.id==='twins'),second=actors.find(a=>a.id==='twins_second');
+  const [dx,dz]=[second.x-first.x,second.z-first.z];
+  let moves=0;
+  for(let i=0;i<2500;i++){
+    motion.step(.05,{playerX:-90,playerZ:-90});
+    assert.ok(Math.abs((second.x-first.x)-dx)<1e-8);
+    assert.ok(Math.abs((second.z-first.z)-dz)<1e-8);
+    assert.equal(second.moving,first.moving);
+    if(first.moving)moves++;
+    assert.ok(isWalkable(first.x,first.z)&&isWalkable(second.x,second.z));
+  }
+  assert.ok(moves>0,'twins should not become a static decoration');
+  const before=[first.x,first.z,second.x,second.z];
+  for(let i=0;i<200;i++)motion.step(.05,{playerX:second.x,playerZ:second.z,
+    activeId:'twins_second'});
+  assert.deepEqual([first.x,first.z,second.x,second.z],before);
+});

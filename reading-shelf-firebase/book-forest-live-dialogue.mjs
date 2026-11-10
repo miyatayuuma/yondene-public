@@ -38,7 +38,7 @@ export function validateLiveForestOutput(raw,{characterId,requireLine=false}={})
   return {text:requireLine?text:null,labels};
 }
 
-function promptFor({characterId,mode,npcLine,chosenLabel='',history=[]}){
+function promptFor({characterId,mode,npcLine,chosenLabel='',history=[],closing=false}){
   return {
     task:mode==='reply'?'選ばれた返答に応じたNPCのひと言と次の返答候補を作る':
       'NPCのひと言に合う、子どもが選べる自然な返答候補だけを作る',
@@ -53,7 +53,8 @@ function promptFor({characterId,mode,npcLine,chosenLabel='',history=[]}){
       '本人の感想・行動・気持ちを知っているふりをしない',
       '返答候補は2〜3個、それぞれ24字以内。正解誘導より自然な会話を優先する',
       'ひとつの返答候補を選んでも、子どもの実際の信念や経験とはみなさない',
-      characterId==='cat'?'ねこは絶対に人語を話さない':'NPC本人の視点で話す'
+      characterId==='cat'?'ねこは絶対に人語を話さない':'NPC本人の視点で話す',
+      ...(closing?['これが今回の最後のひと言。話題を増やさず、キャラらしく自然に別れを告げる']:[])
     ],
     output:{format:'JSON',shape:{text:mode==='reply'?'NPCの発言（150字以内）':'省略可',
       choices:['子どもが選ぶ返答A','子どもが選ぶ返答B']}}
@@ -62,10 +63,11 @@ function promptFor({characterId,mode,npcLine,chosenLabel='',history=[]}){
 
 /** Does not generate on idle, twin autoplay, or a private child reflection. */
 export function createForestLiveDialogueDirector({base,generate,storage=null,
-  storageKey='forest-ai-local-v1',now=()=>Date.now(),dailyLimit=150,sessionLimit=20}={}){
+  storageKey='forest-ai-local-v1',now=()=>Date.now(),dailyLimit=150,sessionLimit=5,
+  maxReplies=4}={}){
   if(!base||typeof base.start!=='function'||typeof base.select!=='function'||
     typeof generate!=='function')throw Error('base and generate are required');
-  let pending=null,history=[],sessionCount=0,serial=0,closed=false,epoch=0;
+  let pending=null,history=[],sessionCount=0,repliesThisSession=0,serial=0,closed=false,epoch=0;
   const budgetKey=storageKey+':budget',logKey=storageKey+':log';
   function record(item){
     const existing=readJson(storage,logKey,[]);
@@ -87,9 +89,9 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     sessionCount++;
     return true;
   }
-  async function request(characterId,mode,npcLine,chosenLabel=''){
+  async function request(characterId,mode,npcLine,chosenLabel='',closing=false){
     if(!reserve())return null;
-    const context=promptFor({characterId,mode,npcLine,chosenLabel,history});
+    const context=promptFor({characterId,mode,npcLine,chosenLabel,history,closing});
     let timeout;
     try{
       const raw=await Promise.race([Promise.resolve().then(()=>generate(context)),new Promise((_,reject)=>
@@ -104,7 +106,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
   }
   async function start(identity){
     const generation=++epoch;
-    closed=false;pending=null;history=[];sessionCount=0;
+    closed=false;pending=null;history=[];sessionCount=0;repliesThisSession=0;
     const original=await base.start(identity),characterId=identity?.characterId;
     if(closed||generation!==epoch)return null;
     if(!original||!CHARACTERS.has(characterId)||characterId==='cat'||
@@ -129,20 +131,25 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     const label=current.choices.find(choice=>choice.id===choiceId).label;
     history.push({playerChoice:label});history=history.slice(-4);
     record({event:'selected-offered-choice',characterId,label});
-    const generated=await request(characterId,'reply',current.text,label);
+    const closing=repliesThisSession+1>=maxReplies;
+    const generated=await request(characterId,'reply',current.text,label,closing);
     if(closed||generation!==epoch)return null;
     if(!generated){
       const fallback=await base.start({characterId});
       return fallback;
     }
     history.push({npc:generated.text});history=history.slice(-4);
-    record({event:'generated-reply',characterId,text:generated.text,choices:generated.labels});
+    repliesThisSession++;
+    record({event:'generated-reply',characterId,text:generated.text,
+      choices:closing?[]:generated.labels,closing});
+    if(closing){pending=null;return {text:generated.text,choices:[],conversationComplete:true}}
     return decorate(characterId,generated.text,generated.labels);
   }
   return {
     start,select,
     advance(identity){return base.advance?.(identity)||null},
     end(){epoch++;closed=true;pending=null;history=[];base.end?.()},
-    getProgress(){return {...(base.getProgress?.()||{}),aiRequestsThisSession:sessionCount}}
+    getProgress(){return {...(base.getProgress?.()||{}),aiRequestsThisSession:sessionCount,
+      aiRepliesThisSession:repliesThisSession}}
   };
 }

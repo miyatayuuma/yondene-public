@@ -98,8 +98,9 @@ test('twin conversation displays alternating names, autoplays, pauses in backgro
         dialogue:{start:()=>({mode:'twins',speakerName:'ふたご',speakerSlot:0,
           nextSpeakerName:'テストA',nextSpeakerSlot:1,text:'だれか来た！',autoNext:true,autoDelayMs:3500,choices:[]}),
           advance:()=>({mode:'twins',speakerName:++turn%2?'テストA':'テストB',
-            speakerSlot:turn%2?1:2,text:'おしゃべりしよう。',autoNext:true,
-            nextSpeakerName:turn%2?'テストB':'テストA',nextSpeakerSlot:turn%2?2:1,
+            speakerSlot:turn%2?1:2,text:'おしゃべりしよう。',autoNext:turn<2,
+            conversationComplete:turn>=2,
+            nextSpeakerName:turn<2?'テストB':null,nextSpeakerSlot:turn<2?2:null,
             autoDelayMs:3500,choices:[]}),end(){}},
         debug:{avatar:'player_cat',month:4,createScene:async()=>fakeWorld(),
           onReady(value){api=value;resolve()}}});
@@ -109,6 +110,8 @@ test('twin conversation displays alternating names, autoplays, pauses in backgro
     find(env.document.body,'bookForestChat').click();await Promise.resolve();
     const history=find(env.document.body,'bookForestTwinHistory');
     const waiting=find(env.document.body,'bookForestTwinWaiting');
+    const dismiss=find(env.document.body,'bookForestDismiss');
+    assert.equal(dismiss.hidden,true,'no close button during the pre-generated scene');
     assert.equal(history.children[0].children[0].textContent,'ふたご');
     assert.equal(waiting.hidden,false,'animated dots indicate more twin dialogue is coming');
     assert.equal(waiting.children[0].textContent,'テストA','next speaker is visible immediately');
@@ -132,7 +135,13 @@ test('twin conversation displays alternating names, autoplays, pauses in backgro
     for(const fn of env.listeners.visibilitychange||[])fn();
     assert.equal(timers.size,1,'foreground conversation can resume');
     assert.equal(waiting.hidden,false);
-    find(env.document.body,'bookForestDismiss').click();
+    const finalCallback=[...timers.values()][0];await finalCallback();
+    assert.equal(history.children.length,3);
+    assert.equal(waiting.hidden,true,'scene finishes without starting another scene');
+    assert.equal(timers.size,0,'no further auto playback after one scene');
+    assert.equal(dismiss.hidden,false,'close button appears only after the scene ends');
+    assert.equal(dismiss.textContent,'またね');
+    dismiss.click();
     assert.equal(timers.size,0,'closing the conversation cancels speech timers');
     assert.equal(waiting.hidden,true,'closing the conversation hides the waiting indicator');
   }finally{closeForest();globalThis.setTimeout=originalSet;globalThis.clearTimeout=originalClear}

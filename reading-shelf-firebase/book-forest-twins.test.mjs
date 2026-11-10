@@ -37,58 +37,52 @@ test('twins first appear as a group and each turn has its own name without quota
   assert.equal(b.nextSpeakerName,'テストB');assert.equal(b.nextSpeakerSlot,2);
   assert.match(b.text,/テストA/);
   const c=await engine.advance();assert.equal(c.speakerName,'テストB');
-  assert.equal(c.nextSpeakerName,'テストA','next scene speaker is previewed at the scene boundary');
+  assert.equal(c.nextSpeakerName,undefined,'one encounter must not roll into another scene');
+  assert.equal(c.autoNext,false);assert.equal(c.conversationComplete,true);
+  assert.equal(await engine.advance(),null,'one approved scene is one encounter');
   assert.match(c.text,/テストB/);
   for(const result of [a,b,c])assert.doesNotMatch(result.text,/[「」]/u);
   engine.end();
   const second=await engine.start({encounter:1});
-  assert.equal(second.speakerName,'ふたご');
-  assert.match((await engine.advance()).text,/テストC/);
+  assert.equal(second.speakerName,'テストC','subsequent visits open a different scene, not the introduction');
+  assert.equal((await engine.advance()).speakerName,'テストD');
 });
 
-test('twins autonomously carry on, occasionally offering a player choice',async()=>{
-  const engine=setup();await engine.start();
-  await engine.advance();await engine.advance();
-  const turns=[];
-  for(let i=0;i<12;i++){
-    const step=await engine.advance();turns.push(step);
-    if(step.choices.length){
-      assert.equal(step.autoNext,true,'silence does not block the talk');
-      assert.equal(engine.select({choiceId:'invalid'}),null);
-      const reaction=engine.select({choiceId:'bird'});
-      assert.equal(reaction.speakerName,'テストA');
-      assert.match(reaction.text,/鳥も/);
-      assert.equal(engine.select({choiceId:'bird'}),null);
-      break;
-    }
-  }
-  assert.ok(turns.some(turn=>turn.choices.length));
+test('twins autoplay one prepared scene, then offer optional participation and close',async()=>{
+  const engine=setup();await engine.start({encounter:1});
+  const second=await engine.advance();
+  assert.equal(second.autoNext,true);
+  const last=await engine.advance();
+  assert.equal(last.choices.length,2);
+  assert.equal(last.autoNext,false,'a scene boundary is a natural stop, not an infinite loop');
+  assert.equal(last.conversationComplete,true);
+  assert.equal(engine.select({choiceId:'invalid'}),null);
+  const reaction=engine.select({choiceId:'bird'});
+  assert.equal(reaction.speakerName,'テストC');
+  assert.match(reaction.text,/鳥も/);
+  assert.equal(reaction.autoNext,false);
+  assert.equal(reaction.conversationComplete,true);
+  assert.equal(engine.select({choiceId:'bird'}),null);
   engine.end();assert.equal(await engine.advance(),null);
 });
 
 test('twin story conversations are restricted to currently read and approved memories',async()=>{
   const books=[{id:'book-1',status:'unread'}];const engine=setup(books);
-  await engine.start();
-  let unreadStory=false;
-  for(let i=0;i<35;i++)unreadStory||=(await engine.advance()).text.includes('ふしぎな木の実');
-  assert.equal(unreadStory,false);
-  engine.end();books[0].status='read';await engine.start({encounter:1});
-  let sawStory=false;
-  for(let i=0;i<25;i++)sawStory||=(await engine.advance()).text.includes('ふしぎな木の実');
-  assert.ok(sawStory);
+  const unread=await engine.start({encounter:2});
+  assert.doesNotMatch(unread.text,/ふしぎな木の実/);
+  await engine.advance();await engine.advance();
+  assert.equal(await engine.advance(),null);
+  engine.end();books[0].status='read';
+  const story=await engine.start({encounter:2});
+  assert.match(story.text,/ふしぎな木の実/);
   engine.end();
 });
 
 test('a revoked memory cannot finish an ongoing story scene',async()=>{
   const books=[{id:'book-1',status:'read'}],engine=setup(books);
-  await engine.start();
-  let startedStory=false;
-  for(let i=0;i<15;i++){
-    const step=await engine.advance();
-    if(step.text.includes('ふしぎな木の実')){startedStory=true;break}
-  }
-  assert.ok(startedStory);books[0].status='unread';
-  assert.doesNotMatch((await engine.advance()).text,/どんな色|探してみよう/);
+  assert.match((await engine.start({encounter:2})).text,/ふしぎな木の実/);
+  books[0].status='unread';
+  assert.equal(await engine.advance(),null,'the revoked scene ends without leaking later lines');
 });
 
 test('invalid name pairs, incomplete scenes and unsafe quoted speech are rejected',()=>{

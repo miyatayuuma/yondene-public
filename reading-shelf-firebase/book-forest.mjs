@@ -51,8 +51,14 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
       if(!chatOpen||disposed||chatSession!==session||renderId!==dialogueRender||document.hidden)return;
       try{
         const next=await dialogue.advance(identity);
-        if(chatOpen&&!disposed&&chatSession===session&&renderId===dialogueRender&&next)
-          renderDialogue(next,identity,session);
+        if(chatOpen&&!disposed&&chatSession===session&&renderId===dialogueRender){
+          if(next)renderDialogue(next,identity,session);
+          else{
+            cancelAutoDialogue();
+            currentDialogue=[{...result,autoNext:false,conversationComplete:true},identity,session];
+            dismiss.hidden=false;dismiss.textContent='またね';
+          }
+        }
       }catch(error){console.warn('Forest twin conversation advance failed',error)}
     },Math.max(2800,Math.min(14000,Number(result.autoDelayMs)||4600)));
   }
@@ -60,6 +66,7 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
     if(!chatOpen)return;
     const previous=activeCharacter;chatSession++;cancelAutoDialogue();currentDialogue=null;
     chatOpen=false;activeCharacter=null;chat.hidden=true;
+    dismiss.hidden=false;dismiss.textContent='とじる';
     try{dialogue?.end?.({characterId:previous?.dialogueId||previous?.id,displayName:previous?.name})}catch(error){console.warn('Forest dialogue end failed',error)}
   }
   function dispose(){
@@ -86,6 +93,7 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
     speaker.textContent=character.name;message.hidden=false;message.textContent='…';twinHistory.hidden=true;twinWaiting.hidden=true;
     twinHistory.replaceChildren();replies.replaceChildren();
     const session=++chatSession,identity={characterId:character.dialogueId||character.id,displayName:character.name};
+    dismiss.hidden=identity.characterId==='twins';dismiss.textContent='とじる';
     try{
       const result=await (dialogue?.start||defaultDialogue.start)(identity);
       if(!chatOpen||session!==chatSession||disposed)return;
@@ -94,6 +102,8 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
   }
   function renderDialogue(result,identity,session){
     cancelAutoDialogue();currentDialogue=[result,identity,session];
+    dismiss.hidden=result?.mode==='twins'&&result?.conversationComplete!==true;
+    dismiss.textContent=result?.conversationComplete===true?'またね':'とじる';
     if(result?.mode==='twins'){
       speaker.textContent='ふたご';message.hidden=true;twinHistory.hidden=false;
       const turn=el('div','bookForestTwinTurn');turn.dataset.speaker=String(result.speakerSlot??0);

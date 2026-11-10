@@ -53,6 +53,28 @@ test('daily and session limits stop requests rather than retrying or running on 
   assert.equal(calls,1,'second encounter still respects same-day cap');
 });
 
+test('a fourth AI reply ends the encounter naturally without requesting or showing another choice',async()=>{
+  const storage=memoryStorage(),prompts=[];
+  const generator=async prompt=>{
+    prompts.push(prompt);
+    return prompt.task.includes('返答候補だけ')?{choices:['森を歩こう','お話ししよう']}:
+      {text:'また森で会えるのが楽しみだね。',choices:['またね','うん、またね']};
+  };
+  const director=createForestLiveDialogueDirector({base:base(),generate:generator,storage});
+  let result=await director.start(identity);
+  assert.equal(result.choices.length,2);
+  for(let i=0;i<4;i++){
+    result=await director.select({...identity,choiceId:result.choices[0].id});
+    assert.equal(result.choices.length,i===3?0:2);
+  }
+  assert.equal(result.conversationComplete,true);
+  assert.ok(prompts[4].constraints.some(text=>text.includes('最後のひと言')));
+  assert.equal(prompts.length,5,'one opening generation and four replies');
+  assert.equal(director.getProgress().aiRepliesThisSession,4);
+  await director.select({...identity,choiceId:'old-choice'});
+  assert.equal(prompts.length,5,'closed encounter cannot start another AI call');
+});
+
 test('reflections and twins never send child remarks or autoplay lines to an external model',async()=>{
   const storage=memoryStorage();let calls=0;
   const generator=async()=>{calls++;return {choices:['うん、そうだね','もうひとつ聞きたい']}};

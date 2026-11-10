@@ -4,7 +4,7 @@ import * as THREE from './vendor/three/three.module.js';
 import {mountBookForest} from './book-forest.mjs';
 
 class Element {
-  constructor(tag){this.tagName=tag;this.children=[];this.style={};this.attributes={};this.listeners={};this.className='';this.hidden=false;this.clientWidth=412;this.clientHeight=915;this.textContent='';}
+  constructor(tag){this.tagName=tag;this.children=[];this.style={};this.attributes={};this.dataset={};this.listeners={};this.className='';this.hidden=false;this.clientWidth=412;this.clientHeight=915;this.textContent='';}
   append(...nodes){this.children.push(...nodes)} replaceChildren(...nodes){this.children=nodes}
   remove(){this.removed=true} setAttribute(k,v){this.attributes[k]=v} focus(){} setPointerCapture(){}
   addEventListener(k,fn){(this.listeners[k]??=[]).push(fn)}
@@ -84,4 +84,41 @@ test('each twin is separately approachable with the same private sprite and dial
   const after=api.getState().npcs.find(c=>c.id==='twins_second');
   assert.deepEqual([after.x,after.z],[before.x,before.z],'talking sibling stays put');
   find(env.document.body,'bookForestClose').click();
+});
+
+test('twin conversation displays alternating names, autoplays, pauses in background, and stops on close',async()=>{
+  const originalSet=globalThis.setTimeout,originalClear=globalThis.clearTimeout;
+  const timers=new Map();let timerId=0,closeForest=()=>{};
+  globalThis.setTimeout=(fn)=>{const id=++timerId;timers.set(id,fn);return id};
+  globalThis.clearTimeout=id=>timers.delete(id);
+  try{
+    const env=environment();let api,turn=0;
+    const ready=new Promise(resolve=>{
+      closeForest=mountBookForest({familyId:'twins-voice',privateSprites:{images},
+        dialogue:{start:()=>({mode:'twins',speakerName:'ふたご',speakerSlot:0,
+          text:'だれか来た！',autoNext:true,autoDelayMs:3500,choices:[]}),
+          advance:()=>({mode:'twins',speakerName:++turn%2?'テストA':'テストB',
+            speakerSlot:turn%2?1:2,text:'おしゃべりしよう。',autoNext:true,
+            autoDelayMs:3500,choices:[]}),end(){}},
+        debug:{avatar:'player_cat',month:4,createScene:async()=>fakeWorld(),
+          onReady(value){api=value;resolve()}}});
+    });
+    await ready;api.setView({x:56,z:33});env.tick(performance.now()+100);
+    find(env.document.body,'bookForestChat').click();await Promise.resolve();
+    const history=find(env.document.body,'bookForestTwinHistory');
+    assert.equal(history.children[0].children[0].textContent,'ふたご');
+    assert.equal(timers.size,1);
+    const callback=[...timers.values()][0];await callback();
+    assert.equal(history.children.length,2);
+    assert.equal(history.children[1].children[0].textContent,'テストA');
+    assert.equal(timers.size,1);
+    env.document.hidden=true;
+    for(const fn of env.listeners.visibilitychange||[])fn();
+    assert.equal(timers.size,0,'background conversation must pause');
+    env.document.hidden=false;
+    for(const fn of env.listeners.visibilitychange||[])fn();
+    assert.equal(timers.size,1,'foreground conversation can resume');
+    find(env.document.body,'bookForestDismiss').click();
+    assert.equal(timers.size,0,'closing the conversation cancels speech timers');
+  }finally{closeForest();globalThis.setTimeout=originalSet;globalThis.clearTimeout=originalClear}
 });

@@ -1,4 +1,5 @@
 import {unlockedStoryMemories} from './book-forest-story-memory.mjs';
+import {createTwinConversationDirector} from './book-forest-twins.mjs';
 
 // The conversation director is intentionally independent of Firebase, Sheets,
 // Google Drive and Three.js. Real dialogue and story facts are PRIVATE inputs.
@@ -95,8 +96,11 @@ function reviewExcerpt(review,narration=false){
  * must never return withdrawn items. An error is treated as no reflections.
  */
 export function createForestDialogueDirector({getBooks=()=>[],getCatalog=()=>[],getCues=()=>[],
-  getReflections=async()=>[],storage=null,storageKey='forest-dialogue-local-v1',maxSpoilerLevel=2}={}){
+  getReflections=async()=>[],getTwinNames=()=>[],getTwinScenes=()=>[],
+  storage=null,storageKey='forest-dialogue-local-v1',maxSpoilerLevel=2}={}){
   let state=parseState(storage?.getItem?.(storageKey)||null),active=null;
+  const twins=createTwinConversationDirector({getBooks,getCatalog,
+    getNamePairs:getTwinNames,getScenes:getTwinScenes});
   function persist(){
     try{storage?.setItem?.(storageKey,JSON.stringify(state))}catch{}
   }
@@ -222,11 +226,17 @@ export function createForestDialogueDirector({getBooks=()=>[],getCatalog=()=>[],
     async start({characterId}={}){
       if(!CHARACTERS.has(characterId))return {text:'また、森で会おうね。',choices:[]};
       active=null;
+      if(characterId==='twins'){
+        const result=await twins.start({encounter:state.visits.twins||0});
+        if(result){state.visits.twins=numbers((state.visits.twins||0)+1,0,100000);
+          persist();return result}
+      }
       const result=await nextTopic(characterId);
       state.visits[characterId]=numbers((state.visits[characterId]||0)+1,0,100000);
       persist();return result;
     },
     async select({characterId,choiceId}={}){
+      if(characterId==='twins'&&twins.getActiveNames())return twins.select({choiceId});
       if(!active||active.characterId!==characterId||!active.choices.some(choice=>choice.id===choiceId))return null;
       const {option}=active;
       if(choiceId==='another-topic'){
@@ -243,7 +253,10 @@ export function createForestDialogueDirector({getBooks=()=>[],getCatalog=()=>[],
       if(response){active.choices=[];return {text:response,choices:[]}}
       return nextTopic(characterId,`${option.cue.id}:${option.memory?.id||option.review?.id||''}`);
     },
-    end(){active=null},
+    async advance({characterId}={}){
+      return characterId==='twins'?twins.advance():null;
+    },
+    end(){active=null;twins.end()},
     // Expose only a count summary for developer tests, never raw reviews.
     getProgress(){return {visits:{...state.visits},seenTopics:state.seen.length,
       seenMemories:state.seenMemories.length,seenReflections:state.seenReviews.length,

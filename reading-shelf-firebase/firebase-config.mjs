@@ -14,7 +14,7 @@ export const firebaseConfig = {
 // Public reCAPTCHA site keys and Worker URLs are not private API credentials.
 export const forestAIConfig = {
   enabled: true,
-  workerUrl: '',
+  workerUrl: 'https://yondene-forest-ai.akebi-lab-2611.workers.dev',
   appCheckSiteKey: '6LfIFBkuAAAAAPGF2MMF5MlRfUAX_GZ_KLgqqKfw',
   modelId: 'gemini-3.8-flash'
 };

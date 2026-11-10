@@ -106,7 +106,10 @@ test('twin conversation displays alternating names, autoplays, pauses in backgro
     await ready;api.setView({x:56,z:33});env.tick(performance.now()+100);
     find(env.document.body,'bookForestChat').click();await Promise.resolve();
     const history=find(env.document.body,'bookForestTwinHistory');
+    const waiting=find(env.document.body,'bookForestTwinWaiting');
     assert.equal(history.children[0].children[0].textContent,'ふたご');
+    assert.equal(waiting.hidden,false,'animated dots indicate more twin dialogue is coming');
+    assert.equal(waiting.children.length,3);
     assert.equal(timers.size,1);
     const callback=[...timers.values()][0];await callback();
     assert.equal(history.children.length,2);
@@ -115,10 +118,13 @@ test('twin conversation displays alternating names, autoplays, pauses in backgro
     env.document.hidden=true;
     for(const fn of env.listeners.visibilitychange||[])fn();
     assert.equal(timers.size,0,'background conversation must pause');
+    assert.equal(waiting.hidden,true,'background pause hides the waiting indicator');
     env.document.hidden=false;
     for(const fn of env.listeners.visibilitychange||[])fn();
     assert.equal(timers.size,1,'foreground conversation can resume');
+    assert.equal(waiting.hidden,false);
     find(env.document.body,'bookForestDismiss').click();
     assert.equal(timers.size,0,'closing the conversation cancels speech timers');
+    assert.equal(waiting.hidden,true,'closing the conversation hides the waiting indicator');
   }finally{closeForest();globalThis.setTimeout=originalSet;globalThis.clearTimeout=originalClear}
 });

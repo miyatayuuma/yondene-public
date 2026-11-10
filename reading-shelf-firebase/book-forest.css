@@ -9,7 +9,7 @@
 .bookForestNub{position:relative;width:42px;height:42px;border-radius:50%;background:#fffef2c7;border:1px solid #fff;box-shadow:0 3px 9px #274b3540;pointer-events:none}
 .bookForestChat{pointer-events:auto;border-radius:99px;background:#fff9e9ee;color:#3e6750;font-size:15px;font-weight:800;border:1px solid #fff;padding:12px 20px;box-shadow:0 5px 20px #294b3e40;touch-action:manipulation}
 .bookForestChat[hidden],.bookForestConversation[hidden]{display:none!important}
-.bookForestConversation{position:absolute;left:50%;bottom:max(150px,calc(env(safe-area-inset-bottom) + 140px));transform:translateX(-50%);width:min(480px,calc(100vw - 36px));box-sizing:border-box;background:#fffaf0f5;border:1px solid #fff;border-radius:20px;box-shadow:0 12px 38px #1e423b55;padding:16px 20px;color:#324b3d;user-select:text}
+.bookForestConversation{position:absolute;left:50%;bottom:max(150px,calc(env(safe-area-inset-bottom) + 140px));transform:translateX(-50%);width:min(480px,calc(100vw - 36px));max-height:min(56dvh,450px);overflow-y:auto;overscroll-behavior:contain;box-sizing:border-box;background:#fffaf0f5;border:1px solid #fff;border-radius:20px;box-shadow:0 12px 38px #1e423b55;padding:16px 20px;color:#324b3d;user-select:text}
 .bookForestSpeaker{font-size:15px;color:#507d5e}.bookForestMessage{font-size:16px;line-height:1.75;margin:7px 0 10px;white-space:pre-wrap}
 .bookForestReplies{display:flex;gap:8px;flex-wrap:wrap}
 .bookForestReplies button,.bookForestDismiss{border:1px solid #cddfc8;border-radius:99px;background:#eaf4e0;color:#3e674b;font-size:13px;font-weight:700;padding:8px 15px;touch-action:manipulation}

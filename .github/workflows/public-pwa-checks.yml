@@ -27,6 +27,7 @@ jobs:
           activity.test.mjs
           bibliography-identity.test.mjs
           book-forest-ai-provider.test.mjs
+          book-forest-cloudflare-provider.test.mjs
           book-forest-cache.test.mjs
           book-forest-dialogue-director.test.mjs
           book-forest-dialogue-generation.test.mjs
@@ -47,6 +48,8 @@ jobs:
           reader-name.test.mjs
           reading-record-domain.test.mjs
           startup-recovery.test.mjs
+      - name: Test Cloudflare forest AI Worker without external API calls
+        run: node --test cloudflare/forest-ai/src/index.test.mjs
   rules:
     runs-on: ubuntu-latest
     needs: static

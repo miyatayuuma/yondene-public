@@ -62,7 +62,7 @@ function promptFor({characterId,mode,npcLine,chosenLabel='',history=[]}){
 
 /** Does not generate on idle, twin autoplay, or a private child reflection. */
 export function createForestLiveDialogueDirector({base,generate,storage=null,
-  storageKey='forest-ai-local-v1',now=()=>Date.now(),dailyLimit=12,sessionLimit=5}={}){
+  storageKey='forest-ai-local-v1',now=()=>Date.now(),dailyLimit=150,sessionLimit=20}={}){
   if(!base||typeof base.start!=='function'||typeof base.select!=='function'||
     typeof generate!=='function')throw Error('base and generate are required');
   let pending=null,history=[],sessionCount=0,serial=0,closed=false,epoch=0;

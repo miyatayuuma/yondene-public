@@ -176,7 +176,7 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
     const player=spriteFor(avatar,7.2);scene.add(player.group);
     const npcs=CHARACTERS.map(info=>{const model=spriteFor(info.spriteId||info.id,6.8*info.scale);model.group.position.set(info.x,walkHeight(info.x,info.z),info.z);scene.add(model.group);return {...info,model,moving:false}});
     let playerX=START.x,playerZ=START.z,yaw=START.yaw,targetYaw=yaw,pitch=.53,targetPitch=pitch,clock=0,last=performance.now(),frames=0,frameTime=0,lastPerf=last,checkMonth=0;
-    const canWalk=(x,z)=>isWalkable(x,z)&&!treeObstacles.some(t=>Math.hypot(x-t.x,z-t.z)<t.r);
+    const canWalk=(x,z)=>isWalkable(x,z,1.2)&&!treeObstacles.some(t=>Math.hypot(x-t.x,z-t.z)<t.r+.35);
     const npcMotion=createForestNpcMotion(npcs,canWalk);
     const nearby=()=>{
       let candidate=null,distance=7.2;

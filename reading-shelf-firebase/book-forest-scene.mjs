@@ -11,7 +11,7 @@ function distToSegment(x,z,a,b){
 }
 function pathDistance(x,z){let d=Infinity;for(const path of PATHS)for(let i=1;i<path.length;i++)d=Math.min(d,distToSegment(x,z,path[i-1],path[i]));return d}
 const assetBase=new URL('./forest-assets/',import.meta.url);
-const assetNames=['tree-oak','tree-detailed','tree-default','tree-pinedefaulta','plant-bushdetailed','grass-large','grass','flower-reda','flower-yellowa','flower-purplea','rock-largea','rock-largeb','stump-old','log-large','mushroom-redgroup','fence-simple'];
+const assetNames=['tree-oak','tree-detailed','tree-default','tree-pinedefaulta','plant-bushdetailed','grass-large','grass','flower-reda','flower-yellowa','flower-purplea','rock-largea','rock-largeb','stump-old','log-large','mushroom-redgroup'];
 async function loadAssets(){
   const loader=new GLTFLoader();
   const names=[...assetNames,'house','hall'];
@@ -44,7 +44,9 @@ export async function createForestScene(canvas,initialMonth,{load=loadAssets,mak
   for(let i=0;i<positions.count;i++)positions.setY(i,heightAt(positions.getX(i),positions.getZ(i)));
   ground.setAttribute('color',new THREE.BufferAttribute(groundColors,3));ground.computeVertexNormals();
   const terrain=new THREE.Mesh(ground,new THREE.MeshStandardMaterial({vertexColors:true,roughness:1}));scene.add(terrain);
-  const waterMat=mat(0x75b5aa,{roughness:.28,metalness:.05,transparent:true,opacity:.91,side:THREE.DoubleSide});
+  // Opaque water occupies the depth buffer like the shore and the footbridge.
+  // Transparent large water planes were incorrectly sorted over NPC sprites.
+  const waterMat=mat(0x75b5aa,{roughness:.38,metalness:.04,side:THREE.DoubleSide});
   const waterVerts=[],waterIndex=[];
   for(let i=0;i<=150;i++){
     const z=-WORLD_LIMIT+i*WORLD_LIMIT*2/150,x=riverX(z);
@@ -77,7 +79,7 @@ export async function createForestScene(canvas,initialMonth,{load=loadAssets,mak
     scene.add(new THREE.Mesh(geo,mat(0xb9a17b,{side:THREE.DoubleSide})));
   }
   PATHS.forEach((path,i)=>ribbon(path,i<2?3.8:2.6));
-  const wood=mat(0x9b7656),woodDark=mat(0x72543e),stone=mat(0xada99a);
+  const wood=mat(0x9b7656),woodDark=mat(0x72543e),woodLight=mat(0xbe9870),stone=mat(0xada99a);
   function beam(w,h,d,x,y,z,m=wood,parent=scene){const mesh=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m);mesh.position.set(x,y,z);parent.add(mesh);return mesh}
   // A low arched footbridge; its deck uses the same height function as the walker.
   for(const bz of BRIDGE_Z){
@@ -167,20 +169,71 @@ export async function createForestScene(canvas,initialMonth,{load=loadAssets,mak
     shore.push({x,z,y:heightAt(x,z)-.06,rot:rand()*TAU,scale:1.4+rand()*2.6});
   }
   instanced('rock-largea',shore,'rock');
-  const fences=[];
-  for(const [x,z,rotation] of [[-51,42,0],[-48,42,0],[-45,42,0],[-42,42,0],[34,27,0],[37,27,0],[40,27,0]])
-    fences.push({x,z,y:heightAt(x,z),rot:rotation,scale:3});
-  instanced('fence-simple',fences,'wood');
+  // Distinct posts and sloped rails. Every post touches its own ground sample;
+  // a uniformly elevated instanced fence left some ends floating on hills.
+  function timberRail(x1,z1,x2,z2,offset,material=wood){
+    const dx=x2-x1,dz=z2-z1,len=Math.hypot(dx,dz);
+    const h1=heightAt(x1,z1)+offset,h2=heightAt(x2,z2)+offset;
+    const rail=beam(len+.12,.14,.18,(x1+x2)/2,(h1+h2)/2,(z1+z2)/2,material);
+    rail.rotation.order='YXZ';rail.rotation.y=-Math.atan2(dz,dx);
+    rail.rotation.z=Math.atan2(h2-h1,len);
+  }
+  function gardenFence(x1,z1,x2,z2,sections){
+    const points=Array.from({length:sections+1},(_,i)=>({
+      x:x1+(x2-x1)*i/sections,z:z1+(z2-z1)*i/sections}));
+    for(let i=0;i<sections;i++){
+      const a=points[i],b=points[i+1];
+      timberRail(a.x,a.z,b.x,b.z,.49,woodLight);
+      timberRail(a.x,a.z,b.x,b.z,1.09,wood);
+    }
+    for(const p of points){
+      const y=heightAt(p.x,p.z);
+      beam(.27,1.42,.27,p.x,y+.71,p.z,woodDark);
+      const cap=beam(.36,.13,.36,p.x,y+1.47,p.z,woodLight);
+      cap.rotation.y=Math.PI/4;
+      const base=beam(.35,.16,.35,p.x,y+.055,p.z,stone);
+      base.rotation.y=Math.PI/4;
+    }
+  }
+  gardenFence(-53,42,-41,42,4);
+  gardenFence(32,27,44,27,4);
   for(const h of HOUSES){
     const model=assets[h.type].clone(true);model.position.set(h.x,heightAt(h.x,h.z)-.25,h.z);model.scale.setScalar(h.scale);model.rotation.y=h.rotation;scene.add(model);
   }
-  // Seating and handmade rails give the water and the lookout a place to pause.
-  function bench(x,z,angle=0){
-    const b=new THREE.Group();b.position.set(x,heightAt(x,z),z);b.rotation.y=angle;scene.add(b);
-    beam(3.3,.22,.9,0,.75,0,wood,b);beam(3.3,.8,.16,0,1.35,-.38,wood,b);
-    for(const s of [-1,1])beam(.25,.75,.6,s*1.25,.35,0,woodDark,b);
+  // A low-poly slatted seat with real legs on each sampled terrain corner.
+  // Seats stay level, while each leg reaches the uneven forest floor.
+  function bench(x,z,lookX,lookZ){
+    const angle=Math.atan2(lookX-x,lookZ-z),c=Math.cos(angle),s=Math.sin(angle);
+    const b=new THREE.Group();b.position.set(x,0,z);b.rotation.y=angle;scene.add(b);
+    const supports=[];
+    for(const lx of [-1.47,1.47])for(const lz of [-.39,.36]){
+      const wx=x+c*lx+s*lz,wz=z-s*lx+c*lz;
+      supports.push({lx,lz,ground:heightAt(wx,wz)});
+    }
+    const seatY=Math.max(...supports.map(p=>p.ground))+.83;
+    for(const depth of [-.35,-.04,.27]){
+      beam(3.58,.13,.26,0,seatY,depth,woodLight,b);
+      beam(3.5,.035,.035,0,seatY+.075,depth-.092,wood,b);
+    }
+    for(const support of supports){
+      const foot=support.ground+.025,h=seatY-.06-foot;
+      beam(.19,h,.2,support.lx,foot+h/2,support.lz,woodDark,b);
+      beam(.33,.13,.32,support.lx,foot+.035,support.lz,stone,b);
+    }
+    for(const lx of [-1.47,1.47]){
+      const rest=beam(.17,.95,.17,lx,seatY+.42,-.5,woodDark,b);
+      rest.rotation.x=-.12;
+      beam(.22,.12,.85,lx,seatY+.48,-.13,woodLight,b);
+    }
+    for(const rise of [.3,.57,.83]){
+      const plank=beam(3.52,.17,.16,0,seatY+rise,-.52-rise*.12,wood,b);
+      plank.rotation.x=-.12;
+    }
+    beam(3.02,.14,.18,0,seatY-.36,-.22,woodDark,b);
   }
-  bench(-71,-28,.7);bench(62,68,-.8);bench(-15,20,-.3);
+  bench(-71,-28,POND.x,POND.z);
+  bench(62,68,44,43);
+  bench(-15,20,5,19);
   const snowGeometry=new THREE.CircleGeometry(1,9);snowGeometry.rotateX(-Math.PI/2);
   const snowPatches=new THREE.InstancedMesh(snowGeometry,palette.snow,95),snow=[];
   for(let i=0;i<95;i++){

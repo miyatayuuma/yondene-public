@@ -13,13 +13,18 @@ const VOICES={
 };
 const SELF_NAMES={king:'王さま',kiki:'キキ',jiji:'ジジ',skipper:'スキッパー',
   zorori:'ゾロリ',ishishi:'イシシ',noshishi:'ノシシ'};
+const PROMPT_VERSION='forest-short-exchange-v5';
+const GOODBYE={king:'続きはまた今度だ。達者でな！',kiki:'じゃあ、また森で会おうね！',
+  jiji:'またね。気をつけて歩くんだよ。',skipper:'またいっしょに探検しよう！',
+  zorori:'次はもっと面白い話をしてやるぜ！',ishishi:'じゃあな！また遊ぼうぜ！',
+  noshishi:'またね。のんびり待ってるよ。'};
 const clean=value=>typeof value==='string'?value.trim().replace(/\s+/gu,' '):'';
 function readJson(storage,key,fallback){
   try{return JSON.parse(storage?.getItem?.(key)||'null')||fallback}catch{return fallback}
 }
 function validLine(characterId,text){
   const line=clean(text);
-  if(line.length<5||line.length>150||/[{}<>]/u.test(line))return false;
+  if(line.length<5||line.length>90||/[{}<>]/u.test(line))return false;
   // The non-speaking cat stays on approved hand-written action lines in v1.
   if(characterId==='cat')return false;
   const name=SELF_NAMES[characterId];
@@ -31,30 +36,31 @@ export function validateLiveForestOutput(raw,{characterId,requireLine=false}={})
   if(!data||typeof data!=='object'||!CHARACTERS.has(characterId))return null;
   const text=clean(data.text);
   if(requireLine&&!validLine(characterId,text))return null;
-  if(!Array.isArray(data.choices)||data.choices.length<2||data.choices.length>3)return null;
+  if(!Array.isArray(data.choices)||data.choices.length!==2)return null;
   const labels=data.choices.map(choice=>clean(typeof choice==='string'?choice:choice?.label));
-  if(labels.some(label=>label.length<2||label.length>24||/[\r\n{}<>「」]/u.test(label))||
+  if(labels.some(label=>label.length<2||label.length>18||/[\r\n{}<>「」]/u.test(label))||
     new Set(labels).size!==labels.length)return null;
   return {text:requireLine?text:null,labels};
 }
 
 function promptFor({characterId,mode,npcLine,chosenLabel='',history=[],closing=false}){
   return {
-    task:mode==='reply'?'選ばれた返答に応じたNPCのひと言と次の返答候補を作る':
-      'NPCのひと言に合う、子どもが選べる自然な返答候補だけを作る',
+    task:mode==='reply'?'いま選ばれた返答に自然に応じる短いNPCのひと言を作る':
+      '現在のNPCのひと言に対する短い返答候補を2個だけ作る',
     npc:{id:characterId,voice:VOICES[characterId]},
     context:{npcLine:clean(npcLine).slice(0,170),chosenLabel:clean(chosenLabel).slice(0,24),
-      recentTurns:history.slice(-4)},
+      recentTurns:history.slice(-2)},
     constraints:[
       '会話は日本語。小学校低学年が読める短い言葉と簡単な漢字にする',
       '会話の相手は実在の子ども。家族、住所、学校、年齢、個人情報を質問しない',
       '原作の出来事を勝手に作らない。わからないときは森の身近なものを話題にする',
-      '原作や台本から台詞を引用しない。説明文やあらすじにしない',
+      '原作や台本から台詞を引用しない。説明文、あらすじ、教訓、長い回想にしない',
       '本人の感想・行動・気持ちを知っているふりをしない',
-      '返答候補は2〜3個、それぞれ24字以内。正解誘導より自然な会話を優先する',
+      'NPCの返事は1〜2文で70字以内。前の発言を言い換えて繰り返さない',
+      '返答候補は2個、各16字以内。ありきたりな相づちや無意味な質問を続けない',
       'ひとつの返答候補を選んでも、子どもの実際の信念や経験とはみなさない',
       characterId==='cat'?'ねこは絶対に人語を話さない':'NPC本人の視点で話す',
-      ...(closing?['これが今回の最後のひと言。話題を増やさず、キャラらしく自然に別れを告げる']:[])
+      ...(closing?['この一言で会話を終える。新たな話題を出さず自然に別れを告げる']:[])
     ],
     output:{format:'JSON',shape:{text:mode==='reply'?'NPCの発言（150字以内）':'省略可',
       choices:['子どもが選ぶ返答A','子どもが選ぶ返答B']}}
@@ -63,15 +69,16 @@ function promptFor({characterId,mode,npcLine,chosenLabel='',history=[],closing=f
 
 /** Does not generate on idle, twin autoplay, or a private child reflection. */
 export function createForestLiveDialogueDirector({base,generate,storage=null,
-  storageKey='forest-ai-local-v1',now=()=>Date.now(),dailyLimit=150,sessionLimit=5,
-  maxReplies=4}={}){
+  storageKey='forest-ai-local-v1',now=()=>Date.now(),dailyLimit=150,sessionLimit=3,
+  maxReplies=2,startDelayMs=280,modelId='unknown'}={}){
   if(!base||typeof base.start!=='function'||typeof base.select!=='function'||
     typeof generate!=='function')throw Error('base and generate are required');
-  let pending=null,history=[],sessionCount=0,repliesThisSession=0,serial=0,closed=false,epoch=0;
+  let pending=null,history=[],sessionCount=0,repliesThisSession=0,serial=0,closed=false,epoch=0,
+    inflight=null;
   const budgetKey=storageKey+':budget',logKey=storageKey+':log';
   function record(item){
     const existing=readJson(storage,logKey,[]);
-    const entries=Array.isArray(existing)?existing.slice(-59):[];
+    const entries=Array.isArray(existing)?existing.slice(-299):[];
     entries.push({at:now(),...item});
     try{storage?.setItem?.(logKey,JSON.stringify(entries))}catch{}
   }
@@ -92,12 +99,23 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
   async function request(characterId,mode,npcLine,chosenLabel='',closing=false){
     if(!reserve())return null;
     const context=promptFor({characterId,mode,npcLine,chosenLabel,history,closing});
+    const controller=new AbortController(),startedAt=now();
+    inflight={controller,characterId,mode,startedAt};
     let timeout;
     try{
-      const raw=await Promise.race([Promise.resolve().then(()=>generate(context)),new Promise((_,reject)=>
-        {timeout=setTimeout(()=>reject(Error('timeout')),11000)})]);
-      return validateLiveForestOutput(raw,{characterId,requireLine:mode==='reply'});
-    }catch{return null}finally{clearTimeout(timeout)}
+      const raw=await Promise.race([Promise.resolve().then(()=>generate(context,{signal:controller.signal})),
+        new Promise((_,reject)=>{timeout=setTimeout(()=>{
+          controller.abort();reject(Error('timeout'));
+        },11000)})]);
+      const result=validateLiveForestOutput(raw,{characterId,requireLine:mode==='reply'});
+      if(controller.signal.aborted)return null;
+      if(!result)record({event:'invalid-generation',characterId,mode,modelId,promptVersion:PROMPT_VERSION});
+      return result?{...result,elapsedMs:Math.max(0,now()-startedAt)}:null;
+    }catch{
+      if(!controller.signal.aborted)record({event:'generation-failed',characterId,mode,modelId,
+        promptVersion:PROMPT_VERSION,elapsedMs:Math.max(0,now()-startedAt)});
+      return null;
+    }finally{clearTimeout(timeout);if(inflight?.controller===controller)inflight=null}
   }
   function decorate(characterId,text,labels){
     const choices=labels.map((label,i)=>({id:`ai-${++serial}-${i}`,label}));
@@ -112,11 +130,14 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     if(!original||!CHARACTERS.has(characterId)||characterId==='cat'||
       original.sourceKind==='reflection'||
       !validLine(characterId,original.text))return original;
+    if(startDelayMs>0)await new Promise(resolve=>setTimeout(resolve,startDelayMs));
+    if(closed||generation!==epoch)return null;
     const result=await request(characterId,'choices',original.text);
     if(closed||generation!==epoch)return null;
     if(!result)return original;
     history.push({npc:clean(original.text).slice(0,150)});
-    record({event:'generated-choices',characterId,choices:result.labels});
+    record({event:'generated-choices',characterId,text:original.text,choices:result.labels,
+      sourceKind:original.sourceKind||'unknown',modelId,promptVersion:PROMPT_VERSION,elapsedMs:result.elapsedMs});
     return decorate(characterId,original.text,result.labels);
   }
   async function select({characterId,choiceId}={}){
@@ -129,26 +150,34 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     }
     pending=null;
     const label=current.choices.find(choice=>choice.id===choiceId).label;
-    history.push({playerChoice:label});history=history.slice(-4);
+    history.push({playerChoice:label});history=history.slice(-2);
     record({event:'selected-offered-choice',characterId,label});
     const closing=repliesThisSession+1>=maxReplies;
     const generated=await request(characterId,'reply',current.text,label,closing);
     if(closed||generation!==epoch)return null;
     if(!generated){
-      const fallback=await base.start({characterId});
-      return fallback;
+      return {text:GOODBYE[characterId]||'また、森で会おうね。',choices:[],conversationComplete:true};
     }
-    history.push({npc:generated.text});history=history.slice(-4);
+    history.push({npc:generated.text});history=history.slice(-2);
     repliesThisSession++;
     record({event:'generated-reply',characterId,text:generated.text,
-      choices:closing?[]:generated.labels,closing});
+      choices:closing?[]:generated.labels,closing,modelId,promptVersion:PROMPT_VERSION,
+      elapsedMs:generated.elapsedMs,turn:repliesThisSession});
     if(closing){pending=null;return {text:generated.text,choices:[],conversationComplete:true}}
     return decorate(characterId,generated.text,generated.labels);
   }
   return {
     start,select,
     advance(identity){return base.advance?.(identity)||null},
-    end(){epoch++;closed=true;pending=null;history=[];base.end?.()},
+    end(){
+      epoch++;closed=true;pending=null;history=[];
+      if(inflight&&!inflight.controller.signal.aborted){
+        record({event:'cancel-requested',characterId:inflight.characterId,mode:inflight.mode,
+          modelId,promptVersion:PROMPT_VERSION,elapsedMs:Math.max(0,now()-inflight.startedAt)});
+        inflight.controller.abort();
+      }
+      base.end?.();
+    },
     getProgress(){return {...(base.getProgress?.()||{}),aiRequestsThisSession:sessionCount,
       aiRepliesThisSession:repliesThisSession}}
   };

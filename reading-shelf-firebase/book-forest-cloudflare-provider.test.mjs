@@ -16,6 +16,27 @@ test('Cloudflare provider sends a Firebase ID token, no API key, and returns cho
   assert.equal(args.options.cache,'no-store');
 });
 
+test('Cloudflare provider aborts before dispatch after token retrieval and forwards signals to fetch',async()=>{
+  let resolveToken,fetchCalls=0;
+  const controller=new AbortController();
+  const stalled=createForestCloudflareGenerator({workerUrl:'https://demo.workers.dev',
+    getIdToken:()=>new Promise(resolve=>{resolveToken=resolve}),
+    fetchImpl:async()=>{fetchCalls++;throw Error('should not dispatch')}});
+  const pending=stalled({task:'検証'},{signal:controller.signal});
+  controller.abort();
+  resolveToken('signed.'+'token'.repeat(8));
+  await assert.rejects(()=>pending,/cancelled/);
+  assert.equal(fetchCalls,0);
+  let receivedSignal;
+  const immediate=createForestCloudflareGenerator({workerUrl:'https://demo.workers.dev',
+    getIdToken:async()=>('signed.'+'token'.repeat(8)),
+    fetchImpl:async(_url,options)=>{receivedSignal=options.signal;
+      return {ok:true,json:async()=>({choices:['橋を見たい','森へ行きたい']})}}});
+  const fresh=new AbortController();
+  await immediate({task:'検証'},{signal:fresh.signal});
+  assert.equal(receivedSignal,fresh.signal);
+});
+
 test('Cloudflare provider refuses invalid origin, missing auth and quota errors',async()=>{
   assert.throws(()=>createForestCloudflareGenerator({workerUrl:'http://example.com',getIdToken:async()=>''}),/invalid/);
   const withoutLogin=createForestCloudflareGenerator({workerUrl:'https://demo.workers.dev',getIdToken:async()=>''});

@@ -23,6 +23,17 @@ test('stream and pond beds remain below water, and bridge ends meet the banks',(
   }
 });
 
+test('actor-sized footprints cannot enter the river edge, pond edge or bridge rail',()=>{
+  const z=30;
+  assert.equal(isWalkable(riverX(z)+4.6,z),false,'the center is dry but the actor overlaps the water');
+  assert.equal(isWalkable(POND.x+POND.r+.6,POND.z),false,'pond edge also has clearance');
+  for(const bz of BRIDGE_Z){
+    const x=riverX(bz);
+    assert.equal(isWalkable(x,bz),true);
+    assert.equal(isWalkable(x,bz+2.7),false,'bridge rails are outside the traversable footprint');
+  }
+});
+
 test('the terrain beneath each house footprint has a stable foundation',()=>{
   for(const house of HOUSES){
     const width=(house.type==='hall'?.59:.40)*house.scale;

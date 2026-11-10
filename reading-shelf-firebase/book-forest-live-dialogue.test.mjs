@@ -36,6 +36,8 @@ test('generates contextual reply choices, then a character reply only after a ch
   assert.equal(director.getProgress().aiRequestsThisSession,2);
   const log=JSON.parse(storage.getItem('forest-ai-local-v1:log'));
   assert.deepEqual(log.map(x=>x.event),['generated-choices','selected-offered-choice','generated-reply']);
+  assert.equal(log[0].text,'今日はいい風がふいているね。','export can reconstruct the initial line');
+  assert.equal(log[0].promptVersion,'forest-short-exchange-v5');
   assert.equal(log[1].label,'風の音を聞く');
   director.end();
 });
@@ -53,7 +55,7 @@ test('daily and session limits stop requests rather than retrying or running on 
   assert.equal(calls,1,'second encounter still respects same-day cap');
 });
 
-test('a fourth AI reply ends the encounter naturally without requesting or showing another choice',async()=>{
+test('a second AI reply ends the encounter naturally without requesting or showing another choice',async()=>{
   const storage=memoryStorage(),prompts=[];
   const generator=async prompt=>{
     prompts.push(prompt);
@@ -63,16 +65,48 @@ test('a fourth AI reply ends the encounter naturally without requesting or showi
   const director=createForestLiveDialogueDirector({base:base(),generate:generator,storage});
   let result=await director.start(identity);
   assert.equal(result.choices.length,2);
-  for(let i=0;i<4;i++){
+  for(let i=0;i<2;i++){
     result=await director.select({...identity,choiceId:result.choices[0].id});
-    assert.equal(result.choices.length,i===3?0:2);
+    assert.equal(result.choices.length,i===1?0:2);
   }
   assert.equal(result.conversationComplete,true);
-  assert.ok(prompts[4].constraints.some(text=>text.includes('最後のひと言')));
-  assert.equal(prompts.length,5,'one opening generation and four replies');
-  assert.equal(director.getProgress().aiRepliesThisSession,4);
+  assert.ok(prompts[2].constraints.some(text=>text.includes('この一言で会話を終える')));
+  assert.equal(prompts.length,3,'one opening generation and two replies');
+  assert.equal(director.getProgress().aiRepliesThisSession,2);
   await director.select({...identity,choiceId:'old-choice'});
-  assert.equal(prompts.length,5,'closed encounter cannot start another AI call');
+  assert.equal(prompts.length,3,'closed encounter cannot start another AI call');
+});
+
+test('closing an encounter during the opening delay sends no AI request',async()=>{
+  const storage=memoryStorage();let calls=0;
+  const director=createForestLiveDialogueDirector({base:base(),storage,startDelayMs:30,
+    generate:async()=>{calls++;return {choices:['近くを歩こう','また今度ね']}}});
+  const pending=director.start(identity);
+  await new Promise(resolve=>setTimeout(resolve,5));
+  director.end();
+  assert.equal(await pending,null);
+  assert.equal(calls,0);
+  assert.equal(director.getProgress().aiRequestsThisSession,0);
+});
+
+test('closing while an AI reply is pending aborts its fetch and prevents a late line',async()=>{
+  const storage=memoryStorage();let observedSignal;
+  const director=createForestLiveDialogueDirector({base:base(),storage,startDelayMs:0,now:()=>2000,
+    modelId:'test-gemma',generate:async(prompt,{signal})=>{
+      if(prompt.task.includes('返答候補'))return {choices:['橋を見よう','もう帰ろう']};
+      observedSignal=signal;
+      return new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(Error('aborted')),{once:true}));
+    }});
+  const first=await director.start(identity);
+  const pending=director.select({...identity,choiceId:first.choices[0].id});
+  await new Promise(resolve=>setTimeout(resolve,0));
+  assert.equal(observedSignal.aborted,false);
+  director.end();
+  assert.equal(observedSignal.aborted,true);
+  assert.equal(await pending,null);
+  const log=JSON.parse(storage.getItem('forest-ai-local-v1:log'));
+  assert.ok(log.some(entry=>entry.event==='cancel-requested'&&entry.modelId==='test-gemma'));
+  assert.equal(log.some(entry=>entry.event==='generated-reply'),false);
 });
 
 test('reflections and twins never send child remarks or autoplay lines to an external model',async()=>{
@@ -95,6 +129,8 @@ test('bad LLM output is rejected, preserving approved fallback and avoiding fabr
     {characterId:'cat',requireLine:true}),null);
   assert.equal(validateLiveForestOutput({text:'今日は森を歩くね。',choices:['どうして？','どうして？']},
     {characterId:'kiki',requireLine:true}),null);
+  assert.equal(validateLiveForestOutput({text:'とても長い説明です。'.repeat(12),choices:['橋を見に行く','また今度ね']},
+    {characterId:'kiki',requireLine:true}),null,'reject verbose lines');
   const original=await base().start();
   const director=createForestLiveDialogueDirector({base:base(),generate:async()=>({choices:['だめ']}),
     storage:memoryStorage()});

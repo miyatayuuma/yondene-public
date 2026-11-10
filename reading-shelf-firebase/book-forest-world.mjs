@@ -75,7 +75,7 @@ export function bridgeAt(x,z){
   return null;
 }
 export function walkHeight(x,z){return bridgeAt(x,z)??heightAt(x,z)}
-export function isWalkable(x,z){
+function walkablePoint(x,z){
   if(Math.abs(x)>WORLD_LIMIT-4||Math.abs(z)>WORLD_LIMIT-4)return false;
   if(Math.hypot(x-POND.x,z-POND.z)<POND.r+.3)return false;
   if(Math.abs(x-riverX(z))<4.2&&bridgeAt(x,z)===null)return false;
@@ -86,6 +86,16 @@ export function isWalkable(x,z){
     return lx>bounds[0]*h.scale-margin&&lx<bounds[1]*h.scale+margin&&
       lz>bounds[2]*h.scale-margin&&lz<bounds[3]*h.scale+margin;
   }))return false;
+  return true;
+}
+// Actors have feet and width: checking only their center allowed sprites to
+// overlap the water and to slip along the bridge rails and bank edges.
+export function isWalkable(x,z,radius=.85){
+  if(!walkablePoint(x,z))return false;
+  for(let i=0;i<8;i++){
+    const angle=i*Math.PI/4;
+    if(!walkablePoint(x+radius*Math.cos(angle),z+radius*Math.sin(angle)))return false;
+  }
   return true;
 }
 export function monthInJapan(date=new Date()){

@@ -5,7 +5,7 @@ import {saveCachedForestDialogue,loadCachedForestDialogue,clearCachedForestDialo
 
 const headers=['schemaVersion','cueId','npcId','kind','bookId','memoryId','fromNpc','text','choicesJson','approval'];
 const values=[headers,[1,'test-meet','king','meet','','','','こんにちは','', 'approved'],
-  [1,'test-review','cat','story','','','','（ねこが絵を描く）{memory}','', 'approved'],
+  [1,'test-review','cat','story','','mem-1','','（ねこは庭の絵を描き、前足で水を示す。）','', 'approved'],
   [1,'test-rejected','king','meet','','','','未承認です','', 'draft']];
 const fact=[['schemaVersion','memoryId','bookId','bookTitle','text','tags','characters','spoilerLevel','evidenceStatus','confidence','sourceUrl'],
   [1,'mem-1','test-book','架空の本','友だちが庭に水をまいた','庭','king',1,'approved','high','https://example.org/book']];

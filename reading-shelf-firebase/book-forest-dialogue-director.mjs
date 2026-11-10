@@ -6,6 +6,8 @@ import {unlockedStoryMemories} from './book-forest-story-memory.mjs';
 const CHARACTERS=new Set(['king','cat','kiki','jiji','skipper','twins','zorori','ishishi','noshishi']);
 const KINDS=new Set(['meet','ambient','story','reflection','relay']);
 const MAX_CUES=600,MAX_SEEN=100,MAX_TEXT=230;
+const SELF_NAMES={king:'王さま',kiki:'キキ',jiji:'ジジ',skipper:'スキッパー',
+  zorori:'ゾロリ',ishishi:'イシシ',noshishi:'ノシシ'};
 const validId=value=>typeof value==='string'&&/^[a-zA-Z0-9_-]{1,100}$/.test(value);
 const normalizeText=value=>typeof value==='string'?value.trim().replace(/\s+/gu,' '):'';
 const numbers=(value,min,max)=>Number.isSafeInteger(value)&&value>=min&&value<=max?value:min;
@@ -17,6 +19,16 @@ function validCue(cue){
     !normalizeText(cue.text)||cue.text.length>MAX_TEXT)return false;
   if(['story','reflection'].includes(cue.kind)&&cue.bookId!==undefined&&
     !validId(cue.bookId))return false;
+  // Story lines are authored for one specific, sourced memory. A generic
+  // {memory} interpolation would turn a third-person synopsis into speech.
+  if(cue.kind==='story'&&(!validId(cue.memoryId)||cue.text.includes('{memory}')))return false;
+  if(cue.kind==='story'){
+    const text=normalizeText(cue.text);
+    const name=SELF_NAMES[cue.characterId];
+    if(name&&(text.startsWith(name+'は')||text.startsWith(name+'が')))return false;
+    // The king's cat communicates by gesture; narration must not make it talk.
+    if(cue.characterId==='cat'&&(!/^（.*）$/u.test(text)||/[「」]/u.test(text)))return false;
+  }
   if(cue.kind==='relay'&&!CHARACTERS.has(cue.fromCharacterId))return false;
   if(cue.memoryId!==undefined&&!validId(cue.memoryId))return false;
   if(cue.choices!==undefined&&(!Array.isArray(cue.choices)||cue.choices.length>3||
@@ -36,7 +48,7 @@ export function validateForestDialogueCues(cues){
   });
 }
 
-function emptyState(){return {version:1,visits:{},seen:[],seenMemories:[],seenReviews:[],
+function emptyState(){return {version:1,visits:{},lastKinds:{},seen:[],seenMemories:[],seenReviews:[],
   knownRead:[],freshRead:[],readInitialized:false,pendingRelay:null};}
 function parseState(raw){
   try{
@@ -46,10 +58,14 @@ function parseState(raw){
     for(const [id,count] of Object.entries(value.visits||{})){
       if(CHARACTERS.has(id))visits[id]=numbers(count,0,100000);
     }
+    const lastKinds={};
+    for(const [id,kind] of Object.entries(value.lastKinds||{})){
+      if(CHARACTERS.has(id)&&KINDS.has(kind))lastKinds[id]=kind;
+    }
     const ids=field=>unique((Array.isArray(value[field])?value[field]:[])
       .filter(validId)).slice(-MAX_SEEN);
     const relay=value.pendingRelay;
-    return {version:1,visits,seen:ids('seen'),seenMemories:ids('seenMemories'),
+    return {version:1,visits,lastKinds,seen:ids('seen'),seenMemories:ids('seenMemories'),
       seenReviews:ids('seenReviews'),knownRead:ids('knownRead'),freshRead:ids('freshRead'),
       readInitialized:value.readInitialized===true,pendingRelay:
         CHARACTERS.has(relay?.to)&&CHARACTERS.has(relay?.from)?{from:relay.from,to:relay.to,
@@ -102,6 +118,13 @@ export function createForestDialogueDirector({getBooks=()=>[],getCatalog=()=>[],
     const memoryById=new Map(memories.map(item=>[item.id,item]));
     const approved=validateForestDialogueCues(await getCues());
     const relevant=approved.filter(cue=>cue.characterId===characterId);
+    const relayTargets=new Map();
+    for(const voice of approved.filter(cue=>cue.kind==='story'&&memoryById.has(cue.memoryId))){
+      if(!relayTargets.has(voice.memoryId))relayTargets.set(voice.memoryId,new Set());
+      relayTargets.get(voice.memoryId).add(voice.characterId);
+    }
+    const voicedMemories=new Map(relevant.filter(cue=>cue.kind==='story')
+      .map(cue=>[cue.memoryId,cue]));
     const reviewBooks=unique(relevant.filter(cue=>cue.kind==='reflection'&&cue.bookId&&
       readable.has(cue.bookId)).map(cue=>cue.bookId)).slice(0,5);
     const reviews=new Map();
@@ -109,24 +132,31 @@ export function createForestDialogueDirector({getBooks=()=>[],getCatalog=()=>[],
       try{reviews.set(bookId,(await getReflections(bookId)).map(safeReview).filter(Boolean).slice(0,5))}
       catch{reviews.set(bookId,[])}
     }));
-    const options=[];
+    const options=[],lastKind=state.lastKinds[characterId];
     for(const [index,cue] of relevant.entries()){
       if(cue.kind==='meet'&&(state.visits[characterId]||0)>0)continue;
       if(cue.kind==='relay'&&!(state.pendingRelay?.to===characterId&&
         state.pendingRelay?.from===cue.fromCharacterId))continue;
       if(cue.kind==='relay'){
         const related=memoryById.get(state.pendingRelay?.memoryId)||null;
-        options.push({cue,memory:related,index,score:150+(related?4:0)});
+        if(related&&!voicedMemories.has(related.id)){
+          // This NPC has no reviewed account of the same incident. Consume the
+          // stale relay instead of repeatedly promising a missing conversation.
+          state.pendingRelay=null;persist();continue;
+        }
+        options.push({cue,memory:related,voiceCue:related?voicedMemories.get(related.id):null,
+          relayTargets,index,score:150+(related?4:0)});
         continue;
       }
       if(cue.kind==='story'){
-        const matches=cue.memoryId?[memoryById.get(cue.memoryId)].filter(Boolean):
-          memories.filter(memory=>!cue.bookId||cue.bookId===memory.bookId);
+        const matches=[memoryById.get(cue.memoryId)].filter(memory=>
+          memory&&(!cue.bookId||cue.bookId===memory.bookId));
         for(const memory of matches){
           const relevance=String(memory.characters||'').split(/[\s,，、|]+/u).includes(characterId)?6:0;
-          options.push({cue,memory,index,score:66+relevance+
-            (state.seenMemories.includes(memory.id)?-28:22)+
+          options.push({cue,memory,relayTargets,index,score:66+relevance+
+            (state.seenMemories.includes(memory.id)?-35:22)+
             (state.seen.includes(cue.id)?-12:0)+
+            (lastKind==='story'?-45:lastKind==='ambient'?18:0)+
             (state.freshRead.includes(memory.bookId)?42:0)});
         }
         continue;
@@ -134,26 +164,35 @@ export function createForestDialogueDirector({getBooks=()=>[],getCatalog=()=>[],
       if(cue.kind==='reflection'){
         for(const review of reviews.get(cue.bookId)||[]){
           options.push({cue,review,index,score:82+
-            (state.seenReviews.includes(review.id)?-48:60)+
-            (state.seen.includes(cue.id)?-12:0)});
+            (state.seenReviews.includes(review.id)?-65:60)+
+            (state.seen.includes(cue.id)?-12:0)+
+            (lastKind==='reflection'?-120:0)});
         }
         continue;
       }
-      const base={meet:160,ambient:18}[cue.kind];
-      options.push({cue,index,score:base+(state.seen.includes(cue.id)?-24:14)});
+      const base={meet:160,ambient:40}[cue.kind];
+      options.push({cue,index,score:base+(state.seen.includes(cue.id)?-12:20)+
+        (cue.kind==='ambient'&&lastKind==='ambient'?-12:0)});
     }
     return options.sort((a,b)=>b.score-a.score||a.index-b.index||
       String(a.memory?.id||a.review?.id||'').localeCompare(String(b.memory?.id||b.review?.id||'')));
   }
   function render(option){
-    const {cue,memory,review}=option;
+    const {cue,memory,review,voiceCue,relayTargets}=option;
     let text=normalizeText(cue.text);
-    if(memory)text=text.replaceAll('{memory}',normalizeText(memory.text));
-    if(cue.kind==='relay'&&!memory)text=text.replaceAll('{memory}','');
+    if(cue.kind==='story'&&!memory)return null;
+    if(cue.kind==='relay'){
+      // Relay preserves the episode ID, but can only quote a reviewed line
+      // written for the *receiving* character. Never paste catalog prose.
+      if(memory&&text.includes('{memory}')&&!voiceCue)return null;
+      text=text.replaceAll('{memory}',normalizeText(voiceCue?.text));
+    }
     if(review)text=text.replaceAll('{reflection}',reviewExcerpt(review,cue.characterId==='cat'));
     // A script with a required placeholder cannot render the wrong fact.
     if(/\{(?:memory|reflection)\}/u.test(text))return null;
-    const choices=(cue.choices||[]).map(choice=>({id:choice.id,label:choice.label}));
+    const choices=(cue.choices||[])
+      .filter(choice=>!choice.relayTo||!memory||relayTargets?.get(memory.id)?.has(choice.relayTo))
+      .map(choice=>({id:choice.id,label:choice.label}));
     if(!choices.length)choices.push({id:'another-topic',label:'ほかの話も聞く'});
     return {text,choices};
   }
@@ -161,6 +200,7 @@ export function createForestDialogueDirector({getBooks=()=>[],getCatalog=()=>[],
     const response=render(option);if(!response)return null;
     active={characterId,option,choices:response.choices};
     remember(state.seen,option.cue.id);
+    state.lastKinds[characterId]=option.cue.kind;
     if(option.memory)remember(state.seenMemories,option.memory.id);
     if(option.cue.kind==='story'&&option.memory){
       state.freshRead=state.freshRead.filter(id=>id!==option.memory.bookId);

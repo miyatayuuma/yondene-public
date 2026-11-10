@@ -1,7 +1,8 @@
 import {validateForestDialogueCues} from './book-forest-dialogue-director.mjs';
 import {unlockedStoryMemories} from './book-forest-story-memory.mjs';
 
-const PREFIX='private-book-forest-dialogue-v1-';
+const PREFIX='private-book-forest-dialogue-v2-';
+const LEGACY_PREFIX='private-book-forest-dialogue-v1-';
 const IDS=/^[A-Za-z0-9_-]{1,160}$/u;
 const pathname='/__book_forest_private_dialogue__/package';
 const scopedName=(uid,familyId)=>{
@@ -45,9 +46,14 @@ export async function loadCachedForestDialogue({uid,familyId,cacheStorage=global
 
 export async function clearCachedForestDialogue({uid,familyId,cacheStorage=globalThis.caches}={}){
   if(!cacheStorage?.delete)return;
-  if(uid&&familyId){await cacheStorage.delete(scopedName(uid,familyId));return}
+  if(uid&&familyId){
+    const oldName=LEGACY_PREFIX+uid+'-'+familyId;
+    await Promise.all([cacheStorage.delete(scopedName(uid,familyId)),cacheStorage.delete(oldName)]);
+    return;
+  }
   if(cacheStorage.keys){
-    await Promise.all((await cacheStorage.keys()).filter(name=>name.startsWith(PREFIX))
+    await Promise.all((await cacheStorage.keys()).filter(name=>
+      name.startsWith(PREFIX)||name.startsWith(LEGACY_PREFIX))
       .map(name=>cacheStorage.delete(name)));
   }
 }

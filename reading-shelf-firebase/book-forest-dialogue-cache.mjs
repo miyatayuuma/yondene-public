@@ -2,8 +2,9 @@ import {validateForestDialogueCues} from './book-forest-dialogue-director.mjs';
 import {unlockedStoryMemories} from './book-forest-story-memory.mjs';
 import {validateTwinNamePairs,validateTwinScenes} from './book-forest-twins.mjs';
 
-const PREFIX='private-book-forest-dialogue-v3-';
-const LEGACY_PREFIXES=['private-book-forest-dialogue-v1-','private-book-forest-dialogue-v2-'];
+const PREFIX='private-book-forest-dialogue-v4-';
+const LEGACY_PREFIXES=['private-book-forest-dialogue-v1-','private-book-forest-dialogue-v2-',
+  'private-book-forest-dialogue-v3-'];
 const IDS=/^[A-Za-z0-9_-]{1,160}$/u;
 const pathname='/__book_forest_private_dialogue__/package';
 const scopedName=(uid,familyId)=>{
@@ -17,6 +18,8 @@ export async function saveCachedForestDialogue({uid,familyId,packageData,cacheSt
   if(!validateForestDialogueCues(packageData?.cues).length)throw Error('会話台本が空です');
   if(!Array.isArray(packageData?.catalog)||packageData.catalog.length>140)
     throw Error('物語記憶の件数が正しくありません');
+  if(!Array.isArray(packageData?.thoughtSeeds)||packageData.thoughtSeeds.length>180)
+    throw Error('思考の種台帳の形式が正しくありません');
   if(!validateTwinNamePairs(packageData?.twinNames).length||
     validateTwinScenes(packageData?.twinScenes).length<2)
     throw Error('ふたご会話の承認済みデータが足りません');
@@ -40,11 +43,13 @@ export async function loadCachedForestDialogue({uid,familyId,cacheStorage=global
     const data=JSON.parse(text);
     if(!Array.isArray(data.catalog)||data.catalog.length>140||!validateForestDialogueCues(data.cues).length)
       throw Error('invalid');
+    if(!Array.isArray(data.thoughtSeeds)||data.thoughtSeeds.length>180)throw Error('invalid seeds');
     const twinNames=validateTwinNamePairs(data.twinNames),twinScenes=validateTwinScenes(data.twinScenes);
     if(!twinNames.length||twinScenes.length<2)throw Error('invalid twins');
     // Fact-level authorization still happens with the current Firestore shelf
     // snapshot in the director. Never persist reading state or review quotes.
-    return {catalog:data.catalog,cues:validateForestDialogueCues(data.cues),twinNames,twinScenes};
+    return {catalog:data.catalog,cues:validateForestDialogueCues(data.cues),twinNames,twinScenes,
+      thoughtSeeds:data.thoughtSeeds};
   }catch{
     await cacheStorage.delete(name);return null;
   }

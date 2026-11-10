@@ -75,10 +75,11 @@ export function createTwinConversationDirector({getBooks=()=>[],getCatalog=()=>[
     const choices=(line.choices||[]).map(choice=>({id:choice.id,label:choice.label}));
     active.pendingChoices=line.choices||[];
     return {mode:'twins',speakerName:nameFor(line.speakerSlot),speakerSlot:line.speakerSlot,text,choices,
+      ...nextSpeaker(),
       autoNext:true,autoDelayMs:choices.length?11500:
         Math.min(7700,Math.max(3400,2500+text.length*90))};
   }
-  function chooseScene(){
+  function peekNextScene(){
     const all=active.scenes.filter(scene=>scene.id!=='intro');
     const ambient=all.filter(scene=>!scene.memoryId),story=all.filter(scene=>scene.memoryId);
     const preferStory=active.sceneIndex%3===1;
@@ -87,7 +88,16 @@ export function createTwinConversationDirector({getBooks=()=>[],getCatalog=()=>[
     // Stable variety across encounters, while avoiding immediate repeats.
     let index=(active.encounter+active.sceneIndex)%pool.length;
     if(pool.length>1&&pool[index].id===active.lastScene)index=(index+1)%pool.length;
-    const chosen=pool[index];active.lastScene=chosen.id;active.sceneIndex++;
+    return pool[index];
+  }
+  function nextSpeaker(){
+    const next=active.scene.lines[active.offset]||peekNextScene()?.lines[0];
+    return next?{nextSpeakerName:nameFor(next.speakerSlot),nextSpeakerSlot:next.speakerSlot}:{};
+  }
+  function chooseScene(){
+    const chosen=peekNextScene();
+    if(!chosen)return null;
+    active.lastScene=chosen.id;active.sceneIndex++;
     return chosen;
   }
   function advanceLocal(){
@@ -127,7 +137,7 @@ export function createTwinConversationDirector({getBooks=()=>[],getCatalog=()=>[
       const text=choice.text.replaceAll('{firstName}',active.names.firstName)
         .replaceAll('{secondName}',active.names.secondName);
       return {mode:'twins',speakerName:nameFor(choice.speakerSlot),speakerSlot:choice.speakerSlot,text,
-        choices:[],autoNext:true,autoDelayMs:Math.min(6600,3200+text.length*80)};
+        ...nextSpeaker(),choices:[],autoNext:true,autoDelayMs:Math.min(6600,3200+text.length*80)};
     },
     end(){active=null},
     getActiveNames(){return active?{...active.names}:null}

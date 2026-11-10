@@ -32,7 +32,9 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
   const twinHistory=el('div','bookForestTwinHistory');twinHistory.hidden=true;
   const twinWaiting=el('div','bookForestTwinWaiting');twinWaiting.hidden=true;
   twinWaiting.setAttribute('role','status');twinWaiting.setAttribute('aria-label','少し待つとふたごのおしゃべりが続きます');
-  for(let i=0;i<3;i++){const dot=el('span','');dot.setAttribute('aria-hidden','true');twinWaiting.append(dot)}
+  const waitingName=el('strong','bookForestTwinName'),waitingDots=el('p','bookForestTwinWaitingDots');
+  for(let i=0;i<3;i++){const dot=el('span','');dot.setAttribute('aria-hidden','true');waitingDots.append(dot)}
+  twinWaiting.append(waitingName,waitingDots);
   const dismiss=el('button','bookForestDismiss','とじる');dismiss.type='button';chat.append(speaker,message,twinHistory,twinWaiting,replies,dismiss);
   const loading=el('div','bookForestLoading','森を準備しています…');
   layer.append(canvas,vignette,close,bottom,chat,loading);document.body.append(layer);document.body.classList.add('bookForestOpen');layer.focus({preventScroll:true});
@@ -41,7 +43,10 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
   function scheduleAutoDialogue(result,identity,session){
     if(result?.mode!=='twins'||result.autoNext!==true||typeof dialogue?.advance!=='function'||document.hidden)return;
     const renderId=dialogueRender;
+    waitingName.textContent=result.nextSpeakerName||'ふたご';
+    twinWaiting.dataset.speaker=String(result.nextSpeakerSlot??0);
     twinWaiting.hidden=false;
+    chat.scrollTop=chat.scrollHeight;
     autoDialogueTimer=setTimeout(async()=>{
       if(!chatOpen||disposed||chatSession!==session||renderId!==dialogueRender||document.hidden)return;
       try{

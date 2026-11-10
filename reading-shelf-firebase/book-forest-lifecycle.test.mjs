@@ -96,24 +96,33 @@ test('twin conversation displays alternating names, autoplays, pauses in backgro
     const ready=new Promise(resolve=>{
       closeForest=mountBookForest({familyId:'twins-voice',privateSprites:{images},
         dialogue:{start:()=>({mode:'twins',speakerName:'ふたご',speakerSlot:0,
-          text:'だれか来た！',autoNext:true,autoDelayMs:3500,choices:[]}),
+          nextSpeakerName:'テストA',nextSpeakerSlot:1,text:'だれか来た！',autoNext:true,autoDelayMs:3500,choices:[]}),
           advance:()=>({mode:'twins',speakerName:++turn%2?'テストA':'テストB',
             speakerSlot:turn%2?1:2,text:'おしゃべりしよう。',autoNext:true,
+            nextSpeakerName:turn%2?'テストB':'テストA',nextSpeakerSlot:turn%2?2:1,
             autoDelayMs:3500,choices:[]}),end(){}},
         debug:{avatar:'player_cat',month:4,createScene:async()=>fakeWorld(),
           onReady(value){api=value;resolve()}}});
     });
     await ready;api.setView({x:56,z:33});env.tick(performance.now()+100);
+    const chatPanel=find(env.document.body,'bookForestConversation');chatPanel.scrollHeight=410;
     find(env.document.body,'bookForestChat').click();await Promise.resolve();
     const history=find(env.document.body,'bookForestTwinHistory');
     const waiting=find(env.document.body,'bookForestTwinWaiting');
     assert.equal(history.children[0].children[0].textContent,'ふたご');
     assert.equal(waiting.hidden,false,'animated dots indicate more twin dialogue is coming');
-    assert.equal(waiting.children.length,3);
+    assert.equal(waiting.children[0].textContent,'テストA','next speaker is visible immediately');
+    assert.equal(waiting.children[1].children.length,3,'three animated dots occupy next speaker message');
+    assert.equal(waiting.dataset.speaker,'1');
+    assert.equal(chatPanel.scrollTop,410,'new speaker preview is scrolled into view');
     assert.equal(timers.size,1);
+    chatPanel.scrollHeight=520;
     const callback=[...timers.values()][0];await callback();
     assert.equal(history.children.length,2);
     assert.equal(history.children[1].children[0].textContent,'テストA');
+    assert.equal(waiting.children[0].textContent,'テストB','dots switch to the next twin after speaking');
+    assert.equal(waiting.dataset.speaker,'2');
+    assert.equal(chatPanel.scrollTop,520,'next preview remains visible when dialogue grows');
     assert.equal(timers.size,1);
     env.document.hidden=true;
     for(const fn of env.listeners.visibilitychange||[])fn();

@@ -28,6 +28,9 @@ export function validateForestSpriteManifest(manifest){
 export async function authorizeForestDrive({user,GoogleAuthProvider,reauthenticateWithPopup}){
   const provider=new GoogleAuthProvider();
   provider.addScope(FOREST_DRIVE_SCOPE);
+  // Prefer the account already authenticated with Firebase when a new Drive
+  // authorization is genuinely needed (first visit or explicit image refresh).
+  if(user?.email)provider.setCustomParameters({login_hint:user.email});
   const result=await reauthenticateWithPopup(user,provider);
   const token=GoogleAuthProvider.credentialFromResult(result)?.accessToken;
   if(!token)throw Error('Google Driveの読み取り権限が取得できませんでした');
@@ -39,7 +42,9 @@ function mediaURL(fileId){
   return 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?alt=media';
 }
 
-export async function loadPrivateForestSprites(token,{fetchImpl=fetch,decodeImage=createImageBitmap}={}){
+export async function loadPrivateForestSprites(token,{
+  fetchImpl=fetch,decodeImage=createImageBitmap,onValidatedAssets
+}={}){
   if(!token)throw Error('Google Driveの認証が必要です');
   async function get(fileId){
     const response=await fetchImpl(mediaURL(fileId),{
@@ -56,6 +61,7 @@ export async function loadPrivateForestSprites(token,{fetchImpl=fetch,decodeImag
   const assets=validateForestSpriteManifest(manifest);
   const sheetSize=manifest.frameSize*2;
   const images={};
+  const blobs=onValidatedAssets?{}:null;
   try{
     // At 128x128 and 64 colors the 11 images collectively weigh ~30 KiB.
     await Promise.all(FOREST_SPRITE_NAMES.map(async name=>{
@@ -68,7 +74,9 @@ export async function loadPrivateForestSprites(token,{fetchImpl=fetch,decodeImag
         throw Error('画像のコマ配置が正しくありません');
       }
       images[name]=decoded;
+      if(blobs)blobs[name]=blob;
     }));
+    if(onValidatedAssets)await onValidatedAssets(manifest,blobs);
   }catch(error){
     Object.values(images).forEach(image=>image.close?.());
     throw error;

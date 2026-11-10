@@ -18,4 +18,5 @@
 .forestAvatarChoice{display:flex;align-items:center;gap:8px;font-size:13px;color:#56715f}.forestAvatarChoice select{width:auto;min-width:100px}
 .forestSettingsEntry{background:linear-gradient(112deg,#eff9e9,#fff8e7);border:1px solid #d7e7d3;border-radius:20px;padding:17px 19px;display:grid;gap:6px}
 .forestSettingsEntry h3{margin:0;color:#316849;font-size:19px}.forestSettingsEntry p{margin:0 0 6px;color:#56715f;font-size:12px}.forestSettingsEntry .primary{width:fit-content}
+.forestSettingsEntry .forestRefresh{width:fit-content;background:transparent;color:#497560;font-size:12px;padding:5px 10px}
 @media(max-height:540px){.bookForestJoystick{width:86px;height:86px}.bookForestJoystick::before{width:55px;height:55px}.bookForestNub{width:35px;height:35px}.bookForestConversation{bottom:108px}}

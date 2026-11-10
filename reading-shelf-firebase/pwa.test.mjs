@@ -3,9 +3,21 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {STATUSES,readingModeLabel,compactReadPeriodLabel} from './domain.mjs';
 import {coverStatusLabel,coverIsAlternate} from './bibliography-identity.mjs';
+import {forestAIConfig} from './firebase-config.mjs';
 const get=(name)=>readFileSync(new URL('./'+name,import.meta.url));
 const text=(name)=>get(name).toString('utf8');
 const manifest=JSON.parse(text('manifest.webmanifest'));
+
+test('live forest AI can switch from Gemini to Cloudflare without embedding a secret',()=>{
+  assert.equal(forestAIConfig.enabled,true);
+  assert.equal(typeof forestAIConfig.workerUrl,'string');
+  assert.match(forestAIConfig.appCheckSiteKey,/^6L[A-Za-z0-9_-]{20,}$/);
+  assert.equal(forestAIConfig.modelId,'gemini-3.8-flash');
+  assert.match(text('app.mjs'),/if\(conversation&&forestAIConfig\.enabled===true\)/);
+  assert.match(text('book-forest-ai-provider.mjs'),/ReCaptchaEnterpriseProvider/);
+  assert.match(text('app.mjs'),/createForestCloudflareGenerator/);
+  assert.match(text('book-forest-cloudflare-provider.mjs'),/getIdToken/);
+});
 
 test('installable Japanese よんでね PWA manifest',()=>{
   assert.equal(manifest.name,'よんでね');
@@ -96,7 +108,7 @@ test('no removed DOM ID can silently cause a null property assignment',()=>{
 test('PWA cannot combine stale JS with current HTML after deployment',()=>{
   const html=text('index.html'),sw=text('sw.js');
   const config=JSON.parse(text('firebase.json'));
-  assert.match(html,/app\.mjs\?build=20261110-forest-ai-v1/);
+  assert.match(html,/app\.mjs\?build=20261110-forest-ai-v3/);
   assert.match(sw,/const ARTWORK_PATHS=new Set\(ARTWORK\)/);
   assert.ok(!sw.includes('PUBLIC_ASSETS'));
   for(const path of ['/app.mjs','/index.html','/domain.mjs','/book-community.mjs','/recommendations.mjs']){
@@ -157,7 +169,7 @@ test('single-step sorting options have distinct clear Japanese descriptions',()=
 });
 test('PWA build integrates synopsis and forest without stale module assets',()=>{
   const html=text('index.html'),app=text('app.mjs'),recs=text('recommendations.mjs');
-  const build='20261110-forest-ai-v1',unchanged='20261019-shelf-v28',readingBuild='20261025-reading-legacy-v1';
+  const build='20261110-forest-ai-v3',unchanged='20261019-shelf-v28',readingBuild='20261025-reading-legacy-v1';
   assert.match(html,new RegExp('data-app-build="'+build+'"'));
   assert.match(html,new RegExp('app\\.mjs\\?build='+build));
   assert.match(html,new RegExp('style\\.css\\?build='+build));

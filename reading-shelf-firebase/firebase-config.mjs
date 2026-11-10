@@ -9,12 +9,12 @@ export const firebaseConfig = {
   appId: "1:565070188680:web:1e94bbcb854526b0dc0f3d"
 };
 
-// Optional forest AI. Requires Firebase Console > AI Logic (Gemini Developer API)
-// and a registered App Check reCAPTCHA Enterprise public site key.
-// Keep disabled until the free Spark project and App Check have been verified.
-// The site key is a PUBLIC web identifier, not a secret API credential.
+// Live forest AI: set workerUrl to the deployed HTTPS Cloudflare Worker URL.
+// Until then, the existing Firebase AI Logic implementation remains active.
+// Public reCAPTCHA site keys and Worker URLs are not private API credentials.
 export const forestAIConfig = {
-  enabled: false,
-  appCheckSiteKey: '',
+  enabled: true,
+  workerUrl: 'https://yondene-forest-ai.akebi-lab-2611.workers.dev',
+  appCheckSiteKey: '6LfIFBkuAAAAAPGF2MMF5MlRfUAX_GZ_KLgqqKfw',
   modelId: 'gemini-3.8-flash'
 };

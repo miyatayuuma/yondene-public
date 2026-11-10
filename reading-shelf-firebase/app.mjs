@@ -1,7 +1,7 @@
 import {initializeApp} from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-app.js';
-import {getAuth,GoogleAuthProvider,signInWithPopup,signInWithRedirect,reauthenticateWithPopup,getRedirectResult,setPersistence,browserLocalPersistence,onAuthStateChanged,signOut} from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-auth.js';
+import {getAuth,getIdToken,GoogleAuthProvider,signInWithPopup,signInWithRedirect,reauthenticateWithPopup,getRedirectResult,setPersistence,browserLocalPersistence,onAuthStateChanged,signOut} from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-auth.js';
 import {getFirestore,doc,collection,getDoc,getDocs,query,limit,orderBy,setDoc,deleteDoc,onSnapshot,Timestamp,serverTimestamp,runTransaction,writeBatch} from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-firestore.js';
-import {firebaseConfig,forestAIConfig} from './firebase-config.mjs?build=20261110-forest-ai-v1';
+import {firebaseConfig,forestAIConfig} from './firebase-config.mjs?build=20261110-forest-ai-v3';
 import {isPermissionDenied,staleMembershipRoute} from './startup-recovery.mjs?build=20261019-shelf-v28';
 import {newInviteToken,parseInviteHash,oneTimeInviteUrl} from './invite-links.mjs?build=20261019-shelf-v28';
 import {shelfThumbnailUrl} from './cover-thumbnails.mjs?build=20261019-shelf-v28';
@@ -14,17 +14,18 @@ import {mountFamilyActivity} from './activity.mjs?build=20261019-shelf-v28';
 import {mountChildRating} from './child-rating.mjs?build=20261019-shelf-v28';
 import {mountReadingRecordEditor} from './reading-record-editor.mjs?build=20261025-reading-legacy-v1';
 import {readerNameFromShelf} from './reader-name.mjs?build=20261019-shelf-v28';
-import {mountBookForest,getForestAvatar,setForestAvatar} from './book-forest.mjs?build=20261110-forest-ai-v1';
-import {authorizeForestDrive,loadPrivateForestSprites} from './book-forest-drive.mjs?build=20261110-forest-ai-v1';
-import {saveCachedForestSprites,loadCachedForestSprites,clearCachedForestSprites} from './book-forest-cache.mjs?build=20261110-forest-ai-v1';
-import {loadPrivateForestDialogue} from './book-forest-private-dialogue.mjs?build=20261110-forest-ai-v1';
-import {saveCachedForestDialogue,loadCachedForestDialogue,clearCachedForestDialogue} from './book-forest-dialogue-cache.mjs?build=20261110-forest-ai-v1';
-import {createForestDialogueDirector} from './book-forest-dialogue-director.mjs?build=20261110-forest-ai-v1';
-import {createForestLiveDialogueDirector} from './book-forest-live-dialogue.mjs?build=20261110-forest-ai-v1';
-import {createForestAIGenerator} from './book-forest-ai-provider.mjs?build=20261110-forest-ai-v1';
-import {STATUSES,ACTIVE_READ_FILTER,filteredBooks,readPeriodLabel,compactReadPeriodLabel,readingModeLabel,emptyStateMessage} from './domain.mjs?build=20261110-forest-ai-v1';
+import {mountBookForest,getForestAvatar,setForestAvatar} from './book-forest.mjs?build=20261110-forest-ai-v3';
+import {authorizeForestDrive,loadPrivateForestSprites} from './book-forest-drive.mjs?build=20261110-forest-ai-v3';
+import {saveCachedForestSprites,loadCachedForestSprites,clearCachedForestSprites} from './book-forest-cache.mjs?build=20261110-forest-ai-v3';
+import {loadPrivateForestDialogue} from './book-forest-private-dialogue.mjs?build=20261110-forest-ai-v3';
+import {saveCachedForestDialogue,loadCachedForestDialogue,clearCachedForestDialogue} from './book-forest-dialogue-cache.mjs?build=20261110-forest-ai-v3';
+import {createForestDialogueDirector} from './book-forest-dialogue-director.mjs?build=20261110-forest-ai-v3';
+import {createForestLiveDialogueDirector} from './book-forest-live-dialogue.mjs?build=20261110-forest-ai-v3';
+import {createForestAIGenerator} from './book-forest-ai-provider.mjs?build=20261110-forest-ai-v3';
+import {createForestCloudflareGenerator} from './book-forest-cloudflare-provider.mjs?build=20261110-forest-ai-v3';
+import {STATUSES,ACTIVE_READ_FILTER,filteredBooks,readPeriodLabel,compactReadPeriodLabel,readingModeLabel,emptyStateMessage} from './domain.mjs?build=20261110-forest-ai-v3';
 
-const APP_BUILD='20261110-forest-ai-v1';
+const APP_BUILD='20261110-forest-ai-v3';
 const $=id=>{const element=document.getElementById(id);if(!element)throw new Error('APP_DOM_MISMATCH: missing #'+id);return element};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const safeCover=url=>/^(https:\/\/|data:image\/(jpeg|png|webp);base64,)/i.test(String(url||''))?String(url):'';
@@ -77,6 +78,8 @@ function initUI(){
       try{localStorage.removeItem('yondene-forest-dialogue-state-v1:'+leavingUid+':'+leavingFamily)}catch{}
       const aiKey='yondene-forest-ai-local-v1:'+leavingUid+':'+leavingFamily;
       try{localStorage.removeItem(aiKey+':budget');localStorage.removeItem(aiKey+':log')}catch{}
+      const cloudflareKey='yondene-forest-ai-local-v2:'+leavingUid+':'+leavingFamily;
+      try{localStorage.removeItem(cloudflareKey+':budget');localStorage.removeItem(cloudflareKey+':log')}catch{}
     }
     await signOut(auth);
   };
@@ -702,13 +705,18 @@ function renderFamily(){
             try{
               // App Check is initialized once for the app, not on every forest visit.
               if(!forestAIGeneratorPromise){
-                forestAIGeneratorPromise=createForestAIGenerator({firebaseApp,
-                  siteKey:forestAIConfig.appCheckSiteKey,modelId:forestAIConfig.modelId})
+                forestAIGeneratorPromise=(forestAIConfig.workerUrl?
+                  Promise.resolve(createForestCloudflareGenerator({
+                    workerUrl:forestAIConfig.workerUrl,getIdToken:()=>getIdToken(auth.currentUser)})):
+                  createForestAIGenerator({firebaseApp,
+                    siteKey:forestAIConfig.appCheckSiteKey,modelId:forestAIConfig.modelId}))
                   .catch(error=>{forestAIGeneratorPromise=null;throw error});
               }
               const generate=await forestAIGeneratorPromise;
               dialogueEngine=createForestLiveDialogueDirector({base:conversation,generate,
-                storage:localStorage,storageKey:'yondene-forest-ai-local-v1:'+ownerUid+':'+familyId});
+                storage:localStorage,storageKey:'yondene-forest-ai-local-v2:'+ownerUid+':'+familyId,
+                dailyLimit:forestAIConfig.workerUrl?150:12,
+                sessionLimit:forestAIConfig.workerUrl?20:5});
             }catch(error){
               console.warn('Forest AI unavailable; approved dialogue remains available',error);
               notice('AI会話は利用できません。承認済みの会話台本で遊べます。');

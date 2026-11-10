@@ -30,14 +30,18 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
   const chat=el('section','bookForestConversation');chat.hidden=true;chat.setAttribute('aria-live','polite');
   const speaker=el('strong','bookForestSpeaker'),message=el('p','bookForestMessage'),replies=el('div','bookForestReplies');
   const twinHistory=el('div','bookForestTwinHistory');twinHistory.hidden=true;
-  const dismiss=el('button','bookForestDismiss','とじる');dismiss.type='button';chat.append(speaker,message,twinHistory,replies,dismiss);
+  const twinWaiting=el('div','bookForestTwinWaiting');twinWaiting.hidden=true;
+  twinWaiting.setAttribute('role','status');twinWaiting.setAttribute('aria-label','少し待つとふたごのおしゃべりが続きます');
+  for(let i=0;i<3;i++){const dot=el('span','');dot.setAttribute('aria-hidden','true');twinWaiting.append(dot)}
+  const dismiss=el('button','bookForestDismiss','とじる');dismiss.type='button';chat.append(speaker,message,twinHistory,twinWaiting,replies,dismiss);
   const loading=el('div','bookForestLoading','森を準備しています…');
   layer.append(canvas,vignette,close,bottom,chat,loading);document.body.append(layer);document.body.classList.add('bookForestOpen');layer.focus({preventScroll:true});
   function stopInput(){keys.clear();joystickX=0;joystickY=0;stickPointer=null;lookPointer=null;nub.style.transform='translate(0,0)'}
-  function cancelAutoDialogue(){clearTimeout(autoDialogueTimer);autoDialogueTimer=null;dialogueRender++}
+  function cancelAutoDialogue(){clearTimeout(autoDialogueTimer);autoDialogueTimer=null;dialogueRender++;twinWaiting.hidden=true}
   function scheduleAutoDialogue(result,identity,session){
     if(result?.mode!=='twins'||result.autoNext!==true||typeof dialogue?.advance!=='function'||document.hidden)return;
     const renderId=dialogueRender;
+    twinWaiting.hidden=false;
     autoDialogueTimer=setTimeout(async()=>{
       if(!chatOpen||disposed||chatSession!==session||renderId!==dialogueRender||document.hidden)return;
       try{
@@ -74,7 +78,7 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
   async function showDialogue(character){
     if(chatOpen||disposed)return;
     stopInput();cancelAutoDialogue();currentDialogue=null;chatOpen=true;chat.hidden=false;activeCharacter=character;
-    speaker.textContent=character.name;message.hidden=false;message.textContent='…';twinHistory.hidden=true;
+    speaker.textContent=character.name;message.hidden=false;message.textContent='…';twinHistory.hidden=true;twinWaiting.hidden=true;
     twinHistory.replaceChildren();replies.replaceChildren();
     const session=++chatSession,identity={characterId:character.dialogueId||character.id,displayName:character.name};
     try{

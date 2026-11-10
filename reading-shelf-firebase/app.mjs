@@ -1,7 +1,7 @@
 import {initializeApp} from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-app.js';
 import {getAuth,GoogleAuthProvider,signInWithPopup,signInWithRedirect,reauthenticateWithPopup,getRedirectResult,setPersistence,browserLocalPersistence,onAuthStateChanged,signOut} from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-auth.js';
 import {getFirestore,doc,collection,getDoc,getDocs,query,limit,orderBy,setDoc,deleteDoc,onSnapshot,Timestamp,serverTimestamp,runTransaction,writeBatch} from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-firestore.js';
-import {firebaseConfig} from './firebase-config.mjs?build=20261019-shelf-v28';
+import {firebaseConfig,forestAIConfig} from './firebase-config.mjs?build=20261110-forest-ai-v1';
 import {isPermissionDenied,staleMembershipRoute} from './startup-recovery.mjs?build=20261019-shelf-v28';
 import {newInviteToken,parseInviteHash,oneTimeInviteUrl} from './invite-links.mjs?build=20261019-shelf-v28';
 import {shelfThumbnailUrl} from './cover-thumbnails.mjs?build=20261019-shelf-v28';
@@ -14,21 +14,23 @@ import {mountFamilyActivity} from './activity.mjs?build=20261019-shelf-v28';
 import {mountChildRating} from './child-rating.mjs?build=20261019-shelf-v28';
 import {mountReadingRecordEditor} from './reading-record-editor.mjs?build=20261025-reading-legacy-v1';
 import {readerNameFromShelf} from './reader-name.mjs?build=20261019-shelf-v28';
-import {mountBookForest,getForestAvatar,setForestAvatar} from './book-forest.mjs?build=20261110-forest-twins-v3';
-import {authorizeForestDrive,loadPrivateForestSprites} from './book-forest-drive.mjs?build=20261110-forest-twins-v3';
-import {saveCachedForestSprites,loadCachedForestSprites,clearCachedForestSprites} from './book-forest-cache.mjs?build=20261110-forest-twins-v3';
-import {loadPrivateForestDialogue} from './book-forest-private-dialogue.mjs?build=20261110-forest-twins-v3';
-import {saveCachedForestDialogue,loadCachedForestDialogue,clearCachedForestDialogue} from './book-forest-dialogue-cache.mjs?build=20261110-forest-twins-v3';
-import {createForestDialogueDirector} from './book-forest-dialogue-director.mjs?build=20261110-forest-twins-v3';
-import {STATUSES,ACTIVE_READ_FILTER,filteredBooks,readPeriodLabel,compactReadPeriodLabel,readingModeLabel,emptyStateMessage} from './domain.mjs?build=20261110-forest-twins-v3';
+import {mountBookForest,getForestAvatar,setForestAvatar} from './book-forest.mjs?build=20261110-forest-ai-v1';
+import {authorizeForestDrive,loadPrivateForestSprites} from './book-forest-drive.mjs?build=20261110-forest-ai-v1';
+import {saveCachedForestSprites,loadCachedForestSprites,clearCachedForestSprites} from './book-forest-cache.mjs?build=20261110-forest-ai-v1';
+import {loadPrivateForestDialogue} from './book-forest-private-dialogue.mjs?build=20261110-forest-ai-v1';
+import {saveCachedForestDialogue,loadCachedForestDialogue,clearCachedForestDialogue} from './book-forest-dialogue-cache.mjs?build=20261110-forest-ai-v1';
+import {createForestDialogueDirector} from './book-forest-dialogue-director.mjs?build=20261110-forest-ai-v1';
+import {createForestLiveDialogueDirector} from './book-forest-live-dialogue.mjs?build=20261110-forest-ai-v1';
+import {createForestAIGenerator} from './book-forest-ai-provider.mjs?build=20261110-forest-ai-v1';
+import {STATUSES,ACTIVE_READ_FILTER,filteredBooks,readPeriodLabel,compactReadPeriodLabel,readingModeLabel,emptyStateMessage} from './domain.mjs?build=20261110-forest-ai-v1';
 
-const APP_BUILD='20261110-forest-twins-v3';
+const APP_BUILD='20261110-forest-ai-v1';
 const $=id=>{const element=document.getElementById(id);if(!element)throw new Error('APP_DOM_MISMATCH: missing #'+id);return element};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const safeCover=url=>/^(https:\/\/|data:image\/(jpeg|png|webp);base64,)/i.test(String(url||''))?String(url):'';
 const safeSourceUrl=url=>/^https:\/\/[^\s]+$/i.test(String(url||''))?String(url):'';
 const SHOW=['loading','loginPanel','setupPanel','shelfPanel'];
-let auth,db,user=null,fid='',role='',household=null,books=[],series=[],members=[],profiles=[],invites=[],openInvites=[],lastInviteLink='';
+let auth,db,firebaseApp=null,user=null,fid='',role='',household=null,books=[],series=[],members=[],profiles=[],invites=[],openInvites=[],lastInviteLink='';
 let unsubs=[],view='shelf',generation=0,ratings=new Map(),closeRating=null,refreshRating=null,closeReadingEdit=null;
 let closeCommunity=null,closeRecommendations=null,closeActivity=null,pendingUI=null,closeForest=null,forestSpriteCache=null,forestDialogueCache=null;
 const inviteFromUrl=new URLSearchParams(location.search).get('family')||'';
@@ -73,6 +75,8 @@ function initUI(){
     try{await clearCachedForestDialogue()}catch(error){console.warn('Could not clear private forest conversation',error)}
     if(leavingUid&&leavingFamily){
       try{localStorage.removeItem('yondene-forest-dialogue-state-v1:'+leavingUid+':'+leavingFamily)}catch{}
+      const aiKey='yondene-forest-ai-local-v1:'+leavingUid+':'+leavingFamily;
+      try{localStorage.removeItem(aiKey+':budget');localStorage.removeItem(aiKey+':log')}catch{}
     }
     await signOut(auth);
   };
@@ -693,8 +697,20 @@ function renderFamily(){
             },
             storage:localStorage,storageKey:'yondene-forest-dialogue-state-v1:'+ownerUid+':'+familyId
           }):null;
+          let dialogueEngine=conversation;
+          if(conversation&&forestAIConfig.enabled===true){
+            try{
+              const generate=await createForestAIGenerator({firebaseApp,
+                siteKey:forestAIConfig.appCheckSiteKey,modelId:forestAIConfig.modelId});
+              dialogueEngine=createForestLiveDialogueDirector({base:conversation,generate,
+                storage:localStorage,storageKey:'yondene-forest-ai-local-v1:'+ownerUid+':'+familyId});
+            }catch(error){
+              console.warn('Forest AI unavailable; approved dialogue remains available',error);
+              notice('AI会話は利用できません。承認済みの会話台本で遊べます。');
+            }
+          }
           closeForest=mountBookForest({familyId,privateSprites:forestSpriteCache,
-            ...(conversation?{dialogue:conversation}:{}),
+            ...(dialogueEngine?{dialogue:dialogueEngine}:{}),
             onClose:()=>{closeForest=null}});
         }catch(error){statusError(error)}
         finally{forestLaunch.disabled=false;forestLaunch.textContent='本の森へ行く'}
@@ -849,7 +865,7 @@ async function start(){
     show('setupPanel');$('setupTitle').textContent='Firebaseの初期設定が必要です';$('setupDesc').textContent='プロジェクト接続設定がまだ登録されていません。管理者がFirebaseを作成し、firebase-config.mjsを設定してください。';$('setupBody').replaceChildren();return;
   }
   try{
-    const app=initializeApp(firebaseConfig);auth=getAuth(app);db=getFirestore(app);
+    const app=initializeApp(firebaseConfig);firebaseApp=app;auth=getAuth(app);db=getFirestore(app);
     await setPersistence(auth,browserLocalPersistence);
     await getRedirectResult(auth).catch(e=>{if(e.code!=='auth/no-auth-event')throw e});
     onAuthStateChanged(auth,u=>{void signedIn(u)},statusError);

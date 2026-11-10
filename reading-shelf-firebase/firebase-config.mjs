@@ -8,3 +8,13 @@ export const firebaseConfig = {
   messagingSenderId: "565070188680",
   appId: "1:565070188680:web:1e94bbcb854526b0dc0f3d"
 };
+
+// Optional forest AI. Requires Firebase Console > AI Logic (Gemini Developer API)
+// and a registered App Check reCAPTCHA Enterprise public site key.
+// Keep disabled until the free Spark project and App Check have been verified.
+// The site key is a PUBLIC web identifier, not a secret API credential.
+export const forestAIConfig = {
+  enabled: false,
+  appCheckSiteKey: '',
+  modelId: 'gemini-3.8-flash'
+};

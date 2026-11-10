@@ -26,6 +26,7 @@ jobs:
           node --test
           activity.test.mjs
           bibliography-identity.test.mjs
+          book-forest-ai-provider.test.mjs
           book-forest-cache.test.mjs
           book-forest-dialogue-director.test.mjs
           book-forest-dialogue-generation.test.mjs
@@ -35,6 +36,7 @@ jobs:
           book-forest-story-memory.test.mjs
           book-forest-world.test.mjs
           book-forest-lifecycle.test.mjs
+          book-forest-live-dialogue.test.mjs
           book-forest-scene.test.mjs
           cover-thumbnails.test.mjs
           domain.test.mjs

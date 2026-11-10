@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {FOREST_SPRITE_NAMES,validateForestSpriteManifest,loadPrivateForestSprites} from './book-forest-drive.mjs';
+import {FOREST_SPRITE_NAMES,validateForestSpriteManifest,loadPrivateForestSprites,authorizeForestDrive} from './book-forest-drive.mjs';
 
 const assets=Object.fromEntries(FOREST_SPRITE_NAMES.map((name,i)=>[name,'abcDEFGHIJKLMNO_'+String(i).padStart(10,'0')]));
 const manifest={schemaVersion:1,columns:2,rows:2,frameSize:64,frameDurationMs:250,assets};
@@ -44,5 +44,37 @@ test('accepts full-resolution 2-by-2 image sheets from the private Drive manifes
     fetchImpl,decodeImage:async()=>({width:1254,height:1254,close(){}})
   });
   assert.equal(Object.keys(result.images).length,11);
+  result.dispose();
+});
+
+test('uses the signed-in Firebase account as the Drive authorization hint',async()=>{
+  class Provider{
+    static credentialFromResult(){return {accessToken:'one-time-drive-token'}}
+    addScope(scope){this.scope=scope}
+    setCustomParameters(params){this.params=params}
+  }
+  const user={email:'owner@example.com'};
+  const token=await authorizeForestDrive({user,GoogleAuthProvider:Provider,
+    reauthenticateWithPopup:async(account,provider)=>{
+      assert.equal(account,user);
+      assert.deepEqual(provider.params,{login_hint:user.email});
+      return {};
+    }
+  });
+  assert.equal(token,'one-time-drive-token');
+});
+
+test('offers only fully validated Drive assets for optional device caching',async()=>{
+  let count=0,payload;
+  const result=await loadPrivateForestSprites('short-lived-token',{
+    fetchImpl:async()=>{
+      count++;
+      return count===1?{ok:true,json:async()=>manifest}:{ok:true,blob:async()=>new Blob(['image'],{type:'image/png'})};
+    },
+    decodeImage:async()=>({width:128,height:128,close(){}}),
+    onValidatedAssets:async(m,blobs)=>{payload={manifest:m,blobs}}
+  });
+  assert.equal(payload.manifest,manifest);
+  assert.equal(Object.keys(payload.blobs).length,FOREST_SPRITE_NAMES.length);
   result.dispose();
 });

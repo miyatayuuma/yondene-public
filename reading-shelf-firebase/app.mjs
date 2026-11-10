@@ -15,10 +15,11 @@ import {mountChildRating} from './child-rating.mjs?build=20261019-shelf-v28';
 import {mountReadingRecordEditor} from './reading-record-editor.mjs?build=20261025-reading-legacy-v1';
 import {readerNameFromShelf} from './reader-name.mjs?build=20261019-shelf-v28';
 import {mountBookForest,getForestAvatar,setForestAvatar} from './book-forest.mjs?build=20261110-forest-npc-v1';
-import {authorizeForestDrive,loadPrivateForestSprites} from './book-forest-drive.mjs?build=20261110-forest-npc-v1';
-import {STATUSES,ACTIVE_READ_FILTER,filteredBooks,readPeriodLabel,compactReadPeriodLabel,readingModeLabel,emptyStateMessage} from './domain.mjs?build=20261110-forest-npc-v1';
+import {authorizeForestDrive,loadPrivateForestSprites} from './book-forest-drive.mjs?build=20261110-forest-cache-v1';
+import {saveCachedForestSprites,loadCachedForestSprites,clearCachedForestSprites} from './book-forest-cache.mjs?build=20261110-forest-cache-v1';
+import {STATUSES,ACTIVE_READ_FILTER,filteredBooks,readPeriodLabel,compactReadPeriodLabel,readingModeLabel,emptyStateMessage} from './domain.mjs?build=20261110-forest-cache-v1';
 
-const APP_BUILD='20261110-forest-npc-v1';
+const APP_BUILD='20261110-forest-cache-v1';
 const $=id=>{const element=document.getElementById(id);if(!element)throw new Error('APP_DOM_MISMATCH: missing #'+id);return element};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const safeCover=url=>/^(https:\/\/|data:image\/(jpeg|png|webp);base64,)/i.test(String(url||''))?String(url):'';
@@ -62,7 +63,11 @@ function registerInstallAction(){
 function initUI(){
   registerInstallAction();
   $('googleLogin').onclick=login;
-  $('signOut').onclick=async()=>{closeListeners();await signOut(auth)};
+  $('signOut').onclick=async()=>{
+    closeListeners();
+    try{await clearCachedForestSprites()}catch(error){console.warn('Could not clear private forest images',error)}
+    await signOut(auth);
+  };
   const resetShelf=()=>{$('filter').value=ACTIVE_READ_FILTER;$('search').value=''};
   resetShelf(); // Browser form restoration must not override the default bookshelf.
   document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{
@@ -593,7 +598,7 @@ function renderFamily(){
       const forestArea=document.createElement('section');forestArea.className='forestSettingsEntry';
       const forestTitle=document.createElement('h3');forestTitle.textContent='🌿 本の森';forestArea.append(forestTitle);
       const forestDescription=document.createElement('p');
-      forestDescription.textContent='小さな森を歩いて、登場人物に会いに行こう。画像は非公開Google Driveから読み込みます（初回にDriveの読み取り許可が必要です）。';
+      forestDescription.textContent='小さな森を歩いて、登場人物に会いに行こう。画像は初回のみ非公開Google Driveから読み込み、この端末に保存します。';
       forestArea.append(forestDescription);
       const avatarLabel=document.createElement('label');avatarLabel.className='forestAvatarChoice';
       avatarLabel.append('いっしょに歩く ');
@@ -611,21 +616,53 @@ function renderFamily(){
         const familyId=fid,ownerUid=user.uid;
         try{
           if(!forestSpriteCache){
-            forestLaunch.textContent='Google Driveへのアクセスを確認しています…';
-            // Request OAuth from the button gesture. Neither token nor PNG is persisted.
-            const token=await authorizeForestDrive({user,GoogleAuthProvider,reauthenticateWithPopup});
-            forestLaunch.textContent='非公開ドット絵を読み込んでいます…';
-            const loaded=await loadPrivateForestSprites(token);
-            if(role!=='owner'||fid!==familyId||user?.uid!==ownerUid){loaded.dispose();return}
-            forestSpriteCache=loaded;
+            try{
+              forestSpriteCache=await loadCachedForestSprites({uid:ownerUid,familyId});
+            }catch(error){console.warn('Private forest image cache unavailable',error)}
+            if(!forestSpriteCache){
+              forestLaunch.textContent='Google Driveへのアクセスを確認しています…';
+              // A Drive popup is needed only if the private images are not on this device.
+              const token=await authorizeForestDrive({user,GoogleAuthProvider,reauthenticateWithPopup});
+              forestLaunch.textContent='非公開ドット絵を読み込んでいます…';
+              const loaded=await loadPrivateForestSprites(token,{
+                onValidatedAssets:async(manifest,blobs)=>{
+                  if(role!=='owner'||fid!==familyId||user?.uid!==ownerUid)return;
+                  try{
+                    await saveCachedForestSprites({uid:ownerUid,familyId,manifest,blobs});
+                    // Signing out during a slow cache write must not leave private
+                    // artwork behind after the logout cleanup has run.
+                    if(role!=='owner'||fid!==familyId||user?.uid!==ownerUid){
+                      await clearCachedForestSprites({uid:ownerUid,familyId});
+                    }
+                  }
+                  catch(error){console.warn('Could not cache private forest images',error)}
+                }
+              });
+              if(role!=='owner'||fid!==familyId||user?.uid!==ownerUid){loaded.dispose();return}
+              forestSpriteCache=loaded;
+            }
           }
-          if(role!=='owner'||fid!==familyId||user?.uid!==ownerUid)return;
+          if(role!=='owner'||fid!==familyId||user?.uid!==ownerUid){
+            forestSpriteCache?.dispose();forestSpriteCache=null;return;
+          }
           closeForest=mountBookForest({familyId,privateSprites:forestSpriteCache,
             onClose:()=>{closeForest=null}});
         }catch(error){statusError(error)}
         finally{forestLaunch.disabled=false;forestLaunch.textContent='本の森へ行く'}
       };
-      forestArea.append(forestLaunch);root.append(forestArea);
+      const forestRefresh=document.createElement('button');forestRefresh.className='forestRefresh';
+      forestRefresh.type='button';forestRefresh.textContent='画像を更新';
+      forestRefresh.onclick=async()=>{
+        if(role!=='owner'||!fid||closeForest)return;
+        forestRefresh.disabled=true;
+        try{
+          await clearCachedForestSprites({uid:user.uid,familyId:fid});
+          forestSpriteCache?.dispose();forestSpriteCache=null;
+          notice('保存済みの森の画像を削除しました。次回はGoogle Driveから最新版を読み込みます。');
+        }catch(error){statusError(error)}
+        finally{forestRefresh.disabled=false}
+      };
+      forestArea.append(forestLaunch,forestRefresh);root.append(forestArea);
     }
     if(role==='owner'){
       pendingUI=mountPendingReflections({db,fid,books:()=>books,container:root,

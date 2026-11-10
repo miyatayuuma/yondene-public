@@ -32,9 +32,12 @@ test('twins first appear as a group and each turn has its own name without quota
   const engine=setup();
   const a=await engine.start({encounter:0});
   assert.equal(a.speakerName,'ふたご');assert.equal(a.speakerSlot,0);
+  assert.equal(a.nextSpeakerName,'テストA');assert.equal(a.nextSpeakerSlot,1);
   const b=await engine.advance();assert.equal(b.speakerName,'テストA');
+  assert.equal(b.nextSpeakerName,'テストB');assert.equal(b.nextSpeakerSlot,2);
   assert.match(b.text,/テストA/);
   const c=await engine.advance();assert.equal(c.speakerName,'テストB');
+  assert.equal(c.nextSpeakerName,'テストA','next scene speaker is previewed at the scene boundary');
   assert.match(c.text,/テストB/);
   for(const result of [a,b,c])assert.doesNotMatch(result.text,/[「」]/u);
   engine.end();

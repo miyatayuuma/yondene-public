@@ -7,26 +7,26 @@ export const FOREST_VOICE_CHARACTERS=Object.freeze([
   {id:'jiji',name:'ジジ'},
   {id:'skipper',name:'スキッパー'},
   {id:'zorori',name:'ゾロリ'},
-  {id:'ishishi',name:'イシシ'},
-  {id:'noshishi',name:'ノシシ'},
-  // The twins' names rotate; voices belong to the first and second speakers.
-  {id:'twins_first',name:'ふたご・1人目'},
-  {id:'twins_second',name:'ふたご・2人目'}
+  {id:'ishishi',name:'イシシ・ノシシ（共通）'},
+  // The twins' names rotate; both speakers use the same voice profile.
+  {id:'twins_first',name:'ふたご（2人共通）'}
 ]);
 
-export const FOREST_DEFAULT_VOICES=Object.freeze({
-  king:{rate:1.08,pitch:.88,volume:1,voiceURI:''},
-  kiki:{rate:1.20,pitch:1.13,volume:1,voiceURI:''},
-  jiji:{rate:1.16,pitch:.98,volume:1,voiceURI:''},
-  skipper:{rate:1.12,pitch:.93,volume:1,voiceURI:''},
-  zorori:{rate:1.24,pitch:.91,volume:1,voiceURI:''},
-  ishishi:{rate:1.21,pitch:1.08,volume:1,voiceURI:''},
-  noshishi:{rate:1.13,pitch:.86,volume:1,voiceURI:''},
-  twins_first:{rate:1.23,pitch:1.16,volume:1,voiceURI:''},
-  twins_second:{rate:1.15,pitch:.96,volume:1,voiceURI:''}
+export const FOREST_VOICE_ALIASES=Object.freeze({
+  noshishi:'ishishi',twins:'twins_first',twins_second:'twins_first'
 });
 
-const DEFAULT_PROFILE=Object.freeze({rate:1.2,pitch:1,volume:1,voiceURI:''});
+export const FOREST_DEFAULT_VOICES=Object.freeze({
+  king:{rate:1.34,pitch:.88,volume:1,voiceURI:''},
+  kiki:{rate:1.48,pitch:1.13,volume:1,voiceURI:''},
+  jiji:{rate:1.42,pitch:.98,volume:1,voiceURI:''},
+  skipper:{rate:1.38,pitch:.93,volume:1,voiceURI:''},
+  zorori:{rate:1.52,pitch:.91,volume:1,voiceURI:''},
+  ishishi:{rate:1.48,pitch:1.08,volume:1,voiceURI:''},
+  twins_first:{rate:1.45,pitch:1.16,volume:1,voiceURI:''}
+});
+
+const DEFAULT_PROFILE=Object.freeze({rate:1.4,pitch:1,volume:1,voiceURI:''});
 const clamp=(value,min,max)=>Math.min(max,Math.max(min,value));
 const bounded=(value,fallback,min,max)=>Number.isFinite(Number(value))&&value!==''&&value!==null
   ?clamp(Number(value),min,max):fallback;
@@ -34,7 +34,7 @@ const bounded=(value,fallback,min,max)=>Number.isFinite(Number(value))&&value!==
 export function normalizeForestVoiceProfile(input={},fallback=DEFAULT_PROFILE){
   const profile=input&&typeof input==='object'?input:{};
   return {
-    rate:bounded(profile.rate,fallback.rate,.7,1.6),
+    rate:bounded(profile.rate,fallback.rate,.7,2),
     pitch:bounded(profile.pitch,fallback.pitch,.6,1.4),
     volume:bounded(profile.volume,fallback.volume,0,1),
     voiceURI:typeof profile.voiceURI==='string'?profile.voiceURI.slice(0,180):fallback.voiceURI
@@ -42,8 +42,11 @@ export function normalizeForestVoiceProfile(input={},fallback=DEFAULT_PROFILE){
 }
 
 export function forestVoiceProfile(characterId,overrides={}){
-  const base=FOREST_DEFAULT_VOICES[characterId]||DEFAULT_PROFILE;
-  return normalizeForestVoiceProfile(overrides?.[characterId]||base,base);
+  const speakerId=FOREST_VOICE_ALIASES[characterId]||characterId;
+  const base=FOREST_DEFAULT_VOICES[speakerId];
+  // Cat has no speech. Unknown IDs must not receive an accidental default voice.
+  if(!base)return null;
+  return normalizeForestVoiceProfile(overrides?.[speakerId]||base,base);
 }
 
 // Explicitly fix names whose pronunciation varies between engines. Do not
@@ -79,11 +82,13 @@ export function createForestVoiceEngine({synth=globalThis.speechSynthesis,Uttera
     }
     return Boolean(previous);
   }
-  function speak({text,profile={},onStart=()=>{}}={}){
+  function speak({characterId,text,profile,onStart=()=>{}}={}){
     stop();
+    const base=forestVoiceProfile(characterId);
+    if(!base)return Promise.resolve({status:'forbidden'});
     if(!supported())return Promise.resolve({status:'unsupported'});
     if(!String(text??'').trim())return Promise.resolve({status:'empty'});
-    const selected=normalizeForestVoiceProfile(profile);
+    const selected=normalizeForestVoiceProfile(profile??base,base);
     let utterance;
     try{utterance=new Utterance(forestSpeechText(text))}catch(error){return Promise.resolve({status:'error',error:String(error)})}
     utterance.lang='ja-JP';

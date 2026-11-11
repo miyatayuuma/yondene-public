@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {FOREST_VOICE_CHARACTERS,FOREST_DEFAULT_VOICES,normalizeForestVoiceProfile,
+import {FOREST_VOICE_CHARACTERS,FOREST_DEFAULT_VOICES,FOREST_VOICE_ALIASES,normalizeForestVoiceProfile,
   forestVoiceProfile,forestSpeechText,createForestVoiceEngine} from './book-forest-voice.mjs';
 
 class FakeUtterance{
@@ -14,22 +14,30 @@ function fakeSpeech(){
   return {synth,voices};
 }
 
-test('all speaking characters have independently adjustable profiles',()=>{
-  assert.equal(FOREST_VOICE_CHARACTERS.length,9);
-  assert.equal(new Set(FOREST_VOICE_CHARACTERS.map(c=>c.id)).size,9);
+test('seven voice profiles cover nine characters, with silent cat and shared pairs',()=>{
+  assert.equal(FOREST_VOICE_CHARACTERS.length,7);
+  assert.equal(new Set(FOREST_VOICE_CHARACTERS.map(c=>c.id)).size,7);
   for(const {id} of FOREST_VOICE_CHARACTERS){
     assert.ok(FOREST_DEFAULT_VOICES[id]);
     const profile=forestVoiceProfile(id);
-    assert.ok(profile.rate>=.7&&profile.rate<=1.6);
+    assert.ok(profile.rate>=1.3&&profile.rate<=2);
     assert.ok(profile.pitch>=.6&&profile.pitch<=1.4);
   }
-  assert.notDeepEqual(forestVoiceProfile('twins_first'),forestVoiceProfile('twins_second'));
+  assert.equal(FOREST_VOICE_ALIASES.noshishi,'ishishi');
+  assert.deepEqual(forestVoiceProfile('ishishi'),forestVoiceProfile('noshishi'));
+  assert.deepEqual(forestVoiceProfile('twins_first'),forestVoiceProfile('twins_second'));
+  assert.deepEqual(forestVoiceProfile('twins'),forestVoiceProfile('twins_first'));
+  assert.equal(forestVoiceProfile('cat'),null);
+  assert.equal(forestVoiceProfile('unknown'),null);
+  const custom={ishishi:{rate:1.85,pitch:.72},twins_first:{rate:1.65,pitch:.8}};
+  assert.deepEqual(forestVoiceProfile('noshishi',custom),forestVoiceProfile('ishishi',custom));
+  assert.deepEqual(forestVoiceProfile('twins_second',custom),forestVoiceProfile('twins_first',custom));
 });
 
 test('normalization constrains all values and ignores unsafe data types',()=>{
   assert.deepEqual(normalizeForestVoiceProfile({rate:10,pitch:-3,volume:99,voiceURI:123}),
-    {rate:1.6,pitch:.6,volume:1,voiceURI:''});
-  assert.equal(normalizeForestVoiceProfile({rate:'bad',pitch:null}).rate,1.2);
+    {rate:2,pitch:.6,volume:1,voiceURI:''});
+  assert.equal(normalizeForestVoiceProfile({rate:'bad',pitch:null}).rate,1.4);
   assert.equal(normalizeForestVoiceProfile({rate:'bad',pitch:null}).pitch,1);
   assert.equal(forestVoiceProfile('king',{king:{rate:.8}}).rate,.8);
 });
@@ -46,12 +54,12 @@ test('engine uses Japanese voice, chosen speed and pitch, and ends cleanly',asyn
   assert.equal(voice.supported(),true);
   assert.equal(voice.japaneseVoices().length,1);
   let started=0;
-  const done=voice.speak({text:'王さま',profile:{rate:1.25,pitch:.9,volume:.8,voiceURI:'ja-local'},onStart:()=>started++});
+  const done=voice.speak({characterId:'king',text:'王さま',profile:{rate:1.45,pitch:.9,volume:.8,voiceURI:'ja-local'},onStart:()=>started++});
   assert.equal(synth.cancelCount,0,'first playback should not cancel audio prematurely');
   const utterance=synth.calls[0];
   assert.equal(utterance.text,'おうさま');
   assert.equal(utterance.lang,'ja-JP');
-  assert.equal(utterance.rate,1.25);
+  assert.equal(utterance.rate,1.45);
   assert.equal(utterance.pitch,.9);
   assert.equal(utterance.volume,.8);
   assert.equal(utterance.voice.voiceURI,'ja-local');
@@ -64,9 +72,9 @@ test('engine uses Japanese voice, chosen speed and pitch, and ends cleanly',asyn
 test('stop cancels ongoing speech; stale events cannot complete the next utterance',async()=>{
   const {synth}=fakeSpeech();
   const voice=createForestVoiceEngine({synth,Utterance:FakeUtterance});
-  const first=voice.speak({text:'一つ目'});
+  const first=voice.speak({characterId:'twins_first',text:'一つ目'});
   const old=synth.calls[0];
-  const second=voice.speak({text:'二つ目'});
+  const second=voice.speak({characterId:'twins_second',text:'二つ目'});
   assert.deepEqual(await first,{status:'cancelled'});
   assert.equal(synth.cancelCount,1);
   old.onend();
@@ -76,12 +84,21 @@ test('stop cancels ongoing speech; stale events cannot complete the next utteran
   assert.equal(voice.isSpeaking(),false);
 });
 
+test('cat and unknown characters can never start speech, even with explicit text and settings',async()=>{
+  const {synth}=fakeSpeech();
+  const engine=createForestVoiceEngine({synth,Utterance:FakeUtterance});
+  assert.deepEqual(await engine.speak({characterId:'cat',text:'にゃあ',profile:{rate:1.8}}),{status:'forbidden'});
+  assert.deepEqual(await engine.speak({characterId:'unknown',text:'こんにちは'}),{status:'forbidden'});
+  assert.deepEqual(await engine.speak({text:'こんにちは'}),{status:'forbidden'});
+  assert.equal(synth.calls.length,0);
+});
+
 test('unsupported browsers and empty text fail without throwing',async()=>{
   const voice=createForestVoiceEngine({synth:null,Utterance:null});
   assert.equal(voice.supported(),false);
-  assert.deepEqual(await voice.speak({text:'こんにちは'}),{status:'unsupported'});
+  assert.deepEqual(await voice.speak({characterId:'king',text:'こんにちは'}),{status:'unsupported'});
   const {synth}=fakeSpeech();
   const another=createForestVoiceEngine({synth,Utterance:FakeUtterance});
-  assert.deepEqual(await another.speak({text:'  '}),{status:'empty'});
+  assert.deepEqual(await another.speak({characterId:'king',text:'  '}),{status:'empty'});
   assert.equal(synth.calls.length,0);
 });

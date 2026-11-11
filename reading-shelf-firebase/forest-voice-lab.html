@@ -56,7 +56,7 @@
     <select id="character"></select>
     <label class="field" for="line">読み上げるセリフ（A・B共通）</label>
     <textarea id="line">あの橋の向こうに、まだ知らないことがあるんだ。きみは、どう思う？</textarea>
-    <small>「ねこ」は物語上しゃべらないため、声を設定しません。ふたごは名前が変わっても同じ1人目・2人目の声を使います。</small>
+    <small>「ねこ」は読み上げ禁止です。イシシとノシシ、ふたごの2人は、それぞれ共通の声を使います。初期値は全員早口にしています。</small>
   </section>
 
   <section class="card" aria-labelledby="compareTitle">
@@ -71,7 +71,7 @@
         <h3>B · 調整中の声</h3>
         <label class="field" for="voice">日本語音声</label>
         <select id="voice"></select>
-        <div class="slider"><label for="rate">速さ <output id="rateValue">1.20</output></label><input id="rate" type="range" min="0.70" max="1.60" step="0.05" value="1.20"></div>
+        <div class="slider"><label for="rate">速さ <output id="rateValue">1.40</output></label><input id="rate" type="range" min="0.70" max="2.00" step="0.05" value="1.40"></div>
         <div class="slider"><label for="pitch">高さ <output id="pitchValue">1.00</output></label><input id="pitch" type="range" min="0.60" max="1.40" step="0.05" value="1.00"></div>
         <div class="slider"><label for="volume">音量 <output id="volumeValue">1.00</output></label><input id="volume" type="range" min="0" max="1" step="0.05" value="1.00"></div>
         <div class="actions"><button id="playB" class="primary" type="button">▶ Bを聴く</button></div>
@@ -107,26 +107,26 @@ const FOREST_VOICE_CHARACTERS=Object.freeze([
   {id:'jiji',name:'ジジ'},
   {id:'skipper',name:'スキッパー'},
   {id:'zorori',name:'ゾロリ'},
-  {id:'ishishi',name:'イシシ'},
-  {id:'noshishi',name:'ノシシ'},
-  // The twins' names rotate; voices belong to the first and second speakers.
-  {id:'twins_first',name:'ふたご・1人目'},
-  {id:'twins_second',name:'ふたご・2人目'}
+  {id:'ishishi',name:'イシシ・ノシシ（共通）'},
+  // The twins' names rotate; both speakers use the same voice profile.
+  {id:'twins_first',name:'ふたご（2人共通）'}
 ]);
 
-const FOREST_DEFAULT_VOICES=Object.freeze({
-  king:{rate:1.08,pitch:.88,volume:1,voiceURI:''},
-  kiki:{rate:1.20,pitch:1.13,volume:1,voiceURI:''},
-  jiji:{rate:1.16,pitch:.98,volume:1,voiceURI:''},
-  skipper:{rate:1.12,pitch:.93,volume:1,voiceURI:''},
-  zorori:{rate:1.24,pitch:.91,volume:1,voiceURI:''},
-  ishishi:{rate:1.21,pitch:1.08,volume:1,voiceURI:''},
-  noshishi:{rate:1.13,pitch:.86,volume:1,voiceURI:''},
-  twins_first:{rate:1.23,pitch:1.16,volume:1,voiceURI:''},
-  twins_second:{rate:1.15,pitch:.96,volume:1,voiceURI:''}
+const FOREST_VOICE_ALIASES=Object.freeze({
+  noshishi:'ishishi',twins:'twins_first',twins_second:'twins_first'
 });
 
-const DEFAULT_PROFILE=Object.freeze({rate:1.2,pitch:1,volume:1,voiceURI:''});
+const FOREST_DEFAULT_VOICES=Object.freeze({
+  king:{rate:1.34,pitch:.88,volume:1,voiceURI:''},
+  kiki:{rate:1.48,pitch:1.13,volume:1,voiceURI:''},
+  jiji:{rate:1.42,pitch:.98,volume:1,voiceURI:''},
+  skipper:{rate:1.38,pitch:.93,volume:1,voiceURI:''},
+  zorori:{rate:1.52,pitch:.91,volume:1,voiceURI:''},
+  ishishi:{rate:1.48,pitch:1.08,volume:1,voiceURI:''},
+  twins_first:{rate:1.45,pitch:1.16,volume:1,voiceURI:''}
+});
+
+const DEFAULT_PROFILE=Object.freeze({rate:1.4,pitch:1,volume:1,voiceURI:''});
 const clamp=(value,min,max)=>Math.min(max,Math.max(min,value));
 const bounded=(value,fallback,min,max)=>Number.isFinite(Number(value))&&value!==''&&value!==null
   ?clamp(Number(value),min,max):fallback;
@@ -134,7 +134,7 @@ const bounded=(value,fallback,min,max)=>Number.isFinite(Number(value))&&value!==
 function normalizeForestVoiceProfile(input={},fallback=DEFAULT_PROFILE){
   const profile=input&&typeof input==='object'?input:{};
   return {
-    rate:bounded(profile.rate,fallback.rate,.7,1.6),
+    rate:bounded(profile.rate,fallback.rate,.7,2),
     pitch:bounded(profile.pitch,fallback.pitch,.6,1.4),
     volume:bounded(profile.volume,fallback.volume,0,1),
     voiceURI:typeof profile.voiceURI==='string'?profile.voiceURI.slice(0,180):fallback.voiceURI
@@ -142,8 +142,11 @@ function normalizeForestVoiceProfile(input={},fallback=DEFAULT_PROFILE){
 }
 
 function forestVoiceProfile(characterId,overrides={}){
-  const base=FOREST_DEFAULT_VOICES[characterId]||DEFAULT_PROFILE;
-  return normalizeForestVoiceProfile(overrides?.[characterId]||base,base);
+  const speakerId=FOREST_VOICE_ALIASES[characterId]||characterId;
+  const base=FOREST_DEFAULT_VOICES[speakerId];
+  // Cat has no speech. Unknown IDs must not receive an accidental default voice.
+  if(!base)return null;
+  return normalizeForestVoiceProfile(overrides?.[speakerId]||base,base);
 }
 
 // Explicitly fix names whose pronunciation varies between engines. Do not
@@ -179,11 +182,13 @@ function createForestVoiceEngine({synth=globalThis.speechSynthesis,Utterance=glo
     }
     return Boolean(previous);
   }
-  function speak({text,profile={},onStart=()=>{}}={}){
+  function speak({characterId,text,profile,onStart=()=>{}}={}){
     stop();
+    const base=forestVoiceProfile(characterId);
+    if(!base)return Promise.resolve({status:'forbidden'});
     if(!supported())return Promise.resolve({status:'unsupported'});
     if(!String(text??'').trim())return Promise.resolve({status:'empty'});
-    const selected=normalizeForestVoiceProfile(profile);
+    const selected=normalizeForestVoiceProfile(profile??base,base);
     let utterance;
     try{utterance=new Utterance(forestSpeechText(text))}catch(error){return Promise.resolve({status:'error',error:String(error)})}
     utterance.lang='ja-JP';
@@ -219,7 +224,10 @@ try{
 const allowed=new Set(FOREST_VOICE_CHARACTERS.map(item=>item.id));
 const profiles={};
 for(const id of allowed){
-  if(saved[id]&&typeof saved[id]==='object')profiles[id]=forestVoiceProfile(id,saved);
+  // Migrate older independent settings to one shared voice per pair.
+  const legacy=id==='ishishi'?saved.noshishi:id==='twins_first'?(saved.twins_second||saved.twins):null;
+  const chosen=saved[id]||legacy;
+  if(chosen&&typeof chosen==='object')profiles[id]=forestVoiceProfile(id,{[id]:chosen});
 }
 const characterSelect=$('character');
 for(const character of FOREST_VOICE_CHARACTERS){
@@ -281,7 +289,7 @@ async function play(which){
   const sequence=++playbackSequence;
   const profile=which==='A'?accepted():normalizeForestVoiceProfile(candidate);
   status(`${which} の音声を準備しています…`);
-  const result=await engine.speak({text,profile,onStart:()=>{
+  const result=await engine.speak({characterId:activeId,text,profile,onStart:()=>{
     if(sequence===playbackSequence)status(`${which} を読み上げています。タップで別の声に切り替えられます。`);
   }});
   if(sequence!==playbackSequence)return;
@@ -316,7 +324,7 @@ $('resetCharacter').addEventListener('click',()=>{
   status(persist()?'このキャラを初期設定へ戻しました。':'このキャラを初期設定へ戻しました（永続保存不可）。');
 });
 $('exportSettings').addEventListener('click',()=>{
-  const results={version:1,profiles:{}};
+  const results={version:2,profiles:{},aliases:FOREST_VOICE_ALIASES};
   for(const {id} of FOREST_VOICE_CHARACTERS)results.profiles[id]=forestVoiceProfile(id,profiles);
   $('exportArea').value=JSON.stringify(results,null,2);
   $('exportArea').hidden=false;

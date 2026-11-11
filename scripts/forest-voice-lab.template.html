@@ -56,7 +56,7 @@
     <select id="character"></select>
     <label class="field" for="line">読み上げるセリフ（A・B共通）</label>
     <textarea id="line">あの橋の向こうに、まだ知らないことがあるんだ。きみは、どう思う？</textarea>
-    <small>「ねこ」は物語上しゃべらないため、声を設定しません。ふたごは名前が変わっても同じ1人目・2人目の声を使います。</small>
+    <small>「ねこ」は読み上げ禁止です。イシシとノシシ、ふたごの2人は、それぞれ共通の声を使います。初期値は全員早口にしています。</small>
   </section>
 
   <section class="card" aria-labelledby="compareTitle">
@@ -71,7 +71,7 @@
         <h3>B · 調整中の声</h3>
         <label class="field" for="voice">日本語音声</label>
         <select id="voice"></select>
-        <div class="slider"><label for="rate">速さ <output id="rateValue">1.20</output></label><input id="rate" type="range" min="0.70" max="1.60" step="0.05" value="1.20"></div>
+        <div class="slider"><label for="rate">速さ <output id="rateValue">1.40</output></label><input id="rate" type="range" min="0.70" max="2.00" step="0.05" value="1.40"></div>
         <div class="slider"><label for="pitch">高さ <output id="pitchValue">1.00</output></label><input id="pitch" type="range" min="0.60" max="1.40" step="0.05" value="1.00"></div>
         <div class="slider"><label for="volume">音量 <output id="volumeValue">1.00</output></label><input id="volume" type="range" min="0" max="1" step="0.05" value="1.00"></div>
         <div class="actions"><button id="playB" class="primary" type="button">▶ Bを聴く</button></div>

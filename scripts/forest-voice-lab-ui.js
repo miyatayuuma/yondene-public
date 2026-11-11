@@ -10,7 +10,10 @@ try{
 const allowed=new Set(FOREST_VOICE_CHARACTERS.map(item=>item.id));
 const profiles={};
 for(const id of allowed){
-  if(saved[id]&&typeof saved[id]==='object')profiles[id]=forestVoiceProfile(id,saved);
+  // Migrate older independent settings to one shared voice per pair.
+  const legacy=id==='ishishi'?saved.noshishi:id==='twins_first'?(saved.twins_second||saved.twins):null;
+  const chosen=saved[id]||legacy;
+  if(chosen&&typeof chosen==='object')profiles[id]=forestVoiceProfile(id,{[id]:chosen});
 }
 const characterSelect=$('character');
 for(const character of FOREST_VOICE_CHARACTERS){
@@ -72,7 +75,7 @@ async function play(which){
   const sequence=++playbackSequence;
   const profile=which==='A'?accepted():normalizeForestVoiceProfile(candidate);
   status(`${which} の音声を準備しています…`);
-  const result=await engine.speak({text,profile,onStart:()=>{
+  const result=await engine.speak({characterId:activeId,text,profile,onStart:()=>{
     if(sequence===playbackSequence)status(`${which} を読み上げています。タップで別の声に切り替えられます。`);
   }});
   if(sequence!==playbackSequence)return;
@@ -107,7 +110,7 @@ $('resetCharacter').addEventListener('click',()=>{
   status(persist()?'このキャラを初期設定へ戻しました。':'このキャラを初期設定へ戻しました（永続保存不可）。');
 });
 $('exportSettings').addEventListener('click',()=>{
-  const results={version:1,profiles:{}};
+  const results={version:2,profiles:{},aliases:FOREST_VOICE_ALIASES};
   for(const {id} of FOREST_VOICE_CHARACTERS)results.profiles[id]=forestVoiceProfile(id,profiles);
   $('exportArea').value=JSON.stringify(results,null,2);
   $('exportArea').hidden=false;

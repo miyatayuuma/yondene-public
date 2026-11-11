@@ -68,7 +68,7 @@ export async function verifyOwnerIdToken(token,{projectId,ownerUid,keys=signingK
 function validPrompt(prompt){
   return prompt&&typeof prompt==='object'&&!Array.isArray(prompt)&&
     typeof prompt.task==='string'&&prompt.task.length<100&&
-    (prompt.mode===undefined||['choices','reply'].includes(prompt.mode))&&
+    (prompt.mode===undefined||['choices','opening','reply'].includes(prompt.mode))&&
     (prompt.closing===undefined||typeof prompt.closing==='boolean')&&
     NPCS.has(prompt.npc?.id)&&typeof prompt.npc.voice==='string'&&
     prompt.npc.voice.length<=2500&&
@@ -131,7 +131,10 @@ export async function handleRequest(request,env,{verifyToken=verifyOwnerIdToken}
         'あなたは児童向け「本の森」で登場人物の短い即興会話を助ける。'+
         '子どもの個人情報を質問しない。物語にない出来事を断定しない。'+
         '日本語で自然に短く話す。人物設定と承認済み台詞例から本人の声を守り、説明文を書かない。'+
+        '今日のsceneは森の即興の小さな出来事であり原作の事実ではない。'+
+        '別のNPCの会話内容を聞いたふりをせず、選択肢を子どもの信念とみなさない。'+
         '必ずJSONオブジェクトだけを返す。mode=choicesならtextを省略し、choicesを2件、各16字以内。'+
+        'mode=openingなら承認済み台詞のコピーはせず、今日のsceneに合う短い本人の台詞textとchoicesを2件作る。'+
         'mode=replyならNPC本人のひと言textを65字以内で返す。'+
         'closing=trueなら新たな質問をせず、choicesは空配列とする。'},
         {role:'user',content:JSON.stringify(body.prompt)}],
@@ -140,8 +143,11 @@ export async function handleRequest(request,env,{verifyToken=verifyOwnerIdToken}
     });
     return json(readCompletion(result,{closing:body.prompt.closing===true}),200,origin);
   }catch(error){
-    const limited=error?.status===429||/quota|rate limit|neurons|exceeded/iu.test(String(error?.message||''));
-    return json({error:limited?'AI quota reached':'AI unavailable'},limited?429:502,origin);
+    const message=String(error?.message||'');
+    const depleted=/3036|daily free allocation|quota|used up|neurons.*exceed/iu.test(message);
+    const temporary=error?.status===429||/rate limit|capacity temporarily|out of capacity/iu.test(message);
+    return json({error:depleted?'AI quota reached':temporary?'AI temporarily busy':'AI unavailable'},
+      depleted||temporary?429:502,origin);
   }
 }
 

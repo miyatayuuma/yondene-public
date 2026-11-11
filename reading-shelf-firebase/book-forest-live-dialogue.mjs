@@ -2,6 +2,7 @@
 // The generator is injected: this module never holds a key or makes a network call.
 import {createForestThoughtSession,forestThoughtPrompt,
   availableForestThoughtSeeds} from './book-forest-thought-seeds.mjs';
+import {createForestDailyContextSession} from './book-forest-daily-context.mjs';
 import {validateForestDialogueCues} from './book-forest-dialogue-director.mjs';
 import {unlockedStoryMemories} from './book-forest-story-memory.mjs';
 import {forestCharacterVoiceGuide,validForestCharacterProfiles} from './book-forest-character-profiles.mjs';
@@ -11,14 +12,14 @@ const VOICES={
   cat:'王さまのねこ。人間の言葉は話さない。地の文で短い動作だけを書く。',
   kiki:'キキ。自分の経験を一人称で話し、率直で活発。自分を「キキは」と呼ばない。',
   jiji:'ジジ。気さくで少し皮肉屋だが、相手を傷つけない。',
-  skipper:'スキッパー。元気で小さな探検を楽しむ。',
+  skipper:'スキッパー。無口で慎重。小さな発見を静かに観察する。',
   zorori:'ゾロリ。いたずら好きで得意げだが、子どもを怖がらせない。',
   ishishi:'イシシ。食べ物や面白いことに目がなく、おっちょこちょい。',
   noshishi:'ノシシ。のんびりしていて相棒との掛け合いが好き。'
 };
 const SELF_NAMES={king:'王さま',kiki:'キキ',jiji:'ジジ',skipper:'スキッパー',
   zorori:'ゾロリ',ishishi:'イシシ',noshishi:'ノシシ'};
-const PROMPT_VERSION='forest-voice-fidelity-v8';
+const PROMPT_VERSION='forest-daily-interaction-v9';
 const GOODBYE={king:'続きはまた今度だ。達者でな！',kiki:'じゃあ、また森で会おうね！',
   jiji:'またね。気をつけて歩くんだよ。',skipper:'またいっしょに探検しよう！',
   zorori:'次はもっと面白い話をしてやるぜ！',ishishi:'じゃあな！また遊ぼうぜ！',
@@ -80,17 +81,25 @@ function approvedVoiceExamples(cues,characterId,currentLine){
 }
 
 function promptFor({characterId,mode,npcLine,chosenLabel='',history=[],closing=false,topic=null,
-  characterProfile=null,voiceExamples=[],sourceKind=''}){
+  characterProfile=null,voiceExamples=[],sourceKind='',dailyContext=null,recentLines=[]}){
   const guide=forestCharacterVoiceGuide(characterProfile);
   return {
     mode,closing,
     task:mode==='reply'?'いま選ばれた返答にNPC本人らしくひと言応じる。説明や教訓は不要':
-      '承認済みのNPCの第一声を変えず、子どもが選べる短い返答候補を2個だけ作る',
+      mode==='opening'?'承認済み台詞を人物像の手本に、今日の森の小さな出来事を本人らしくひと言話し、子どもの返答候補を2個作る':
+        '承認済みのNPCの第一声を変えず、子どもが選べる短い返答候補を2個だけ作る',
     npc:{id:characterId,voice:guide||VOICES[characterId],
       approvedExamples:voiceExamples.slice(0,2)},
     context:{npcLine:clean(npcLine).slice(0,170),sourceKind,
       chosenLabel:clean(chosenLabel).slice(0,24),
-      recentTurns:history.slice(-2),...(topic?{topic}:{})},
+      recentTurns:history.slice(-4),...(topic?{topic}:{}),
+      ...(dailyContext?{today:{scene:sourceKind==='ambient'?dailyContext.scene:
+        {tone:dailyContext.scene?.tone||''},
+        visitsToday:dailyContext.visitsToday,
+        previousNpc:dailyContext.previousNpc,
+        metNpcCount:dailyContext.metNpcCount,
+        relatedEncounter:dailyContext.relatedEncounter}}:{}),
+      ...(recentLines.length?{avoidRecentLines:recentLines.slice(-3)}:{})},
     constraints:[
       '会話は日本語。小学校低学年が読める短い言葉と簡単な漢字にする',
       '会話の相手は実在の子ども。家族、住所、学校、年齢、個人情報を質問しない',
@@ -100,27 +109,28 @@ function promptFor({characterId,mode,npcLine,chosenLabel='',history=[],closing=f
       '承認済み台詞例は話し方の参考。台詞を引用・コピーせず、人格や関係性だけを手掛かりにする',
       'NPCの返事は自然な一言〜2文で65字以内。前の発言を繰り返さず、設定の説明を会話に混ぜない',
       '返答候補は2個、各16字以内。ありきたりな相づちや無意味な質問を続けない',
-      'ひとつの返答候補を選んでも、子どもの実際の信念や経験とはみなさない',
+      '選択肢はゲーム上の反応であり子どもの実際の信念とはみなさない。別NPCの会話を本人が聞いたふりはしない',
       characterId==='cat'?'ねこは絶対に人語を話さない':'NPC本人の視点で話す',
       ...(topic?['この原作の事実は直前の承認済み台詞と結びつく場合のみ用いる。哲学や説教を求めない']:[]),
       ...(closing?['この一言で会話を終える。新たな話題を出さず自然に別れを告げる']:[])
     ],
-    output:{format:'JSON',shape:{text:mode==='reply'?'NPCの発言（65字以内）':'省略',
+    output:{format:'JSON',shape:{text:mode==='choices'?'省略':'NPCの発言（65字以内）',
       choices:closing?[]:['子どもが選ぶ返答A','子どもが選ぶ返答B']}}
   };
 }
 
 /** Does not generate on idle, twin autoplay, or a private child reflection. */
 export function createForestLiveDialogueDirector({base,generate,storage=null,
-  storageKey='forest-ai-local-v1',now=()=>Date.now(),dailyLimit=150,sessionLimit=3,
+  storageKey='forest-ai-local-v1',now=()=>Date.now(),dailyLimit=300,sessionLimit=3,
   maxReplies=2,startDelayMs=280,modelId='unknown',getBooks=()=>[],getCatalog=()=>[],
   getCues=()=>[],
   getSeeds=()=>[],getCharacterProfiles=()=>[],requireCharacterProfile=false}={}){
   if(!base||typeof base.start!=='function'||typeof base.select!=='function'||
     typeof generate!=='function')throw Error('base and generate are required');
-  let pending=null,history=[],sessionCount=0,repliesThisSession=0,serial=0,closed=false,epoch=0,
-    inflight=null,activeThought=null,activeCharacterProfile=null,activeVoiceExamples=[];
+  let pending=null,pendingScripted=null,history=[],sessionCount=0,repliesThisSession=0,serial=0,closed=false,epoch=0,
+    inflight=null,activeThought=null,activeCharacterProfile=null,activeVoiceExamples=[],activeDaily=null;
   const thoughts=createForestThoughtSession({storage,storageKey:storageKey+':thought',now});
+  const daily=createForestDailyContextSession({storage,storageKey:storageKey+':daily',now});
   const budgetKey=storageKey+':budget',logKey=storageKey+':log';
   function record(item){
     const existing=readJson(storage,logKey,[]);
@@ -131,10 +141,11 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
   function reserve(){
     if(typeof storage?.getItem!=='function'||typeof storage?.setItem!=='function')return false;
     if(sessionCount>=sessionLimit)return false;
-    const day=new Date(now()+9*3600000).toISOString().slice(0,10);
+    // Cloudflare's free Neuron allowance resets at 00:00 UTC (09:00 JST).
+    const day=new Date(now()).toISOString().slice(0,10);
     const previous=readJson(storage,budgetKey,{});
     const used=previous?.day===day?Number(previous.count)||0:0;
-    if(used>=dailyLimit)return false;
+    if(used>=dailyLimit||previous.day===day&&previous.exhausted===true)return false;
     try{storage?.setItem?.(budgetKey,JSON.stringify({day,count:used+1}))}catch{
       // No durable quota => fail closed, not unlimited API calls.
       return false;
@@ -146,8 +157,13 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     sourceKind=''){
     if(!reserve())return null;
     if(mode==='choices'&&topic&&activeThought)thoughts.selected(activeThought,characterId);
+    const previousLogs=readJson(storage,logKey,[]);
+    const recentLines=(Array.isArray(previousLogs)?previousLogs:[]).filter(entry=>entry?.characterId===characterId&&
+      ['generated-opening','generated-reply'].includes(entry.event)&&typeof entry.text==='string')
+      .slice(-3).map(entry=>clean(entry.text).slice(0,90));
     const context=promptFor({characterId,mode,npcLine,chosenLabel,history,closing,topic,
-      characterProfile:activeCharacterProfile,voiceExamples:activeVoiceExamples,sourceKind});
+      characterProfile:activeCharacterProfile,voiceExamples:activeVoiceExamples,sourceKind,
+      dailyContext:activeDaily,recentLines});
     const controller=new AbortController(),startedAt=now();
     inflight={controller,characterId,mode,startedAt};
     let timeout;
@@ -157,25 +173,39 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
           controller.abort();reject(Error('timeout'));
         },11000)})]);
       const result=validateLiveForestOutput(raw,{characterId,
-        requireLine:mode==='reply',closing});
+        requireLine:mode!=='choices',closing});
       if(controller.signal.aborted)return null;
       if(!result)record({event:'invalid-generation',characterId,mode,modelId,promptVersion:PROMPT_VERSION});
       return result?{...result,elapsedMs:Math.max(0,now()-startedAt)}:null;
-    }catch{
+    }catch(error){
+      if(/quota reached|neurons.*exceeded|daily free allocation/iu.test(String(error?.message||''))){
+        const day=new Date(now()).toISOString().slice(0,10);
+        const previous=readJson(storage,budgetKey,{});
+        try{storage?.setItem?.(budgetKey,JSON.stringify({day,
+          count:previous.day===day?Number(previous.count)||1:1,exhausted:true}))}catch{}
+      }
       if(!controller.signal.aborted)record({event:'generation-failed',characterId,mode,modelId,
         promptVersion:PROMPT_VERSION,elapsedMs:Math.max(0,now()-startedAt)});
       return null;
     }finally{clearTimeout(timeout);if(inflight?.controller===controller)inflight=null}
   }
   function decorate(characterId,text,labels,meta={}){
-    const choices=labels.map((label,i)=>({id:`ai-${++serial}-${i}`,label}));
+    const relay=meta.relayChoice;
+    const choices=labels.slice(0,relay?1:2).map((label,i)=>({id:`ai-${++serial}-${i}`,label}));
+    if(relay)choices.push({id:relay.id,label:relay.label,relayTo:relay.relayTo});
     pending={characterId,text,choices,...meta};
     return {text,choices,...(meta.thoughtSeedId?{thoughtSeedId:meta.thoughtSeedId}:{})};
   }
+  function scripted(result,characterId){
+    pendingScripted=result?.choices?.length?{characterId,choices:result.choices}:null;
+    return result;
+  }
   async function start(identity){
     const generation=++epoch;
-    closed=false;pending=null;history=[];sessionCount=0;repliesThisSession=0;activeThought=null;
+    closed=false;pending=null;pendingScripted=null;history=[];sessionCount=0;
+    repliesThisSession=0;activeThought=null;
     activeCharacterProfile=null;activeVoiceExamples=[];
+    activeDaily=null;
     const characterId=identity?.characterId;
     if(CHARACTERS.has(characterId)){
       try{activeCharacterProfile=validForestCharacterProfiles(await getCharacterProfiles())
@@ -189,15 +219,16 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     // Only an independently chosen, matching authored story cue may use it.
     const original=await base.start(identity);
     if(closed||generation!==epoch)return null;
+    if(original&&identity?.characterId){
+      activeDaily=daily.visit(identity.characterId);
+    }
     if(!original||!CHARACTERS.has(characterId)||characterId==='cat'||
       original.sourceKind==='reflection'||
-      !validLine(characterId,original.text))return original;
+      !validLine(characterId,original.text))return scripted(original,characterId);
     // Never swap an approved line for a generic LLM character when private
     // personality material has not loaded in a real owner session.
-    if(requireCharacterProfile&&!activeCharacterProfile)return original;
-    // Repeated encounters remain playable with approved dialogue. A daily
-    // thought cap must never replace an NPC with a generic line.
-    if(activeThought&&!activeThought.allowGeneration)return original;
+    if(requireCharacterProfile&&!activeCharacterProfile)return scripted(original,characterId);
+    // Repeated encounters are allowed while the true API allowance remains.
     try{activeVoiceExamples=approvedVoiceExamples(await getCues(),characterId,original.text)}
     catch{activeVoiceExamples=[]}
     if(startDelayMs>0)await new Promise(resolve=>setTimeout(resolve,startDelayMs));
@@ -205,18 +236,24 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     const useThought=Boolean(activeThought?.seed?.memoryId&&
       original.sourceKind==='story'&&original.sourceMemoryId===activeThought.seed.memoryId);
     const topic=useThought?forestThoughtPrompt(activeThought,characterId):null;
-    const result=await request(characterId,'choices',original.text,'',false,topic,
+    const mode=original.sourceKind==='ambient'?'opening':'choices';
+    const result=await request(characterId,mode,original.text,'',false,topic,
       original.sourceKind||'');
     if(closed||generation!==epoch)return null;
-    if(!result)return original;
-    history.push({npc:clean(original.text).slice(0,150)});
-    record({event:'generated-choices',characterId,text:original.text,choices:result.labels,
+    if(!result)return scripted(original,characterId);
+    const spoken=mode==='opening'?result.text:original.text;
+    history.push({npc:clean(spoken).slice(0,150)});
+    record({event:mode==='opening'?'generated-opening':'generated-choices',characterId,
+      text:spoken,choices:result.labels,
       ...(useThought?{thoughtSeedId:activeThought.seed.id}:{}),
       sourceKind:original.sourceKind||'unknown',modelId,promptVersion:PROMPT_VERSION,elapsedMs:result.elapsedMs});
     const fallbackChoiceId=original.choices?.find(choice=>choice.id==='another-topic')?.id||
       original.choices?.find(choice=>typeof choice?.id==='string')?.id||'';
-    return decorate(characterId,original.text,result.labels,{fallbackChoiceId,
+    const relayChoice=original.choices?.find(choice=>choice.relayTo&&
+      typeof choice.id==='string'&&typeof choice.label==='string')||null;
+    return decorate(characterId,spoken,result.labels,{fallbackChoiceId,
       sourceKind:original.sourceKind||'',sourceMemoryId:original.sourceMemoryId||'',
+      relayChoice,
       ...(useThought?{thoughtSeedId:activeThought.seed.id}:{})});
   }
   async function select({characterId,choiceId}={}){
@@ -224,8 +261,11 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     const current=pending;
     if(!current||current.characterId!==characterId||
       !current.choices.some(choice=>choice.id===choiceId)){
+      const selected=pendingScripted?.characterId===characterId?
+        pendingScripted.choices.find(choice=>choice.id===choiceId):null;
       const original=await base.select({characterId,choiceId});
-      return original;
+      if(selected&&original)daily.selected(characterId,selected.label);
+      return scripted(original,characterId);
     }
     pending=null;
     const label=current.choices.find(choice=>choice.id===choiceId).label;
@@ -247,7 +287,14 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
         }
       }catch{return {text:'続きはまた今度ね。',choices:[],conversationComplete:true}}
     }
-    history.push({playerChoice:label});history=history.slice(-2);
+    daily.selected(characterId,label);
+    const scriptedRelay=current.relayChoice?.id===choiceId;
+    if(scriptedRelay){
+      const result=await base.select({characterId,choiceId});
+      if(closed||generation!==epoch)return null;
+      return scripted(result,characterId);
+    }
+    history.push({playerChoice:label});history=history.slice(-4);
     if(current.thoughtSeedId&&activeThought)thoughts.noteChoice(activeThought,characterId,label);
     record({event:'selected-offered-choice',characterId,label});
     const closing=repliesThisSession+1>=maxReplies;
@@ -266,7 +313,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
       }catch{}
       return {text:GOODBYE[characterId]||'また、森で会おうね。',choices:[],conversationComplete:true};
     }
-    history.push({npc:generated.text});history=history.slice(-2);
+    history.push({npc:generated.text});history=history.slice(-4);
     repliesThisSession++;
     record({event:'generated-reply',characterId,text:generated.text,
       ...(current.thoughtSeedId?{thoughtSeedId:current.thoughtSeedId}:{}),
@@ -288,8 +335,10 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     },
     advance(identity){return base.advance?.(identity)||null},
     end(){
-      epoch++;closed=true;pending=null;history=[];activeThought=null;activeCharacterProfile=null;
+      epoch++;closed=true;pending=null;pendingScripted=null;history=[];
+      activeThought=null;activeCharacterProfile=null;
       activeVoiceExamples=[];
+      activeDaily=null;
       if(inflight&&!inflight.controller.signal.aborted){
         record({event:'cancel-requested',characterId:inflight.characterId,mode:inflight.mode,
           modelId,promptVersion:PROMPT_VERSION,elapsedMs:Math.max(0,now()-inflight.startedAt)});

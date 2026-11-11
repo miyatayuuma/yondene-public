@@ -73,6 +73,11 @@ test('Worker fails closed without owner configuration and handles preflight and 
   const invalid=await handleRequest(request('/dialogue',{body:{prompt:{...prompt,npc:{id:'cat',voice:'ねこ'}}}}),
     liveEnv,{verifyToken:async()=>ownerUid});
   assert.equal(invalid.status,400);
+  const temporarilyBusy=await handleRequest(request(),{...liveEnv,
+    AI:{run:async()=>{throw Object.assign(Error('Capacity temporarily exceeded'),{status:429})}}},
+    {verifyToken:async()=>ownerUid});
+  assert.equal(temporarilyBusy.status,429);
+  assert.deepEqual(await temporarilyBusy.json(),{error:'AI temporarily busy'});
 });
 
 test('Worker normalizes three offered choices and accepts a closing without buttons',async()=>{
@@ -87,4 +92,21 @@ test('Worker normalizes three offered choices and accepts a closing without butt
     mode:'reply',closing:true}}}),env,{verifyToken});
   assert.equal(closing.status,200);
   assert.deepEqual(await closing.json(),{text:'じゃあ、またね。',choices:[]});
+});
+
+test('Worker accepts a scene-specific opening with two choices, using the same owner authentication',async()=>{
+  let systemText='';
+  const env={OWNER_UID:ownerUid,FIREBASE_PROJECT_ID:projectId,AI:{
+    run:async(_,body)=>{
+      systemText=body.messages[0].content;
+      return {choices:[{message:{content:JSON.stringify({text:'あの木のそば、風が気持ちいいね。',
+        choices:['見に行く','少し休む']})}}]};
+    }}};
+  const response=await handleRequest(request('/dialogue',{body:{prompt:{...prompt,
+    mode:'opening',context:{...prompt.context,today:{scene:{id:'tree',focus:'風を聞く',tone:'静か'}}}}}}),
+    env,{verifyToken:async()=>ownerUid});
+  assert.equal(response.status,200);
+  assert.deepEqual(await response.json(),{text:'あの木のそば、風が気持ちいいね。',
+    choices:['見に行く','少し休む']});
+  assert.match(systemText,/今日のscene/);
 });

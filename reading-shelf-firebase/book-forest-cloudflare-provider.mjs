@@ -18,7 +18,13 @@ export function createForestCloudflareGenerator({workerUrl,getIdToken,
       method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},
       body:JSON.stringify({prompt}),cache:'no-store',signal
     });
-    if(!response.ok)throw Error('Forest AI unavailable ('+response.status+')');
+    if(!response.ok){
+      let reason='';
+      try{reason=(await response.json())?.error||''}catch{}
+      if(response.status===429&&reason==='AI quota reached')
+        throw Error('Forest AI daily quota reached');
+      throw Error('Forest AI unavailable ('+response.status+')');
+    }
     const value=await response.json();
     if(!value||!Array.isArray(value.choices)||JSON.stringify(value).length>3000)
       throw Error('Invalid Forest AI response');

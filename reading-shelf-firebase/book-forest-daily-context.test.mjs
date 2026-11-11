@@ -70,6 +70,16 @@ test('source-based themes stay stable within the day and never leak book IDs',()
   assert.ok(!stored.includes('childReflection'));
 });
 
+test('a single eligible seed is not forced every day while the three-day cooldown runs',()=>{
+  const local=storage();let timestamp=day;
+  const session=createForestDailyContextSession({storage:local,now:()=>timestamp});
+  assert.equal(session.visit('kiki',input).scene.kind,'seed');
+  timestamp+=86400000;
+  assert.equal(session.visit('kiki',input).scene.kind,'ambient');
+  timestamp+=86400000;
+  assert.equal(session.visit('kiki',input).scene.kind,'ambient');
+});
+
 test('the next day can continue a selected sourced topic, but not indefinitely',()=>{
   const local=storage();let timestamp=day;
   const session=createForestDailyContextSession({storage:local,

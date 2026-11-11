@@ -87,13 +87,20 @@ function pickTopic(characterId,day,candidates,recent,usedToday){
   // A little ordinary life is essential: every NPC must not always lecture on a book.
   if(hash(day+':idle:'+characterId)%5===0)return null;
   const seen=Array.isArray(recent)?recent:[];
-  return candidates.map(topic=>{
-    const position=seen.lastIndexOf(topic.key);
-    const penalty=position<0?0:66+(position-seen.length+1)*5;
+  const recentKeys=new Set(seen.filter(entry=>{
+    if(!entry||typeof entry!=='object'||!entry.day)return false;
+    const age=dayNumber(day)-dayNumber(entry.day);
+    return age>=0&&age<=3;
+  }).map(entry=>entry.key));
+  // With only one available seed, speak normally for a few days instead of
+  // repeating the same supposed revelation every morning.
+  const fresh=candidates.filter(topic=>!recentKeys.has(topic.key));
+  if(!fresh.length)return null;
+  return fresh.map(topic=>{
     const shared=usedToday.has(topic.key)?28:0;
     return {topic,score:topic.affinity*22+topic.freshBonus+
       (topic.kind==='seed'?10:0)+hash(day+':'+characterId+':'+topic.key)%17-
-      penalty-shared-Math.min(20,topic.sourceUse)};
+      shared-Math.min(20,topic.sourceUse)};
   }).sort((a,b)=>b.score-a.score||a.topic.key.localeCompare(b.topic.key))[0].topic;
 }
 function empty(day,prior={}){
@@ -160,7 +167,7 @@ export function createForestDailyContextSession({storage=null,
       if(scene.evidence==='reviewed'&&visitsToday===1){
         const list=Array.isArray(state.recent[characterId])?
           state.recent[characterId].slice(-MAX_RECENT+1):[];
-        state.recent[characterId]=[...list,scene.id];
+        state.recent[characterId]=[...list,{key:scene.id,day:state.day}];
       }
       save(state);
       return {scene,visitsToday,metNpcCount:Object.keys(state.visits).length,

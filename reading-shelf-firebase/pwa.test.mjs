@@ -108,7 +108,7 @@ test('no removed DOM ID can silently cause a null property assignment',()=>{
 test('PWA cannot combine stale JS with current HTML after deployment',()=>{
   const html=text('index.html'),sw=text('sw.js');
   const config=JSON.parse(text('firebase.json'));
-  assert.match(html,/app\.mjs\?build=20261110-forest-ai-v6/);
+  assert.match(html,/app\.mjs\?build=20261111-activity-preview-v1/);
   assert.match(sw,/const ARTWORK_PATHS=new Set\(ARTWORK\)/);
   assert.ok(!sw.includes('PUBLIC_ASSETS'));
   for(const path of ['/app.mjs','/index.html','/domain.mjs','/book-community.mjs','/recommendations.mjs']){
@@ -167,9 +167,10 @@ test('single-step sorting options have distinct clear Japanese descriptions',()=
   assert.match(app,/filter:view==='series'\?'all':\$\('filter'\)\.value/);
   assert.match(app,/sort:\$\('sort'\)\.value/);
 });
-test('PWA build integrates synopsis and forest without stale module assets',()=>{
+test('PWA build integrates activity previews and preserves forest module versions',()=>{
   const html=text('index.html'),app=text('app.mjs'),recs=text('recommendations.mjs');
-  const build='20261110-forest-ai-v6',unchanged='20261019-shelf-v28',readingBuild='20261025-reading-legacy-v1';
+  const build='20261111-activity-preview-v1',forestBuild='20261110-forest-ai-v6',
+    unchanged='20261019-shelf-v28',readingBuild='20261025-reading-legacy-v1';
   assert.match(html,new RegExp('data-app-build="'+build+'"'));
   assert.match(html,new RegExp('app\\.mjs\\?build='+build));
   assert.match(html,new RegExp('style\\.css\\?build='+build));
@@ -177,13 +178,14 @@ test('PWA build integrates synopsis and forest without stale module assets',()=>
   assert.match(app,/document\.documentElement\.dataset\.appBuild!==APP_BUILD/);
   assert.ok(app.includes("'./reading-record-editor.mjs?build="+readingBuild+"'"));
   assert.ok(text('reading-record-editor.mjs').includes("'./reading-record-domain.mjs?build="+readingBuild+"'"));
-  assert.ok(app.includes("'./domain.mjs?build="+build+"'"));
-  assert.ok(app.includes("'./book-forest.mjs?build="+build+"'"));
-  assert.ok(app.includes("'./book-forest-drive.mjs?build="+build+"'"));
-  assert.ok(app.includes("'./book-forest-cache.mjs?build="+build+"'"));
-  assert.ok(html.includes('book-forest.css?build='+build));
-  assert.ok(app.includes("'./firebase-config.mjs?build="+build+"'"));
-  for(const module of ['book-community','recommendations','bibliography-identity','activity','invite-links','cover-thumbnails','nickname','reader-name','pending-reflections','startup-recovery']){
+  assert.ok(app.includes("'./domain.mjs?build="+forestBuild+"'"));
+  assert.ok(app.includes("'./book-forest.mjs?build="+forestBuild+"'"));
+  assert.ok(app.includes("'./book-forest-drive.mjs?build="+forestBuild+"'"));
+  assert.ok(app.includes("'./book-forest-cache.mjs?build="+forestBuild+"'"));
+  assert.ok(html.includes('book-forest.css?build='+forestBuild));
+  assert.ok(app.includes("'./firebase-config.mjs?build="+forestBuild+"'"));
+  assert.ok(app.includes("'./activity.mjs?build="+build+"'"));
+  for(const module of ['book-community','recommendations','bibliography-identity','invite-links','cover-thumbnails','nickname','reader-name','pending-reflections','startup-recovery']){
     assert.ok(app.includes("'./"+module+".mjs?build="+unchanged+"'"),'unchanged versioned import: '+module);
   }
   assert.ok(recs.includes("'./domain.mjs?build="+unchanged+"'"));
@@ -284,8 +286,8 @@ test('reaction toggles publish and retract feed records in one batch',()=>{
   assert.match(community,/batch\.set\(activityRef,\{actorUid:user\.uid,kind:/);
   assert.match(community,/batch\.delete\(key\)/);
   assert.match(community,/if\(existing\.exists\(\)\)batch\.delete\(activityRef\)/);
-  assert.match(feed,/like:who\+'が「いいね」しました'/);
-  assert.match(feed,/'ask-reflection':who\+'が感想をききたいと伝えました'/);
+  assert.match(feed,/like:who\+'がいいね'/);
+  assert.match(feed,/'ask-reflection':who\+'が感想をききたい'/);
   assert.match(rules,/validReactionActivity\(fid, activityId\)/);
   assert.match(rules,/existsAfter\(reaction\)/);
 });
@@ -359,20 +361,21 @@ test('v14 mobile ergonomics protects taps, form zoom, long titles and dialog foc
   assert.match(v14,/@media \(max-width:440px\)/);
   assert.match(css,/\.bookSelectRow\{grid-template-columns:minmax\(0,1fr\) minmax\(0,1fr\);gap:7px\}/);
   assert.match(v14,/\.commentActions \.textAction/);
-  assert.match(v14,/\.activityBook \{[^}]*-webkit-line-clamp:2/s);
+  assert.match(css,/\.activityBook\{[^}]*text-overflow:ellipsis;white-space:nowrap/s);
+  assert.match(css,/\.activityPreview\{[^}]*-webkit-line-clamp:3/s);
   assert.match(v14,/max-height:calc\(100dvh - 24px - env\(safe-area-inset-top, 0px\) - env\(safe-area-inset-bottom, 0px\)\)/);
   assert.match(v14,/prefers-reduced-motion:reduce/);
   assert.match(v14,/textarea:focus-visible, summary:focus-visible, a:focus-visible/);
   assert.match(html,/<dialog id="bookInfoDialog" aria-labelledby="bookInfoTitle">/);
 });
 
-test('v15: changing the bookshelf title changes all reader-specific reflection labels',()=>{
+test('v15: detail labels follow bookshelf identity while activity keeps a compact generic label',()=>{
   const app=text('app.mjs'),community=text('book-community.mjs'),
     owner=text('owner-reflection.mjs'),activity=text('activity.mjs');
   assert.match(app,/readerNameFromShelf\(household\?\.name\)/);
   assert.match(community,/readerName\+'の感想'/);
   assert.match(owner,/readerName\+'の感想を記録する'/);
-  assert.match(activity,/reflection:\(readerName\?\.\(\)\|\|'子ども'\)\+'の感想が記録されました'/);
+  assert.match(activity,/reflection:'感想'/);
 });
 test('v15: returning to shelf and first load choose read books, without stale search',()=>{
   const app=text('app.mjs'),html=text('index.html');

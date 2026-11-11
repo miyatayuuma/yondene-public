@@ -14,7 +14,7 @@ import {mountFamilyActivity} from './activity.mjs?build=20261111-activity-previe
 import {mountChildRating} from './child-rating.mjs?build=20261019-shelf-v28';
 import {mountReadingRecordEditor} from './reading-record-editor.mjs?build=20261025-reading-legacy-v1';
 import {readerNameFromShelf} from './reader-name.mjs?build=20261019-shelf-v28';
-import {mountBookForest,getForestAvatar,setForestAvatar} from './book-forest.mjs?build=20261110-forest-ai-v6';
+import {mountBookForest,getForestAvatar,setForestAvatar} from './book-forest.mjs?build=20261111-forest-voice-v1';
 import {authorizeForestDrive,loadPrivateForestSprites} from './book-forest-drive.mjs?build=20261110-forest-ai-v6';
 import {saveCachedForestSprites,loadCachedForestSprites,clearCachedForestSprites} from './book-forest-cache.mjs?build=20261110-forest-ai-v6';
 import {loadPrivateForestDialogue} from './book-forest-private-dialogue.mjs?build=20261110-forest-ai-v6';
@@ -29,7 +29,7 @@ import {createForestAIGenerator} from './book-forest-ai-provider.mjs?build=20261
 import {createForestCloudflareGenerator} from './book-forest-cloudflare-provider.mjs?build=20261110-forest-ai-v6';
 import {STATUSES,ACTIVE_READ_FILTER,filteredBooks,readPeriodLabel,compactReadPeriodLabel,readingModeLabel,emptyStateMessage} from './domain.mjs?build=20261110-forest-ai-v6';
 
-const APP_BUILD='20261111-activity-preview-v1';
+const APP_BUILD='20261111-forest-voice-v1';
 const $=id=>{const element=document.getElementById(id);if(!element)throw new Error('APP_DOM_MISMATCH: missing #'+id);return element};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const safeCover=url=>/^(https:\/\/|data:image\/(jpeg|png|webp);base64,)/i.test(String(url||''))?String(url):'';

@@ -1,5 +1,6 @@
 import {CHARACTERS,START,isWalkable,walkHeight,heightAt,monthInJapan,MONTHS} from './book-forest-world.mjs';
 import {createForestNpcMotion} from './book-forest-npc.mjs';
+import {createForestVoiceEngine,forestVoiceProfile} from './book-forest-voice.mjs';
 
 const clamp=(n,a,b)=>Math.min(b,Math.max(a,n));
 function el(tag,klass,text){const node=document.createElement(tag);if(klass)node.className=klass;if(text!==undefined)node.textContent=text;return node}
@@ -17,6 +18,8 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
   let avatar=debug?.avatar||getForestAvatar(familyId),disposed=false,animationId=0,cleanupWorld=()=>{},resizeObserver=null;
   let joystickX=0,joystickY=0,stickPointer=null,lookPointer=null,chatOpen=false,chatSession=0,activeCharacter=null;
   let autoDialogueTimer=null,dialogueRender=0,currentDialogue=null;
+  const voice=debug?.speechEngine||createForestVoiceEngine();
+  let voiceToken=0,activeSpeechNode=null;
   const keys=new Set();
   const layer=el('section','bookForest');layer.setAttribute('role','dialog');layer.setAttribute('aria-modal','true');layer.setAttribute('aria-label','本の森');layer.tabIndex=-1;
   const canvas=el('canvas','bookForestCanvas');canvas.setAttribute('aria-label','本の森の3Dフィールド');
@@ -40,6 +43,57 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
   layer.append(canvas,vignette,close,bottom,chat,loading);document.body.append(layer);document.body.classList.add('bookForestOpen');layer.focus({preventScroll:true});
   function stopInput(){keys.clear();joystickX=0;joystickY=0;stickPointer=null;lookPointer=null;nub.style.transform='translate(0,0)'}
   function cancelAutoDialogue(){clearTimeout(autoDialogueTimer);autoDialogueTimer=null;dialogueRender++;twinWaiting.hidden=true}
+  function stopSpeech(){
+    voiceToken++;
+    if(activeSpeechNode)activeSpeechNode.dataset.speaking='false';
+    activeSpeechNode=null;
+    voice.stop();
+  }
+  function currentVoiceProfile(characterId){
+    let saved={};
+    try{
+      const stored=JSON.parse(localStorage.getItem('yondene-forest-voice-lab-v1')||'{}');
+      if(stored&&typeof stored==='object'&&!Array.isArray(stored))saved=stored;
+    }catch{}
+    return forestVoiceProfile(characterId,saved);
+  }
+  function resumeTwinDialogue(){
+    if(chatOpen&&!disposed&&!document.hidden&&currentDialogue)scheduleAutoDialogue(...currentDialogue);
+  }
+  function playSpokenLine(node,text,characterId,session){
+    if(disposed||!chatOpen||session!==chatSession||document.hidden)return;
+    if(activeSpeechNode===node&&voice.isSpeaking()){
+      stopSpeech();resumeTwinDialogue();return;
+    }
+    const profile=currentVoiceProfile(characterId);
+    if(!profile)return;
+    stopSpeech();cancelAutoDialogue();
+    activeSpeechNode=node;node.dataset.speaking='true';
+    const token=++voiceToken;
+    Promise.resolve(voice.speak({characterId,text,profile})).then(()=>{
+      if(token!==voiceToken)return;
+      node.dataset.speaking='false';activeSpeechNode=null;
+      resumeTwinDialogue();
+    },()=>{
+      if(token!==voiceToken)return;
+      node.dataset.speaking='false';activeSpeechNode=null;
+      resumeTwinDialogue();
+    });
+  }
+  function makeSpeechTarget(node,text,characterId,session){
+    node.dataset.voiceEnabled='false';node.dataset.speaking='false';
+    node.onclick=null;node.onkeydown=null;node.tabIndex=-1;
+    node.removeAttribute?.('role');node.removeAttribute?.('aria-label');
+    if(!text.trim()||!forestVoiceProfile(characterId)||!voice.supported())return;
+    node.dataset.voiceEnabled='true';node.tabIndex=0;
+    node.setAttribute('role','button');node.setAttribute('aria-label',`読み上げる：${text}`);
+    node.onclick=()=>playSpokenLine(node,text,characterId,session);
+    node.onkeydown=event=>{
+      if(event.code==='Enter'||event.code==='Space'){
+        event.preventDefault();event.stopPropagation?.();node.click();
+      }
+    };
+  }
   function scheduleAutoDialogue(result,identity,session){
     if(result?.mode!=='twins'||result.autoNext!==true||typeof dialogue?.advance!=='function'||document.hidden)return;
     const renderId=dialogueRender;
@@ -64,13 +118,13 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
   }
   function endDialogue(){
     if(!chatOpen)return;
-    const previous=activeCharacter;chatSession++;cancelAutoDialogue();currentDialogue=null;
+    const previous=activeCharacter;chatSession++;stopSpeech();cancelAutoDialogue();currentDialogue=null;
     chatOpen=false;activeCharacter=null;chat.hidden=true;
     dismiss.hidden=false;dismiss.textContent='とじる';
     try{dialogue?.end?.({characterId:previous?.dialogueId||previous?.id,displayName:previous?.name})}catch(error){console.warn('Forest dialogue end failed',error)}
   }
   function dispose(){
-    if(disposed)return;disposed=true;endDialogue();cancelAnimationFrame(animationId);stopInput();cleanupWorld();resizeObserver?.disconnect();
+    if(disposed)return;disposed=true;endDialogue();stopSpeech();cancelAnimationFrame(animationId);stopInput();cleanupWorld();resizeObserver?.disconnect();
     document.removeEventListener('keydown',onKeyDown);document.removeEventListener('keyup',onKeyUp);document.removeEventListener('visibilitychange',onVisibility);window.removeEventListener('blur',onBlur);
     document.body.classList.remove('bookForestOpen');layer.remove();
   }
@@ -83,14 +137,15 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
     keys.add(event.code);
   };
   const onKeyUp=event=>keys.delete(event.code),onVisibility=()=>{
-    if(document.hidden){stopInput();cancelAutoDialogue()}
+    if(document.hidden){stopInput();stopSpeech();cancelAutoDialogue()}
     else if(chatOpen&&currentDialogue)scheduleAutoDialogue(...currentDialogue);
   },onBlur=()=>stopInput();
   document.addEventListener('keydown',onKeyDown);document.addEventListener('keyup',onKeyUp);document.addEventListener('visibilitychange',onVisibility);window.addEventListener('blur',onBlur);
   async function showDialogue(character){
     if(chatOpen||disposed)return;
-    stopInput();cancelAutoDialogue();currentDialogue=null;chatOpen=true;chat.hidden=false;activeCharacter=character;
+    stopInput();stopSpeech();cancelAutoDialogue();currentDialogue=null;chatOpen=true;chat.hidden=false;activeCharacter=character;
     speaker.textContent=character.name;message.hidden=false;message.textContent='…';twinHistory.hidden=true;twinWaiting.hidden=true;
+    makeSpeechTarget(message,'',character.dialogueId||character.id,chatSession);
     twinHistory.replaceChildren();replies.replaceChildren();
     const session=++chatSession,identity={characterId:character.dialogueId||character.id,displayName:character.name};
     dismiss.hidden=identity.characterId==='twins';dismiss.textContent='とじる';
@@ -101,21 +156,25 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
     }catch(error){if(chatOpen&&session===chatSession){message.textContent='また あとで はなそうね。';console.warn('Forest dialogue failed',error)}}
   }
   function renderDialogue(result,identity,session){
-    cancelAutoDialogue();currentDialogue=[result,identity,session];
+    stopSpeech();cancelAutoDialogue();currentDialogue=[result,identity,session];
     dismiss.hidden=result?.mode==='twins'&&result?.conversationComplete!==true;
     dismiss.textContent=result?.conversationComplete===true?'またね':'とじる';
     if(result?.mode==='twins'){
       speaker.textContent='ふたご';message.hidden=true;twinHistory.hidden=false;
       const turn=el('div','bookForestTwinTurn');turn.dataset.speaker=String(result.speakerSlot??0);
-      turn.append(el('strong','bookForestTwinName',result.speakerName||'ふたご'),
-        el('p','bookForestTwinText',typeof result.text==='string'?result.text:''));
+      const line=typeof result.text==='string'?result.text:'';
+      const textNode=el('p','bookForestTwinText',line);
+      makeSpeechTarget(textNode,line,'twins_first',session);
+      turn.append(el('strong','bookForestTwinName',result.speakerName||'ふたご'),textNode);
       twinHistory.append(turn);
       while(twinHistory.children.length>4)twinHistory.firstChild.remove();
       chat.scrollTop=chat.scrollHeight;
     }else{
       speaker.textContent=activeCharacter?.name||identity.displayName;
       twinHistory.hidden=true;twinHistory.replaceChildren();message.hidden=false;
-      message.textContent=typeof result?.text==='string'?result.text:'';chat.scrollTop=0;
+      message.textContent=typeof result?.text==='string'?result.text:'';
+      makeSpeechTarget(message,message.textContent,identity.characterId,session);
+      chat.scrollTop=0;
     }
     // A seed counts as experienced only after a real conversation frame renders.
     try{dialogue?.onDisplayed?.(result,identity)}catch(error){
@@ -128,7 +187,7 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
       const button=el('button','',choice.label);button.type='button';
       button.onclick=async()=>{
         if(choosing)return;
-        choosing=true;cancelAutoDialogue();
+        choosing=true;stopSpeech();cancelAutoDialogue();
         for(const item of replies.children)item.disabled=true;
         try{
         const next=await dialogue?.select?.({...identity,choiceId:choice.id});

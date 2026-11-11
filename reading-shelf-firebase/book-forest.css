@@ -11,6 +11,9 @@
 .bookForestChat[hidden],.bookForestConversation[hidden],.bookForestTwinHistory[hidden],.bookForestTwinWaiting[hidden],.bookForestMessage[hidden]{display:none!important}
 .bookForestConversation{position:absolute;left:50%;bottom:max(150px,calc(env(safe-area-inset-bottom) + 140px));transform:translateX(-50%);width:min(480px,calc(100vw - 36px));max-height:min(56dvh,450px);overflow-y:auto;overscroll-behavior:contain;box-sizing:border-box;background:#fffaf0f5;border:1px solid #fff;border-radius:20px;box-shadow:0 12px 38px #1e423b55;padding:16px 20px;color:#324b3d;user-select:text}
 .bookForestSpeaker{font-size:15px;color:#507d5e}.bookForestMessage{font-size:16px;line-height:1.75;margin:7px 0 10px;white-space:pre-wrap}
+.bookForestMessage[data-voice-enabled="true"],.bookForestTwinText[data-voice-enabled="true"]{display:table;width:fit-content;max-width:100%;cursor:pointer;touch-action:manipulation;border-radius:4px}
+.bookForestMessage[data-voice-enabled="true"]:focus-visible,.bookForestTwinText[data-voice-enabled="true"]:focus-visible{outline:2px solid #51876b;outline-offset:3px}
+.bookForestMessage[data-speaking="true"],.bookForestTwinText[data-speaking="true"]{text-decoration:underline;text-decoration-style:dotted;text-decoration-color:#64977b;text-underline-offset:4px}
 .bookForestTwinHistory{display:grid;gap:9px;padding:8px 0 12px;max-width:100%}
 .bookForestTwinTurn{max-width:94%;padding:7px 12px;background:#edf4e5;border-radius:13px 13px 13px 4px;border:1px solid #d8e7d0;animation:forestTwinAppear .28s ease-out}
 .bookForestTwinTurn[data-speaker="2"]{justify-self:end;background:#fff2dc;border-color:#eadfca;border-radius:13px 13px 4px 13px}

@@ -39,7 +39,7 @@ test('one stable Japanese-day theme for any order of NPCs; recent topics rotate'
   assert.notEqual(next.seed.id,first.seed.id);
 });
 
-test('two visits deepen a theme; third visit has no new request; logged only on display',()=>{
+test('daily theme visits are bounded and log selection separately from display',()=>{
   const local=storage(),clock=()=>Date.UTC(2026,10,10,13);
   const session=createForestThoughtSession({storage:local,now:clock});
   const first=session.choose({books,catalog,seeds,characterId:'kiki'});
@@ -53,8 +53,8 @@ test('two visits deepen a theme; third visit has no new request; logged only on 
   assert.equal(second.seed.id,first.seed.id);
   assert.equal(second.previousNpc,'kiki');
   assert.equal(second.visit,1);
-  assert.notDeepEqual(forestThoughtPrompt(first,'kiki').philosophy,
-    forestThoughtPrompt(second,'jiji').philosophy);
+  assert.deepEqual(forestThoughtPrompt(first,'kiki'),forestThoughtPrompt(second,'jiji'),
+    'the private fact stays neutral; the separate NPC profile determines the voice');
   session.choose({books,catalog,seeds,characterId:'kiki'});
   assert.equal(session.choose({books,catalog,seeds,characterId:'kiki'}).allowGeneration,false);
 });
@@ -63,7 +63,8 @@ test('no book IDs, remarks, or reader data are included in the LLM topic',()=>{
   const result=selectForestThoughtSeed({books,catalog,seeds});
   const prompt=forestThoughtPrompt(result,'kiki');
   assert.ok(prompt.fact.includes('庭に花'));
-  assert.ok(prompt.question.includes('手伝って'));
+  assert.equal(prompt.question,undefined);
+  assert.equal(prompt.philosophy,undefined);
   assert.equal(JSON.stringify(prompt).includes('book-1'),false);
   assert.equal(JSON.stringify(prompt).includes('mem-1'),false);
   assert.equal(JSON.stringify(prompt).includes('s1'),false);

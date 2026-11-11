@@ -37,7 +37,7 @@ test('generates contextual reply choices, then a character reply only after a ch
   const log=JSON.parse(storage.getItem('forest-ai-local-v1:log'));
   assert.deepEqual(log.map(x=>x.event),['generated-choices','selected-offered-choice','generated-reply']);
   assert.equal(log[0].text,'今日はいい風がふいているね。','export can reconstruct the initial line');
-  assert.equal(log[0].promptVersion,'forest-thought-exchange-v7-persona');
+  assert.equal(log[0].promptVersion,'forest-voice-fidelity-v8');
   assert.equal(log[1].label,'風の音を聞く');
   director.end();
 });
@@ -127,12 +127,26 @@ test('bad LLM output is rejected, preserving approved fallback and avoiding fabr
     {characterId:'kiki',requireLine:true}),null);
   assert.equal(validateLiveForestOutput({text:'（こんにちは！）',choices:['はい','いいえ']},
     {characterId:'cat',requireLine:true}),null);
-  assert.equal(validateLiveForestOutput({text:'今日は森を歩くね。',choices:['どうして？','どうして？']},
-    {characterId:'kiki',requireLine:true}),null);
+  assert.deepEqual(validateLiveForestOutput({text:'今日は森を歩くね。',choices:['どうして？','どうして？']},
+    {characterId:'kiki',requireLine:true}),
+    {text:'今日は森を歩くね。',labels:['もう少し聞く','またね']});
   assert.equal(validateLiveForestOutput({text:'ふふ、そうね。わたしも気になるわ。',choices:['どうして？','見に行こう']},
     {characterId:'jiji',requireLine:true}),null,'Jiji must not become a generic female guide');
   assert.equal(validateLiveForestOutput({text:'ぼくはおなかがすいたよ。',choices:['何食べる？','さがそう']},
     {characterId:'ishishi',requireLine:true}),null,'Ishishi does not use a different first person');
+  for(const [characterId,text] of [['king','ぼくは何でも知ってるよ！'],
+    ['ishishi','俺が考えたんだ。大丈夫さ！'],
+    ['jiji','みんな、元気を出して進みましょう！'],
+    ['skipper','さあみんな！大冒険の始まりだ！'],
+    ['kiki','あのね、キキはその日見たんだよ。']]){
+    assert.equal(validateLiveForestOutput({text,choices:['そうだね','もっと聞きたい']},
+      {characterId,requireLine:true}),null,`reject role drift: ${characterId}`);
+  }
+  assert.deepEqual(validateLiveForestOutput({text:'えっ',choices:[]},
+    {characterId:'skipper',requireLine:true,closing:true}),{text:'えっ',labels:[]});
+  assert.deepEqual(validateLiveForestOutput({text:'おら、これ見て！',
+    choices:['見せて','いいね','もう一つ聞く']},{characterId:'ishishi',requireLine:true}),
+    {text:'おら、これ見て！',labels:['見せて','いいね']});
   assert.equal(validateLiveForestOutput({text:'とても長い説明です。'.repeat(12),choices:['橋を見に行く','また今度ね']},
     {characterId:'kiki',requireLine:true}),null,'reject verbose lines');
   const original=await base().start();
@@ -152,6 +166,15 @@ test('private persona governs each live opening and reply; the shared theme is o
     sourceKind:'meet',choices:[{id:'other',label:'もっと聞く'}]})};
   const director=createForestLiveDialogueDirector({base:input,storage:memoryStorage(),
     startDelayMs:0,requireCharacterProfile:true,getCharacterProfiles:()=>[profile],
+    getCues:()=>[
+      {schemaVersion:1,id:'jiji-ambient-1',characterId:'jiji',kind:'ambient',
+        text:'あの木、ちょっと曲がってるね。',approval:'approved'},
+      {schemaVersion:1,id:'jiji-meet-1',characterId:'jiji',kind:'meet',
+        text:'ふうん。きみはそっちに行くんだ。',approval:'approved'},
+      {schemaVersion:1,id:'jiji-restricted-1',characterId:'jiji',kind:'ambient',
+        bookId:'private-book',text:'その本の秘密を知ってるよ。',approval:'approved'},
+      {schemaVersion:1,id:'jiji-reflection',characterId:'jiji',kind:'reflection',
+        text:'読書の感想を伝えたね。',approval:'approved'}],
     generate:async prompt=>{
       prompts.push(prompt);
       return {text:'ぼくは先に見ておくよ。',choices:['見てきて','あとでね']};
@@ -160,6 +183,9 @@ test('private persona governs each live opening and reply; the shared theme is o
   assert.equal(result.text,'そっちの道は大丈夫かな。');
   assert.match(prompts[0].npc.voice,/一人称:ぼく/);
   assert.match(prompts[0].npc.voice,/関係性:キキ/);
+  assert.deepEqual(prompts[0].npc.approvedExamples,
+    ['あの木、ちょっと曲がってるね。','ふうん。きみはそっちに行くんだ。']);
+  assert.equal(prompts[0].mode,'choices');
   assert.ok(prompts[0].constraints.some(rule=>rule.includes('情報量や深い話')));
   result=await director.select({characterId:'jiji',choiceId:result.choices[0].id});
   assert.equal(result.text,'ぼくは先に見ておくよ。');
@@ -184,7 +210,7 @@ test('a previously generated choice cannot be replayed after a new encounter',as
   assert.equal(result.text,'また遊ぼうね。','old choice is passed only to the local director');
 });
 
-test('a sourced daily thought produces a new character-specific opening and logs only actual display',async()=>{
+test('a related sourced thought informs replies without replacing the approved opening',async()=>{
   const storage=memoryStorage(),prompts=[];
   const books=[{id:'book-1',status:'read'}];
   const catalog=[{schemaVersion:1,id:'mem-1',bookId:'book-1',text:'花を植えた',
@@ -193,14 +219,18 @@ test('a sourced daily thought produces a new character-specific opening and logs
     fact:'花を植えた',question:'ひとりでやるのはえらい？',contrast:'助けてもらうのも勇気',
     tags:'協力',lenses:'',spoiler:1,status:'使用可',sourceUrl:'https://example.org',
     selectedCount:0,displayedCount:0}];
-  const director=createForestLiveDialogueDirector({base:base(),storage,startDelayMs:0,
+  const authored={...base(),start:async()=>({text:'花が咲くといいな。',sourceKind:'story',
+    sourceMemoryId:'mem-1',choices:[{id:'another-topic',label:'ほかの話も聞く'}]})};
+  const director=createForestLiveDialogueDirector({base:authored,storage,startDelayMs:0,
     now:()=>Date.UTC(2026,10,10,13),getBooks:()=>books,getCatalog:()=>catalog,getSeeds:()=>seeds,
-    generate:async prompt=>{prompts.push(prompt);return {text:'ひとりで飛んでみたけど、助けを求めるのも勇気ね。',
+    generate:async prompt=>{prompts.push(prompt);return {text:'わたしも楽しみだな。',
       choices:['自分でやりたい','助けてもらう']}}});
   const first=await director.start(identity);
-  assert.equal(first.text,'ひとりで飛んでみたけど、助けを求めるのも勇気ね。');
-  assert.equal(prompts[0].context.topic.question,'ひとりでやるのはえらい？');
-  assert.equal(prompts[0].context.topic.philosophy.axis,'自立と信頼');
+  assert.equal(first.text,'花が咲くといいな。');
+  assert.equal(prompts[0].context.npcLine,'花が咲くといいな。');
+  assert.equal(prompts[0].context.topic.fact,'花を植えた');
+  assert.equal(prompts[0].context.topic.question,undefined);
+  assert.equal(prompts[0].context.topic.philosophy,undefined);
   assert.equal(JSON.stringify(prompts[0]).includes('book-1'),false);
   assert.equal(JSON.parse(storage.getItem('forest-ai-local-v1:thought:events')).length,1);
   director.onDisplayed(first,identity);
@@ -214,4 +244,39 @@ test('a sourced daily thought produces a new character-specific opening and logs
   await director.start(identity);
   assert.equal(prompts.length,2);
   assert.equal(prompts[1].context.topic,undefined,'unread book cannot be forwarded');
+});
+
+test('a third visit with the same thought keeps the authored character dialogue',async()=>{
+  const storage=memoryStorage(),books=[{id:'b1',status:'read'}],calls=[];
+  const catalog=[{schemaVersion:1,id:'m1',bookId:'b1',text:'石を拾った',
+    spoilerLevel:1,evidenceStatus:'approved',confidence:'high',sourceUrl:'https://example.org'}];
+  const seeds=[{id:'s1',bookId:'b1',memoryId:'m1',title:'石の本',fact:'石を拾った',
+    question:'どうして？',contrast:'違う見方',tags:'石',spoiler:1,status:'使用可',
+    sourceUrl:'https://example.org',selectedCount:0,displayedCount:0}];
+  const authored={...base(),start:async()=>({text:'おら、あの石を見つけたぞ！',
+    sourceKind:'story',sourceMemoryId:'m1',choices:[{id:'another-topic',label:'ほかの話も聞く'}]})};
+  const director=createForestLiveDialogueDirector({base:authored,storage,startDelayMs:0,
+    now:()=>Date.UTC(2026,10,10,13),getBooks:()=>books,getCatalog:()=>catalog,getSeeds:()=>seeds,
+    generate:async prompt=>{calls.push(prompt);return {choices:['どれどれ','見せて']}}});
+  for(let visit=1;visit<=3;visit++){
+    const result=await director.start({characterId:'ishishi'});
+    assert.equal(result.text,'おら、あの石を見つけたぞ！');
+    assert.equal(result.conversationComplete,undefined);
+    assert.equal(result.choices.length,visit===3?1:2);
+    director.end();
+  }
+  assert.equal(calls.length,2,'only generation stops, not NPC interaction');
+});
+
+test('AI reply failure resumes the authored continuation when possible',async()=>{
+  let selected=0;
+  const authored={...base(),select:async()=>{selected++;return {text:'あの葉っぱ、見てごらん。',
+    sourceKind:'ambient',choices:[{id:'another-topic',label:'ほかの話も聞く'}]}}};
+  const director=createForestLiveDialogueDirector({base:authored,storage:memoryStorage(),
+    startDelayMs:0,generate:async prompt=>prompt.mode==='choices'?{choices:['見に行く','まだいる']}:
+      {text:'ぼくは王さまです。',choices:['そうだね','いいね']}});
+  const first=await director.start(identity);
+  const next=await director.select({...identity,choiceId:first.choices[0].id});
+  assert.equal(next.text,'あの葉っぱ、見てごらん。');
+  assert.equal(selected,1);
 });

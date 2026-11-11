@@ -9,22 +9,7 @@ const HEADER={id:'種ID',bookId:'書籍ID',title:'書名',memoryId:'物語記憶
   tags:'テーマタグ',lenses:'キャラごとの視点ヒント',spoiler:'ネタバレ度',
   status:'利用状態',sourceUrl:'原作出典URL',selected:'選抜回数',displayed:'実表示回数'};
 
-const PHILOSOPHY=Object.freeze({
-  king:{axis:'名誉と謙虚さ',stance:'自分の役目を誇りながら、知らないことを認める',
-    tension:'立派に見せたい気持ちと、助けを求める勇気'},
-  kiki:{axis:'自立と信頼',stance:'自分で試して失敗から学ぶ。ただし人を頼ることも選べる',
-    tension:'自由でいたい気持ちと、他者への責任'},
-  jiji:{axis:'慎重さと冒険',stance:'危険を見つけるが、心配だけで好奇心を止めない',
-    tension:'安全を守ることと、一歩踏み出すこと'},
-  skipper:{axis:'好奇心と注意深さ',stance:'小さな発見を喜び、見逃したものにもう一度目を向ける',
-    tension:'先へ進む喜びと、立ち止まって観察する価値'},
-  zorori:{axis:'工夫と誠実さ',stance:'うまくいかない場面でも工夫する。ずるい近道の代償も考える',
-    tension:'勝つことと、胸を張れるやり方で勝つこと'},
-  ishishi:{axis:'欲しいものと分け合うこと',stance:'自分の楽しみを正直に求めつつ、友達の分も考える',
-    tension:'目の前の喜びと、分け合う喜び'},
-  noshishi:{axis:'気楽さと責任',stance:'失敗を深刻にしすぎず、仲間が困ればきちんと支える',
-    tension:'のんびり進むことと、必要なときに動くこと'}
-});
+const THOUGHT_SPEAKERS=new Set(['king','kiki','jiji','skipper','zorori','ishishi','noshishi']);
 const normalize=value=>String(value??'').trim().replace(/\s+/gu,' ');
 const count=value=>Number.isSafeInteger(Number(value))&&Number(value)>=0?Number(value):0;
 const dayJapan=timestamp=>new Date(timestamp+9*3600000).toISOString().slice(0,10);
@@ -85,15 +70,14 @@ export function selectForestThoughtSeed({books=[],catalog=[],seeds=[],now=Date.n
   return {day,seed:candidates[0].seed,returning:false};
 }
 
-export function forestThoughtPrompt(selection,characterId,{visit=1,previousNpc='',previousAngle=''}={}){
-  const seed=selection?.seed,philosophy=PHILOSOPHY[characterId];
-  if(!seed||!philosophy)return null;
-  // Do not send private book IDs, child reflections or unverified prose to the LLM.
-  return {title:seed.title.slice(0,85),fact:seed.fact.slice(0,240),
-    question:seed.question.slice(0,120),contrast:seed.contrast.slice(0,140),
-    theme:seed.tags.slice(0,100),philosophy,
-    visit:Math.min(visit,2),previousNpc:PHILOSOPHY[previousNpc]?previousNpc:'',
-    previousAngle:normalize(previousAngle).slice(0,18)};
+export function forestThoughtPrompt(selection,characterId){
+  const seed=selection?.seed;
+  if(!seed||!THOUGHT_SPEAKERS.has(characterId))return null;
+  // A source-checked fact may support a matching approved story cue. The
+  // common philosophical question, contrast, and other NPCs' activity do not
+  // belong in every character's prompt: they homogenize otherwise distinct voices.
+  // Never forward private book IDs, child reflections, or source URLs.
+  return {fact:seed.fact.slice(0,240),theme:seed.tags.slice(0,100)};
 }
 
 export function createForestThoughtSession({storage=null,storageKey='forest-thought-local-v1',

@@ -93,7 +93,8 @@ function promptFor({characterId,mode,npcLine,chosenLabel='',history=[],closing=f
     context:{npcLine:clean(npcLine).slice(0,170),sourceKind,
       chosenLabel:clean(chosenLabel).slice(0,24),
       recentTurns:history.slice(-4),...(topic?{topic}:{}),
-      ...(dailyContext?{today:{scene:dailyContext.scene,
+      ...(dailyContext?{today:{scene:sourceKind==='ambient'?dailyContext.scene:
+        {tone:dailyContext.scene?.tone||''},
         visitsToday:dailyContext.visitsToday,
         previousNpc:dailyContext.previousNpc,
         metNpcCount:dailyContext.metNpcCount,

@@ -37,7 +37,7 @@ test('generates contextual reply choices, then a character reply only after a ch
   const log=JSON.parse(storage.getItem('forest-ai-local-v1:log'));
   assert.deepEqual(log.map(x=>x.event),['generated-choices','selected-offered-choice','generated-reply']);
   assert.equal(log[0].text,'今日はいい風がふいているね。','export can reconstruct the initial line');
-  assert.equal(log[0].promptVersion,'forest-thought-exchange-v6');
+  assert.equal(log[0].promptVersion,'forest-thought-exchange-v7-persona');
   assert.equal(log[1].label,'風の音を聞く');
   director.end();
 });
@@ -129,12 +129,50 @@ test('bad LLM output is rejected, preserving approved fallback and avoiding fabr
     {characterId:'cat',requireLine:true}),null);
   assert.equal(validateLiveForestOutput({text:'今日は森を歩くね。',choices:['どうして？','どうして？']},
     {characterId:'kiki',requireLine:true}),null);
+  assert.equal(validateLiveForestOutput({text:'ふふ、そうね。わたしも気になるわ。',choices:['どうして？','見に行こう']},
+    {characterId:'jiji',requireLine:true}),null,'Jiji must not become a generic female guide');
+  assert.equal(validateLiveForestOutput({text:'ぼくはおなかがすいたよ。',choices:['何食べる？','さがそう']},
+    {characterId:'ishishi',requireLine:true}),null,'Ishishi does not use a different first person');
   assert.equal(validateLiveForestOutput({text:'とても長い説明です。'.repeat(12),choices:['橋を見に行く','また今度ね']},
     {characterId:'kiki',requireLine:true}),null,'reject verbose lines');
   const original=await base().start();
   const director=createForestLiveDialogueDirector({base:base(),generate:async()=>({choices:['だめ']}),
     storage:memoryStorage()});
   assert.deepEqual(await director.start(identity),original);
+});
+
+test('private persona governs each live opening and reply; the shared theme is optional background',async()=>{
+  const prompts=[];
+  const profile={id:'jiji',summary:'親しい相棒',values:'仲間',motivation:'一緒に旅する',
+    relationships:'キキ',behavior:'道を見張る',reactions:'軽い冗談で支える',
+    firstPerson:'ぼく',address:'キキ',cadence:'短い観察の言葉',endings:'固定語尾なし',
+    habits:'決まり文句は繰り返さない',expression:'目の前の物で比喩する',
+    emotion:'驚くと短く言う',avoid:'カウンセラーのような励ましを連発しない',review:'検証中'};
+  const input={...base(),start:async()=>({text:'そっちの道は大丈夫かな。',
+    sourceKind:'meet',choices:[{id:'other',label:'もっと聞く'}]})};
+  const director=createForestLiveDialogueDirector({base:input,storage:memoryStorage(),
+    startDelayMs:0,requireCharacterProfile:true,getCharacterProfiles:()=>[profile],
+    generate:async prompt=>{
+      prompts.push(prompt);
+      return {text:'ぼくは先に見ておくよ。',choices:['見てきて','あとでね']};
+    }});
+  let result=await director.start({characterId:'jiji'});
+  assert.equal(result.text,'そっちの道は大丈夫かな。');
+  assert.match(prompts[0].npc.voice,/一人称:ぼく/);
+  assert.match(prompts[0].npc.voice,/関係性:キキ/);
+  assert.ok(prompts[0].constraints.some(rule=>rule.includes('情報量や深い話')));
+  result=await director.select({characterId:'jiji',choiceId:result.choices[0].id});
+  assert.equal(result.text,'ぼくは先に見ておくよ。');
+  assert.match(prompts[1].npc.voice,/短い観察の言葉/);
+});
+
+test('owner mode never replaces an approved character line when private persona is absent',async()=>{
+  let calls=0;
+  const director=createForestLiveDialogueDirector({base:base(),storage:memoryStorage(),
+    startDelayMs:0,requireCharacterProfile:true,getCharacterProfiles:()=>[],
+    generate:async()=>{calls++;return {choices:['歩こう','休もう']}}});
+  assert.equal((await director.start(identity)).text,'今日はいい風がふいているね。');
+  assert.equal(calls,0);
 });
 
 test('a previously generated choice cannot be replayed after a new encounter',async()=>{

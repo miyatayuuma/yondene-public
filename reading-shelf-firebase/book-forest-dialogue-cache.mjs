@@ -1,10 +1,11 @@
 import {validateForestDialogueCues} from './book-forest-dialogue-director.mjs';
 import {unlockedStoryMemories} from './book-forest-story-memory.mjs';
 import {validateTwinNamePairs,validateTwinScenes} from './book-forest-twins.mjs';
+import {validForestCharacterProfiles} from './book-forest-character-profiles.mjs';
 
-const PREFIX='private-book-forest-dialogue-v4-';
+const PREFIX='private-book-forest-dialogue-v5-';
 const LEGACY_PREFIXES=['private-book-forest-dialogue-v1-','private-book-forest-dialogue-v2-',
-  'private-book-forest-dialogue-v3-'];
+  'private-book-forest-dialogue-v3-','private-book-forest-dialogue-v4-'];
 const IDS=/^[A-Za-z0-9_-]{1,160}$/u;
 const pathname='/__book_forest_private_dialogue__/package';
 const scopedName=(uid,familyId)=>{
@@ -20,11 +21,14 @@ export async function saveCachedForestDialogue({uid,familyId,packageData,cacheSt
     throw Error('物語記憶の件数が正しくありません');
   if(!Array.isArray(packageData?.thoughtSeeds)||packageData.thoughtSeeds.length>180)
     throw Error('思考の種台帳の形式が正しくありません');
+  if(!Array.isArray(packageData?.characterProfiles)||
+    validForestCharacterProfiles(packageData.characterProfiles).length!==packageData.characterProfiles.length)
+    throw Error('非公開キャラクター設定の形式が正しくありません');
   if(!validateTwinNamePairs(packageData?.twinNames).length||
     validateTwinScenes(packageData?.twinScenes).length<2)
     throw Error('ふたご会話の承認済みデータが足りません');
   const body=JSON.stringify(packageData);
-  if(body.length>160000)throw Error('会話台本が大きすぎます');
+  if(body.length>200000)throw Error('会話台本が大きすぎます');
   const name=scopedName(uid,familyId);
   const cache=await cacheStorage.open(name);
   await cache.put(url(),new Response(body,{headers:{'Content-Type':'application/json'}}));
@@ -39,17 +43,20 @@ export async function loadCachedForestDialogue({uid,familyId,cacheStorage=global
   if(!response)return null;
   try{
     const text=await response.text();
-    if(text.length>160000)throw Error('oversized');
+    if(text.length>200000)throw Error('oversized');
     const data=JSON.parse(text);
     if(!Array.isArray(data.catalog)||data.catalog.length>140||!validateForestDialogueCues(data.cues).length)
       throw Error('invalid');
     if(!Array.isArray(data.thoughtSeeds)||data.thoughtSeeds.length>180)throw Error('invalid seeds');
+    if(!Array.isArray(data.characterProfiles)||
+      validForestCharacterProfiles(data.characterProfiles).length!==data.characterProfiles.length)
+      throw Error('invalid profiles');
     const twinNames=validateTwinNamePairs(data.twinNames),twinScenes=validateTwinScenes(data.twinScenes);
     if(!twinNames.length||twinScenes.length<2)throw Error('invalid twins');
     // Fact-level authorization still happens with the current Firestore shelf
     // snapshot in the director. Never persist reading state or review quotes.
     return {catalog:data.catalog,cues:validateForestDialogueCues(data.cues),twinNames,twinScenes,
-      thoughtSeeds:data.thoughtSeeds};
+      thoughtSeeds:data.thoughtSeeds,characterProfiles:validForestCharacterProfiles(data.characterProfiles)};
   }catch{
     await cacheStorage.delete(name);return null;
   }

@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="theme-color" content="#234a3d">
+  <title>本の森｜声の実験室</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,"Noto Sans JP",sans-serif;color:#203b31;background:#f6f5e9;font-size:16px}
+    *{box-sizing:border-box}
+    body{margin:0;background:radial-gradient(ellipse at top,#e7f0d9 0,#f6f5e9 65%);min-height:100vh;line-height:1.55}
+    main{max-width:780px;margin:0 auto;padding:22px 16px 58px}
+    .eyebrow{font-size:.78rem;letter-spacing:.1em;color:#55745a;font-weight:750}
+    h1{font-size:clamp(1.6rem,5vw,2.2rem);letter-spacing:.02em;line-height:1.25;margin:.2rem 0 .6rem}
+    h2{font-size:1.12rem;margin:0 0 .65rem}
+    p{margin:.5rem 0 0}
+    .lead{color:#486158;font-size:.94rem}
+    .card{border:1px solid #cfdcc6;border-radius:20px;padding:18px;margin-top:17px;background:#fffefa;box-shadow:0 5px 16px #20432812}
+    .grid{display:grid;gap:16px;grid-template-columns:repeat(2,minmax(0,1fr))}
+    .field{display:block;margin:12px 0 0;font-size:.88rem;font-weight:700;color:#345246}
+    select,textarea{display:block;width:100%;font:inherit;border:1px solid #aebfb3;background:white;color:#1e3d32;border-radius:11px;padding:11px;margin-top:5px}
+    textarea{min-height:90px;resize:vertical}
+    .speech{background:#eef5e9;border:1px solid #d4e3cf;padding:15px;border-radius:14px;font-size:1rem;margin:10px 0 0}
+    .panel{border:1px solid #d4ddcf;background:#f7f9f2;border-radius:15px;padding:14px}
+    .panel h3{margin:0 0 5px;font-size:1rem}
+    .baseline{color:#54675d;font-size:.9rem;line-height:1.7;overflow-wrap:anywhere;min-height:85px}
+    .slider{margin-top:11px}
+    .slider label{display:flex;justify-content:space-between;font-size:.87rem;font-weight:680;color:#345246}
+    input[type=range]{width:100%;accent-color:#327358;height:29px;cursor:pointer}
+    button{font:inherit;font-weight:750;border:1px solid #7c9e87;border-radius:12px;padding:12px 14px;background:#e6f0e4;color:#204735;cursor:pointer;min-height:46px}
+    button.primary{background:#245b45;color:white;border-color:#245b45}
+    button.secondary{background:#fff;color:#315844}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    button:focus-visible,select:focus-visible,textarea:focus-visible,input:focus-visible{outline:3px solid #b58d32;outline-offset:2px}
+    .actions{display:flex;flex-wrap:wrap;gap:9px;margin-top:14px}
+    .actions>*{flex:1 1 auto}
+    .tag{font-size:.75rem;border-radius:999px;background:#d8e8d5;color:#34634b;padding:3px 9px;font-weight:800;white-space:nowrap}
+    .row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+    #status{border-radius:12px;background:#e8efe5;padding:12px 14px;font-size:.86rem;margin-top:16px;min-height:46px}
+    small{color:#6c7b6f;display:block;margin-top:9px;line-height:1.6}
+    #exportArea{min-height:120px;font-size:.8rem;font-family:ui-monospace,monospace}
+    .footer{color:#63796c;font-size:.82rem;margin:22px 0}
+    @media(max-width:620px){.grid{grid-template-columns:1fr}.card{padding:15px}.baseline{min-height:auto}main{padding-top:16px}}
+  </style>
+</head>
+<body>
+<main>
+  <div class="eyebrow">よんでね · 本の森</div>
+  <h1>声の実験室 <span class="tag">試作</span></h1>
+  <p class="lead">同じセリフで声を聞き比べ、キャラごとの音声を調整します。ここでの設定はまだ本の森の会話に反映されません。</p>
+
+  <section class="card" aria-labelledby="lineTitle">
+    <h2 id="lineTitle">同じセリフで比較</h2>
+    <label class="field" for="character">キャラクター</label>
+    <select id="character"></select>
+    <label class="field" for="line">読み上げるセリフ（A・B共通）</label>
+    <textarea id="line">あの橋の向こうに、まだ知らないことがあるんだ。きみは、どう思う？</textarea>
+    <small>「ねこ」は物語上しゃべらないため、声を設定しません。ふたごは名前が変わっても同じ1人目・2人目の声を使います。</small>
+  </section>
+
+  <section class="card" aria-labelledby="compareTitle">
+    <div class="row"><h2 id="compareTitle">設定Aと設定B</h2><span class="tag">一方ずつ再生</span></div>
+    <div class="grid">
+      <div class="panel">
+        <h3>A · 保存した基準の声</h3>
+        <p id="baseline" class="baseline"></p>
+        <div class="actions"><button id="playA" class="primary" type="button">▶ Aを聴く</button></div>
+      </div>
+      <div class="panel">
+        <h3>B · 調整中の声</h3>
+        <label class="field" for="voice">日本語音声</label>
+        <select id="voice"></select>
+        <div class="slider"><label for="rate">速さ <output id="rateValue">1.20</output></label><input id="rate" type="range" min="0.70" max="1.60" step="0.05" value="1.20"></div>
+        <div class="slider"><label for="pitch">高さ <output id="pitchValue">1.00</output></label><input id="pitch" type="range" min="0.60" max="1.40" step="0.05" value="1.00"></div>
+        <div class="slider"><label for="volume">音量 <output id="volumeValue">1.00</output></label><input id="volume" type="range" min="0" max="1" step="0.05" value="1.00"></div>
+        <div class="actions"><button id="playB" class="primary" type="button">▶ Bを聴く</button></div>
+      </div>
+    </div>
+    <div class="actions">
+      <button id="stop" class="secondary" type="button">■ 停止</button>
+      <button id="restoreB" class="secondary" type="button">BをAに戻す</button>
+      <button id="saveB" type="button">Bを基準に採用</button>
+    </div>
+    <div id="status" role="status" aria-live="polite">端末の音声エンジンを確認しています…</div>
+  </section>
+
+  <section class="card" aria-labelledby="saveTitle">
+    <h2 id="saveTitle">比較結果を残す</h2>
+    <p class="lead">「採用」はこの端末の実験室だけに保存します。気に入った声が決まったらJSONをコピーして開発に渡せます。</p>
+    <div class="actions">
+      <button id="resetCharacter" class="secondary" type="button">このキャラを初期値へ</button>
+      <button id="exportSettings" type="button">採用設定を表示</button>
+    </div>
+    <textarea id="exportArea" aria-label="採用した音声設定のJSON" readonly hidden></textarea>
+    <small>録音や会話履歴、アカウント情報は保存・送信しません。実際の音声は端末のブラウザ・OSの合成機能に依存します。</small>
+  </section>
+  <p class="footer">音が鳴らないときは、端末の音量・日本語読み上げ音声の有無を確認してください。最初の再生はボタン操作が必要です。</p>
+</main>
+<script>
+/* FOREST_VOICE_ENGINE */
+/* FOREST_VOICE_LAB_UI */
+</script>
+</body>
+</html>

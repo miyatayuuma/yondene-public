@@ -44,4 +44,8 @@ test('Cloudflare provider refuses invalid origin, missing auth and quota errors'
   const limited=createForestCloudflareGenerator({workerUrl:'https://demo.workers.dev',
     getIdToken:async()=>('signed.'+'token'.repeat(6)),fetchImpl:async()=>({ok:false,status:429})});
   await assert.rejects(()=>limited({}),/429/);
+  const quota=createForestCloudflareGenerator({workerUrl:'https://demo.workers.dev',
+    getIdToken:async()=>('signed.'+'token'.repeat(6)),fetchImpl:async()=>({ok:false,status:429,
+      json:async()=>({error:'AI quota reached'})})});
+  await assert.rejects(()=>quota({}),/daily quota reached/);
 });

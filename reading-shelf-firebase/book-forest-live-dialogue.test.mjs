@@ -19,15 +19,18 @@ test('generates contextual reply choices, then a character reply only after a ch
   const storage=memoryStorage(),prompts=[];
   const generator=async prompt=>{
     prompts.push(prompt);
-    return prompts.length===1?{choices:['風の音を聞く','どこに行く？']}:
+    return prompts.length===1?{text:'この風、少し遠くまで行きたくなるね。',
+      choices:['風の音を聞く','どこに行く？']}:
       {text:'この先の道を歩いてみたいな。',choices:['いっしょに行く','ここで待つ']};
   };
   const director=createForestLiveDialogueDirector({base:base(),generate:generator,storage,now:()=>1000});
   const first=await director.start(identity);
   assert.equal(prompts.length,1,'one call on an active encounter, never background loops');
-  assert.equal(first.text,'今日はいい風がふいているね。','approved NPC line stays intact');
+  assert.equal(first.text,'この風、少し遠くまで行きたくなるね。','ambient opening changes');
   assert.deepEqual(first.choices.map(x=>x.label),['風の音を聞く','どこに行く？']);
   assert.equal(prompts[0].context.npcLine,'今日はいい風がふいているね。');
+  assert.equal(prompts[0].mode,'opening');
+  assert.ok(prompts[0].context.today.scene.focus);
   const second=await director.select({...identity,choiceId:first.choices[0].id});
   assert.equal(prompts.length,2);
   assert.equal(prompts[1].context.chosenLabel,'風の音を聞く');
@@ -35,16 +38,17 @@ test('generates contextual reply choices, then a character reply only after a ch
   assert.deepEqual(second.choices.map(x=>x.label),['いっしょに行く','ここで待つ']);
   assert.equal(director.getProgress().aiRequestsThisSession,2);
   const log=JSON.parse(storage.getItem('forest-ai-local-v1:log'));
-  assert.deepEqual(log.map(x=>x.event),['generated-choices','selected-offered-choice','generated-reply']);
-  assert.equal(log[0].text,'今日はいい風がふいているね。','export can reconstruct the initial line');
-  assert.equal(log[0].promptVersion,'forest-voice-fidelity-v8');
+  assert.deepEqual(log.map(x=>x.event),['generated-opening','selected-offered-choice','generated-reply']);
+  assert.equal(log[0].text,first.text,'export can reconstruct the initial line');
+  assert.equal(log[0].promptVersion,'forest-daily-interaction-v9');
   assert.equal(log[1].label,'風の音を聞く');
   director.end();
 });
 
 test('daily and session limits stop requests rather than retrying or running on idle',async()=>{
   const storage=memoryStorage();let calls=0;
-  const generator=async()=>{calls++;return {choices:['どこに行く？','何をする？']}};
+  const generator=async()=>{calls++;return {text:'あの道も歩いてみようかな。',
+    choices:['どこに行く？','何をする？']}};
   const director=createForestLiveDialogueDirector({base:base(),generate:generator,storage,
     dailyLimit:1,sessionLimit:1,now:()=>1000});
   const first=await director.start(identity);
@@ -93,7 +97,8 @@ test('closing while an AI reply is pending aborts its fetch and prevents a late 
   const storage=memoryStorage();let observedSignal;
   const director=createForestLiveDialogueDirector({base:base(),storage,startDelayMs:0,now:()=>2000,
     modelId:'test-gemma',generate:async(prompt,{signal})=>{
-      if(prompt.task.includes('返答候補'))return {choices:['橋を見よう','もう帰ろう']};
+      if(prompt.mode==='opening')return {text:'向こうの橋が気になるな。',
+        choices:['橋を見よう','もう帰ろう']};
       observedSignal=signal;
       return new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(Error('aborted')),{once:true}));
     }});
@@ -201,9 +206,69 @@ test('owner mode never replaces an approved character line when private persona 
   assert.equal(calls,0);
 });
 
+test('the next related NPC can react to the previous selected button and daily scene',async()=>{
+  const storage=memoryStorage(),prompts=[];
+  const generator=async prompt=>{
+    prompts.push(prompt);
+    return {text:prompt.npc.id==='kiki'?'今日の森は風が強いね。':'キキは急いでるのかな。',
+      choices:['風の音を聞く','ちょっと歩こう']};
+  };
+  const common={storage,startDelayMs:0,generate:generator,now:()=>Date.UTC(2026,10,11,13)};
+  const kiki=createForestLiveDialogueDirector({base:base(),...common,maxReplies:1});
+  const start=await kiki.start({characterId:'kiki'});
+  await kiki.select({characterId:'kiki',choiceId:start.choices[0].id});
+  kiki.end();
+  const jiji=createForestLiveDialogueDirector({base:base(),...common});
+  await jiji.start({characterId:'jiji'});
+  const context=prompts.at(-1).context.today;
+  assert.equal(context.previousNpc,'kiki');
+  assert.equal(context.relatedEncounter.npc,'kiki');
+  assert.equal(context.relatedEncounter.selectedLabel,'風の音を聞く');
+  assert.notEqual(context.scene.id,prompts[0].context.today.scene.id);
+  assert.ok(prompts.at(-1).constraints.some(rule=>rule.includes('別NPCの会話を本人が聞いたふりはしない')));
+});
+
+test('AI choices retain the approved handoff to a related NPC',async()=>{
+  const storage=memoryStorage();let generated=0,scriptedSelections=0;
+  const authored={...base(),
+    start:async()=>({text:'道の奥も気になるね。',sourceKind:'ambient',choices:[
+      {id:'another-topic',label:'ほかの話も聞く'},
+      {id:'visit-jiji',label:'ジジのところへ',relayTo:'jiji'}]}),
+    select:async({choiceId})=>{
+      assert.equal(choiceId,'visit-jiji');scriptedSelections++;
+      return {text:'ジジも近くにいるよ。',choices:[]};
+    }};
+  const director=createForestLiveDialogueDirector({base:authored,storage,startDelayMs:0,
+    generate:async()=>{generated++;return {text:'ジジはどこかな。',
+      choices:['ここで探す','別の道を見る']}}});
+  const first=await director.start(identity);
+  assert.equal(first.choices.length,2);
+  assert.equal(first.choices[0].label,'ここで探す');
+  assert.equal(first.choices[1].label,'ジジのところへ');
+  const result=await director.select({...identity,choiceId:'visit-jiji'});
+  assert.equal(result.text,'ジジも近くにいるよ。');
+  assert.equal(scriptedSelections,1);
+  assert.equal(generated,1,'handoff never needs an extra AI call');
+});
+
+test('Cloudflare quota response disables further model calls for the UTC day',async()=>{
+  const storage=memoryStorage();let calls=0;
+  const director=createForestLiveDialogueDirector({base:base(),storage,startDelayMs:0,
+    now:()=>Date.UTC(2026,10,11,13),generate:async()=>{
+      calls++;throw Error('Forest AI daily quota reached');
+    }});
+  await director.start(identity);
+  await director.start(identity);
+  assert.equal(calls,1);
+  const quota=JSON.parse(storage.getItem('forest-ai-local-v1:budget'));
+  assert.equal(quota.day,'2026-11-11');
+  assert.equal(quota.exhausted,true);
+});
+
 test('a previously generated choice cannot be replayed after a new encounter',async()=>{
   const director=createForestLiveDialogueDirector({base:base(),storage:memoryStorage(),
-    generate:async()=>({choices:['森を歩きたい','ちょっと休む']})});
+    generate:async()=>({text:'ちょっと森の奥まで行こうかな。',
+      choices:['森を歩きたい','ちょっと休む']})});
   const prior=await director.start(identity);
   await director.start(identity);
   const result=await director.select({...identity,choiceId:prior.choices[0].id});
@@ -246,7 +311,7 @@ test('a related sourced thought informs replies without replacing the approved o
   assert.equal(prompts[1].context.topic,undefined,'unread book cannot be forwarded');
 });
 
-test('a third visit with the same thought keeps the authored character dialogue',async()=>{
+test('repeat visits can generate choices without replacing an authored story line',async()=>{
   const storage=memoryStorage(),books=[{id:'b1',status:'read'}],calls=[];
   const catalog=[{schemaVersion:1,id:'m1',bookId:'b1',text:'石を拾った',
     spoilerLevel:1,evidenceStatus:'approved',confidence:'high',sourceUrl:'https://example.org'}];
@@ -262,10 +327,10 @@ test('a third visit with the same thought keeps the authored character dialogue'
     const result=await director.start({characterId:'ishishi'});
     assert.equal(result.text,'おら、あの石を見つけたぞ！');
     assert.equal(result.conversationComplete,undefined);
-    assert.equal(result.choices.length,visit===3?1:2);
+    assert.equal(result.choices.length,2);
     director.end();
   }
-  assert.equal(calls.length,2,'only generation stops, not NPC interaction');
+  assert.equal(calls.length,3,'generation can continue while the daily request budget remains');
 });
 
 test('AI reply failure resumes the authored continuation when possible',async()=>{

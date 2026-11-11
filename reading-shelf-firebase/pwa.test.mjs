@@ -108,7 +108,7 @@ test('no removed DOM ID can silently cause a null property assignment',()=>{
 test('PWA cannot combine stale JS with current HTML after deployment',()=>{
   const html=text('index.html'),sw=text('sw.js');
   const config=JSON.parse(text('firebase.json'));
-  assert.match(html,/app\.mjs\?build=20261111-forest-voice-v8/);
+  assert.match(html,/app\.mjs\?build=20261111-forest-daily-v9/);
   assert.match(sw,/const ARTWORK_PATHS=new Set\(ARTWORK\)/);
   assert.ok(!sw.includes('PUBLIC_ASSETS'));
   for(const path of ['/app.mjs','/index.html','/domain.mjs','/book-community.mjs','/recommendations.mjs']){
@@ -169,9 +169,10 @@ test('single-step sorting options have distinct clear Japanese descriptions',()=
 });
 test('PWA build integrates activity previews and preserves forest module versions',()=>{
   const html=text('index.html'),app=text('app.mjs'),recs=text('recommendations.mjs');
-  const build='20261111-forest-voice-v8',activityBuild='20261111-activity-preview-v1',
+  const build='20261111-forest-daily-v9',activityBuild='20261111-activity-preview-v1',
     forestBuild='20261110-forest-ai-v6',voiceBuild='20261111-forest-voice-v1',
     personaBuild='20261111-forest-persona-v1',voiceV8Build='20261111-forest-voice-v8',
+    dailyV9Build='20261111-forest-daily-v9',
     unchanged='20261019-shelf-v28',readingBuild='20261025-reading-legacy-v1';
   assert.match(html,new RegExp('data-app-build="'+build+'"'));
   assert.match(html,new RegExp('app\\.mjs\\?build='+build));
@@ -191,11 +192,11 @@ test('PWA build integrates activity previews and preserves forest module version
     assert.ok(app.includes("'./"+module+".mjs?build="+personaBuild+"'"),
       'persona-enabled import: '+module);
   }
-  for(const module of ['book-forest-dialogue-director','book-forest-live-dialogue',
-    'book-forest-thought-seeds']){
+  for(const module of ['book-forest-dialogue-director','book-forest-thought-seeds']){
     assert.ok(app.includes("'./"+module+".mjs?build="+voiceV8Build+"'"),
       'voice-v8 import: '+module);
   }
+  assert.ok(app.includes("'./book-forest-live-dialogue.mjs?build="+dailyV9Build+"'"));
   for(const module of ['book-community','recommendations','bibliography-identity','invite-links','cover-thumbnails','nickname','reader-name','pending-reflections','startup-recovery']){
     assert.ok(app.includes("'./"+module+".mjs?build="+unchanged+"'"),'unchanged versioned import: '+module);
   }

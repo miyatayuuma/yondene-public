@@ -17,10 +17,10 @@ import {readerNameFromShelf} from './reader-name.mjs?build=20261019-shelf-v28';
 import {mountBookForest,getForestAvatar,setForestAvatar} from './book-forest.mjs?build=20261111-forest-voice-v1';
 import {authorizeForestDrive,loadPrivateForestSprites} from './book-forest-drive.mjs?build=20261110-forest-ai-v6';
 import {saveCachedForestSprites,loadCachedForestSprites,clearCachedForestSprites} from './book-forest-cache.mjs?build=20261110-forest-ai-v6';
-import {loadPrivateForestDialogue} from './book-forest-private-dialogue.mjs?build=20261110-forest-ai-v6';
-import {saveCachedForestDialogue,loadCachedForestDialogue,clearCachedForestDialogue} from './book-forest-dialogue-cache.mjs?build=20261110-forest-ai-v6';
+import {loadPrivateForestDialogue} from './book-forest-private-dialogue.mjs?build=20261111-forest-persona-v1';
+import {saveCachedForestDialogue,loadCachedForestDialogue,clearCachedForestDialogue} from './book-forest-dialogue-cache.mjs?build=20261111-forest-persona-v1';
 import {createForestDialogueDirector} from './book-forest-dialogue-director.mjs?build=20261110-forest-ai-v6';
-import {createForestLiveDialogueDirector} from './book-forest-live-dialogue.mjs?build=20261110-forest-ai-v6';
+import {createForestLiveDialogueDirector} from './book-forest-live-dialogue.mjs?build=20261111-forest-persona-v1';
 import {createForestThoughtSession} from './book-forest-thought-seeds.mjs?build=20261110-forest-ai-v6';
 import {authorizeForestThoughtUsageWrite,syncForestThoughtUsage} from './book-forest-thought-sync.mjs?build=20261110-forest-ai-v6';
 import {resetForestConversationHistoryOnce} from './book-forest-conversation-reset.mjs?build=20261110-forest-ai-v6';
@@ -29,7 +29,7 @@ import {createForestAIGenerator} from './book-forest-ai-provider.mjs?build=20261
 import {createForestCloudflareGenerator} from './book-forest-cloudflare-provider.mjs?build=20261110-forest-ai-v6';
 import {STATUSES,ACTIVE_READ_FILTER,filteredBooks,readPeriodLabel,compactReadPeriodLabel,readingModeLabel,emptyStateMessage} from './domain.mjs?build=20261110-forest-ai-v6';
 
-const APP_BUILD='20261111-forest-voice-v1';
+const APP_BUILD='20261111-forest-persona-v1';
 const $=id=>{const element=document.getElementById(id);if(!element)throw new Error('APP_DOM_MISMATCH: missing #'+id);return element};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const safeCover=url=>/^(https:\/\/|data:image\/(jpeg|png|webp);base64,)/i.test(String(url||''))?String(url):'';
@@ -727,6 +727,8 @@ function renderFamily(){
                 sessionLimit:3,maxReplies:2,
                 getBooks:()=>books,getCatalog:()=>forestDialogueCache?.catalog||[],
                 getSeeds:()=>forestDialogueCache?.thoughtSeeds||[],
+                getCharacterProfiles:()=>forestDialogueCache?.characterProfiles||[],
+                requireCharacterProfile:true,
                 modelId:forestAIConfig.workerUrl?'@cf/google/gemma-4-26b-a4b-it':forestAIConfig.modelId});
             }catch(error){
               console.warn('Forest AI unavailable; approved dialogue remains available',error);

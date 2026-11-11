@@ -2,6 +2,7 @@ import {parseStoryMemoryRows} from './book-forest-story-memory.mjs';
 import {parseForestThoughtSeeds} from './book-forest-thought-seeds.mjs';
 import {validateForestDialogueCues} from './book-forest-dialogue-director.mjs';
 import {validateTwinNamePairs,validateTwinScenes} from './book-forest-twins.mjs';
+import {parseForestCharacterProfiles} from './book-forest-character-profiles.mjs';
 
 // The title is a discovery hint, NOT an API credential or spreadsheet ID.
 // The sheet ID, records and OAuth token never appear in the public source.
@@ -93,8 +94,10 @@ export async function loadPrivateForestDialogue(token,{fetchImpl=fetch}={}){
   sheetUrl.searchParams.append('ranges',"'ふたご名前'!A1:E40");
   sheetUrl.searchParams.append('ranges',"'ふたご会話'!A1:I200");
   sheetUrl.searchParams.append('ranges',"'思考の種'!A1:R190");
+  sheetUrl.searchParams.append('ranges',"'キャラ設定'!A1:L20");
+  sheetUrl.searchParams.append('ranges',"'話し方'!A1:K20");
   const data=await authorizedJson(sheetUrl.href,token,fetchImpl);
-  if(!Array.isArray(data.valueRanges)||data.valueRanges.length!==5)
+  if(!Array.isArray(data.valueRanges)||data.valueRanges.length!==7)
     throw Error('非公開の会話台本の形式が正しくありません');
   const catalog=parseStoryMemoryRows(data.valueRanges[0]?.values);
   const cues=parseForestDialogueRows(data.valueRanges[1]?.values);
@@ -102,5 +105,7 @@ export async function loadPrivateForestDialogue(token,{fetchImpl=fetch}={}){
   const twinNames=parseTwinNameRows(data.valueRanges[2]?.values);
   const twinScenes=parseTwinSceneRows(data.valueRanges[3]?.values);
   const thoughtSeeds=parseForestThoughtSeeds(data.valueRanges[4]?.values);
-  return {catalog,cues,twinNames,twinScenes,thoughtSeeds};
+  const characterProfiles=parseForestCharacterProfiles(data.valueRanges[5]?.values,
+    data.valueRanges[6]?.values);
+  return {catalog,cues,twinNames,twinScenes,thoughtSeeds,characterProfiles};
 }

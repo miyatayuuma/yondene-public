@@ -2,6 +2,7 @@
 // The generator is injected: this module never holds a key or makes a network call.
 import {createForestThoughtSession,forestThoughtPrompt,
   availableForestThoughtSeeds} from './book-forest-thought-seeds.mjs';
+import {forestCharacterVoiceGuide,validForestCharacterProfiles} from './book-forest-character-profiles.mjs';
 const CHARACTERS=new Set(['king','cat','kiki','jiji','skipper','zorori','ishishi','noshishi']);
 const VOICES={
   king:'王さま。自分のことは「余」。大げさで好奇心があり、子どもを歓迎する。',
@@ -15,7 +16,7 @@ const VOICES={
 };
 const SELF_NAMES={king:'王さま',kiki:'キキ',jiji:'ジジ',skipper:'スキッパー',
   zorori:'ゾロリ',ishishi:'イシシ',noshishi:'ノシシ'};
-const PROMPT_VERSION='forest-thought-exchange-v6';
+const PROMPT_VERSION='forest-thought-exchange-v7-persona';
 const GOODBYE={king:'続きはまた今度だ。達者でな！',kiki:'じゃあ、また森で会おうね！',
   jiji:'またね。気をつけて歩くんだよ。',skipper:'またいっしょに探検しよう！',
   zorori:'次はもっと面白い話をしてやるぜ！',ishishi:'じゃあな！また遊ぼうぜ！',
@@ -30,7 +31,14 @@ function validLine(characterId,text){
   // The non-speaking cat stays on approved hand-written action lines in v1.
   if(characterId==='cat')return false;
   const name=SELF_NAMES[characterId];
-  return !name||!new RegExp('^'+name+'[はが]').test(line);
+  if(name&&new RegExp('(?:^|[。！？ ])'+name+'[はが]').test(line))return false;
+  // A few unequivocal role swaps can be rejected without enforcing a catchphrase
+  // in every line. More subjective nuance remains an editorial acceptance test.
+  if(characterId==='jiji'&&/(?:私|わたし|あたし)(?:は|も|が|の)|(?:^|[。！？、])\s*そうね[。、]/u.test(line))return false;
+  if(['ishishi','noshishi'].includes(characterId)&&
+    /(?:おれさま|俺様|わたし|私|あたし|ぼく)(?:は|も|が|の|、)/u.test(line))return false;
+  if(characterId==='skipper'&&/(?:おれさま|俺様)(?:は|も|が|の|、)/u.test(line))return false;
+  return true;
 }
 export function validateLiveForestOutput(raw,{characterId,requireLine=false}={}){
   let data=raw;
@@ -45,27 +53,29 @@ export function validateLiveForestOutput(raw,{characterId,requireLine=false}={})
   return {text:requireLine?text:null,labels};
 }
 
-function promptFor({characterId,mode,npcLine,chosenLabel='',history=[],closing=false,topic=null}){
+function promptFor({characterId,mode,npcLine,chosenLabel='',history=[],closing=false,topic=null,
+  characterProfile=null}){
+  const guide=forestCharacterVoiceGuide(characterProfile);
   return {
-    task:mode==='opening'?'今日の本の出来事と問いから、NPCらしい短い第一声と返答候補を2個作る':
-      mode==='reply'?'いま選ばれた返答に自然に応じる短いNPCのひと言を作る':
+    task:mode==='opening'?'NPC本人らしい自然な第一声と返答候補2個を作る。今日の問いに無理に触れなくてよい':
+      mode==='reply'?'いま選ばれた返答にNPC本人らしくひと言応じる。説明や教訓は不要':
         '現在のNPCのひと言に対する短い返答候補を2個だけ作る',
-    npc:{id:characterId,voice:VOICES[characterId]},
+    npc:{id:characterId,voice:guide||VOICES[characterId]},
     context:{npcLine:mode==='opening'?'':clean(npcLine).slice(0,170),
       chosenLabel:clean(chosenLabel).slice(0,24),
       recentTurns:history.slice(-2),...(topic?{topic}:{})},
     constraints:[
       '会話は日本語。小学校低学年が読める短い言葉と簡単な漢字にする',
       '会話の相手は実在の子ども。家族、住所、学校、年齢、個人情報を質問しない',
-      '原作の出来事を勝手に作らない。わからないときは森の身近なものを話題にする',
-      '原作や台本から台詞を引用しない。説明文、あらすじ、教訓、長い回想にしない',
+      '原作の出来事を勝手に作らない。別作品の出来事をその場で目撃したと装わず、台詞引用・あらすじ・教訓にしない',
       '本人の感想・行動・気持ちを知っているふりをしない',
-      'NPCの返事は1〜2文で65字以内。前の発言を言い換えて繰り返さない',
+      '最優先はNPC本人らしい言葉、間、反応、行動。情報量や深い話、立派な気づきを全員に求めない',
+      'NPCの返事は1〜2文で65字以内。前の発言を繰り返さず、設定の解説や根拠の説明を会話に混ぜない',
       '返答候補は2個、各16字以内。ありきたりな相づちや無意味な質問を続けない',
       'ひとつの返答候補を選んでも、子どもの実際の信念や経験とはみなさない',
       characterId==='cat'?'ねこは絶対に人語を話さない':'NPC本人の視点で話す',
-      ...(topic?['作品の確認済み事実に触れ、その登場人物ならではの価値観の違いを自然ににじませる。抽象的な説教はしない',
-        '今日の問いは共有しても、他のNPCとの会話を聞いたと断定しない。前に選ばれた選択肢は子どもの信念ではない。再訪なら少し深める']:[]),
+      ...(topic?['今日の問い・事実は話題のヒントであり、必ず言及する義務はない。何気ない観察、短い冗談、言いよどみもよい',
+        '他のNPCの会話を聞いたと断定せず、同じ問いでも本人の関心や関係性から反応する。哲学や説教を語らない']:[]),
       ...(closing?['この一言で会話を終える。新たな話題を出さず自然に別れを告げる']:[])
     ],
     output:{format:'JSON',shape:{text:mode==='reply'||mode==='opening'?'NPCの発言（65字以内）':'省略可',
@@ -77,11 +87,11 @@ function promptFor({characterId,mode,npcLine,chosenLabel='',history=[],closing=f
 export function createForestLiveDialogueDirector({base,generate,storage=null,
   storageKey='forest-ai-local-v1',now=()=>Date.now(),dailyLimit=150,sessionLimit=3,
   maxReplies=2,startDelayMs=280,modelId='unknown',getBooks=()=>[],getCatalog=()=>[],
-  getSeeds=()=>[]}={}){
+  getSeeds=()=>[],getCharacterProfiles=()=>[],requireCharacterProfile=false}={}){
   if(!base||typeof base.start!=='function'||typeof base.select!=='function'||
     typeof generate!=='function')throw Error('base and generate are required');
   let pending=null,history=[],sessionCount=0,repliesThisSession=0,serial=0,closed=false,epoch=0,
-    inflight=null,activeThought=null;
+    inflight=null,activeThought=null,activeCharacterProfile=null;
   const thoughts=createForestThoughtSession({storage,storageKey:storageKey+':thought',now});
   const budgetKey=storageKey+':budget',logKey=storageKey+':log';
   function record(item){
@@ -107,7 +117,8 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
   async function request(characterId,mode,npcLine,chosenLabel='',closing=false,topic=null){
     if(!reserve())return null;
     if(mode==='opening'&&topic&&activeThought)thoughts.selected(activeThought,characterId);
-    const context=promptFor({characterId,mode,npcLine,chosenLabel,history,closing,topic});
+    const context=promptFor({characterId,mode,npcLine,chosenLabel,history,closing,topic,
+      characterProfile:activeCharacterProfile});
     const controller=new AbortController(),startedAt=now();
     inflight={controller,characterId,mode,startedAt};
     let timeout;
@@ -135,7 +146,12 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
   async function start(identity){
     const generation=++epoch;
     closed=false;pending=null;history=[];sessionCount=0;repliesThisSession=0;activeThought=null;
+    activeCharacterProfile=null;
     const characterId=identity?.characterId;
+    if(CHARACTERS.has(characterId)){
+      try{activeCharacterProfile=validForestCharacterProfiles(await getCharacterProfiles())
+        .find(profile=>profile.id===characterId)||null}catch{activeCharacterProfile=null}
+    }
     if(CHARACTERS.has(characterId)&&characterId!=='cat'){
       try{activeThought=thoughts.choose({books:await getBooks(),catalog:await getCatalog(),
         seeds:await getSeeds(),characterId})}catch{activeThought=null}
@@ -146,6 +162,9 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     if(!original||!CHARACTERS.has(characterId)||characterId==='cat'||
       original.sourceKind==='reflection'||
       !validLine(characterId,original.text))return original;
+    // Never swap an approved line for a generic LLM character when private
+    // personality material has not loaded in a real owner session.
+    if(requireCharacterProfile&&!activeCharacterProfile)return original;
     if(activeThought&&!activeThought.allowGeneration){
       return {text:'今日も会えたね。また明日、ちがう話をしよう。',
         choices:[],conversationComplete:true};
@@ -214,7 +233,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     },
     advance(identity){return base.advance?.(identity)||null},
     end(){
-      epoch++;closed=true;pending=null;history=[];activeThought=null;
+      epoch++;closed=true;pending=null;history=[];activeThought=null;activeCharacterProfile=null;
       if(inflight&&!inflight.controller.signal.aborted){
         record({event:'cancel-requested',characterId:inflight.characterId,mode:inflight.mode,
           modelId,promptVersion:PROMPT_VERSION,elapsedMs:Math.max(0,now()-inflight.startedAt)});

@@ -1,7 +1,6 @@
 // Optional, bounded runtime dialogue on top of approved local NPC scripts.
 // The generator is injected: this module never holds a key or makes a network call.
-import {createForestThoughtSession,forestThoughtPrompt,
-  availableForestThoughtSeeds} from './book-forest-thought-seeds.mjs';
+import {createForestThoughtSession} from './book-forest-thought-seeds.mjs';
 import {createForestDailyContextSession} from './book-forest-daily-context.mjs';
 import {validateForestDialogueCues} from './book-forest-dialogue-director.mjs';
 import {unlockedStoryMemories} from './book-forest-story-memory.mjs';
@@ -19,7 +18,7 @@ const VOICES={
 };
 const SELF_NAMES={king:'王さま',kiki:'キキ',jiji:'ジジ',skipper:'スキッパー',
   zorori:'ゾロリ',ishishi:'イシシ',noshishi:'ノシシ'};
-const PROMPT_VERSION='forest-daily-interaction-v9';
+const PROMPT_VERSION='forest-sourced-interaction-v10';
 const GOODBYE={king:'続きはまた今度だ。達者でな！',kiki:'じゃあ、また森で会おうね！',
   jiji:'またね。気をつけて歩くんだよ。',skipper:'またいっしょに探検しよう！',
   zorori:'次はもっと面白い話をしてやるぜ！',ishishi:'じゃあな！また遊ぼうぜ！',
@@ -80,6 +79,15 @@ function approvedVoiceExamples(cues,characterId,currentLine){
   return [...new Set(lines)].slice(0,2);
 }
 
+function promptScene(scene,sourceKind){
+  if(!scene)return {};
+  if(sourceKind!=='ambient')return {tone:scene.tone||''};
+  // The private memory ID stays on the device for revocation checks.
+  const {id,kind,focus,tone,theme,evidence,previousChoice,stage}=scene;
+  return {id,kind,focus,tone,theme,evidence,
+    ...(previousChoice?{previousChoice,stage}:{})};
+}
+
 function promptFor({characterId,mode,npcLine,chosenLabel='',history=[],closing=false,topic=null,
   characterProfile=null,voiceExamples=[],sourceKind='',dailyContext=null,recentLines=[]}){
   const guide=forestCharacterVoiceGuide(characterProfile);
@@ -93,8 +101,7 @@ function promptFor({characterId,mode,npcLine,chosenLabel='',history=[],closing=f
     context:{npcLine:clean(npcLine).slice(0,170),sourceKind,
       chosenLabel:clean(chosenLabel).slice(0,24),
       recentTurns:history.slice(-4),...(topic?{topic}:{}),
-      ...(dailyContext?{today:{scene:sourceKind==='ambient'?dailyContext.scene:
-        {tone:dailyContext.scene?.tone||''},
+      ...(dailyContext?{today:{scene:promptScene(dailyContext.scene,sourceKind),
         visitsToday:dailyContext.visitsToday,
         previousNpc:dailyContext.previousNpc,
         metNpcCount:dailyContext.metNpcCount,
@@ -105,7 +112,7 @@ function promptFor({characterId,mode,npcLine,chosenLabel='',history=[],closing=f
       '会話の相手は実在の子ども。家族、住所、学校、年齢、個人情報を質問しない',
       '原作の出来事を勝手に作らない。別作品の出来事をその場で目撃したと装わず、台詞引用・あらすじ・教訓にしない',
       '本人の感想・行動・気持ちを知っているふりをしない',
-      '最優先はNPC本人らしい言葉、間、反応、行動。情報量や深い話、立派な気づきを全員に求めない',
+      '最優先はNPC本人らしい言葉、間、反応、行動。情報量や深い話を求めず、思考の種から質問・教訓・立派な気づきを全員に強いない',
       '承認済み台詞例は話し方の参考。台詞を引用・コピーせず、人格や関係性だけを手掛かりにする',
       'NPCの返事は自然な一言〜2文で65字以内。前の発言を繰り返さず、設定の説明を会話に混ぜない',
       '返答候補は2個、各16字以内。ありきたりな相づちや無意味な質問を続けない',
@@ -128,8 +135,9 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
   if(!base||typeof base.start!=='function'||typeof base.select!=='function'||
     typeof generate!=='function')throw Error('base and generate are required');
   let pending=null,pendingScripted=null,history=[],sessionCount=0,repliesThisSession=0,serial=0,closed=false,epoch=0,
-    inflight=null,activeThought=null,activeCharacterProfile=null,activeVoiceExamples=[],activeDaily=null;
-  const thoughts=createForestThoughtSession({storage,storageKey:storageKey+':thought',now});
+    inflight=null,activeCharacterProfile=null,activeVoiceExamples=[],activeDaily=null,
+    displayedTopicKey='';
+  const thoughtUsage=createForestThoughtSession({storage,storageKey:storageKey+':thought',now});
   const daily=createForestDailyContextSession({storage,storageKey:storageKey+':daily',now});
   const budgetKey=storageKey+':budget',logKey=storageKey+':log';
   function record(item){
@@ -137,6 +145,12 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     const entries=Array.isArray(existing)?existing.slice(-299):[];
     entries.push({at:now(),...item});
     try{storage?.setItem?.(logKey,JSON.stringify(entries))}catch{}
+  }
+  function seedSelection(){
+    const scene=activeDaily?.scene;
+    if(!scene?.seedId)return null;
+    return {seed:{id:scene.seedId},day:new Date(now()+9*3600000).toISOString().slice(0,10),
+      visit:activeDaily.visitsToday,allowGeneration:true};
   }
   function reserve(){
     if(typeof storage?.getItem!=='function'||typeof storage?.setItem!=='function')return false;
@@ -156,7 +170,6 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
   async function request(characterId,mode,npcLine,chosenLabel='',closing=false,topic=null,
     sourceKind=''){
     if(!reserve())return null;
-    if(mode==='choices'&&topic&&activeThought)thoughts.selected(activeThought,characterId);
     const previousLogs=readJson(storage,logKey,[]);
     const recentLines=(Array.isArray(previousLogs)?previousLogs:[]).filter(entry=>entry?.characterId===characterId&&
       ['generated-opening','generated-reply'].includes(entry.event)&&typeof entry.text==='string')
@@ -203,7 +216,8 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
   async function start(identity){
     const generation=++epoch;
     closed=false;pending=null;pendingScripted=null;history=[];sessionCount=0;
-    repliesThisSession=0;activeThought=null;
+    repliesThisSession=0;
+    displayedTopicKey='';
     activeCharacterProfile=null;activeVoiceExamples=[];
     activeDaily=null;
     const characterId=identity?.characterId;
@@ -211,16 +225,19 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
       try{activeCharacterProfile=validForestCharacterProfiles(await getCharacterProfiles())
         .find(profile=>profile.id===characterId)||null}catch{activeCharacterProfile=null}
     }
-    if(CHARACTERS.has(characterId)&&characterId!=='cat'){
-      try{activeThought=thoughts.choose({books:await getBooks(),catalog:await getCatalog(),
-        seeds:await getSeeds(),characterId})}catch{activeThought=null}
-    }
-    // A shared daily seed must not force every NPC to discuss the same book.
-    // Only an independently chosen, matching authored story cue may use it.
     const original=await base.start(identity);
     if(closed||generation!==epoch)return null;
     if(original&&identity?.characterId){
-      activeDaily=daily.visit(identity.characterId);
+      try{
+        const [books,catalog,seeds,cues]=await Promise.all([
+          getBooks(),getCatalog(),getSeeds(),getCues()]);
+        if(closed||generation!==epoch)return null;
+        activeDaily=daily.visit(identity.characterId,{books,catalog,seeds,cues,
+          sourceKind:original.sourceKind,sourceMemoryId:original.sourceMemoryId});
+      }catch{
+        if(closed||generation!==epoch)return null;
+        activeDaily=daily.visit(identity.characterId);
+      }
     }
     if(!original||!CHARACTERS.has(characterId)||characterId==='cat'||
       original.sourceKind==='reflection'||
@@ -233,10 +250,13 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     catch{activeVoiceExamples=[]}
     if(startDelayMs>0)await new Promise(resolve=>setTimeout(resolve,startDelayMs));
     if(closed||generation!==epoch)return null;
-    const useThought=Boolean(activeThought?.seed?.memoryId&&
-      original.sourceKind==='story'&&original.sourceMemoryId===activeThought.seed.memoryId);
-    const topic=useThought?forestThoughtPrompt(activeThought,characterId):null;
+    const source=activeDaily?.scene;
+    const useSource=Boolean(source?.evidence==='reviewed'&&
+      original.sourceMemoryId&&original.sourceMemoryId===source.memoryId);
+    const topic=useSource?{fact:source.focus.slice(0,240),theme:source.theme||''}:null;
     const mode=original.sourceKind==='ambient'?'opening':'choices';
+    const seed=seedSelection();
+    if(seed)thoughtUsage.selected(seed,characterId);
     const result=await request(characterId,mode,original.text,'',false,topic,
       original.sourceKind||'');
     if(closed||generation!==epoch)return null;
@@ -245,7 +265,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     history.push({npc:clean(spoken).slice(0,150)});
     record({event:mode==='opening'?'generated-opening':'generated-choices',characterId,
       text:spoken,choices:result.labels,
-      ...(useThought?{thoughtSeedId:activeThought.seed.id}:{}),
+      dailyTopicKind:source?.kind||'ambient',
       sourceKind:original.sourceKind||'unknown',modelId,promptVersion:PROMPT_VERSION,elapsedMs:result.elapsedMs});
     const fallbackChoiceId=original.choices?.find(choice=>choice.id==='another-topic')?.id||
       original.choices?.find(choice=>typeof choice?.id==='string')?.id||'';
@@ -254,7 +274,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     return decorate(characterId,spoken,result.labels,{fallbackChoiceId,
       sourceKind:original.sourceKind||'',sourceMemoryId:original.sourceMemoryId||'',
       relayChoice,
-      ...(useThought?{thoughtSeedId:activeThought.seed.id}:{})});
+      ...(source?.evidence==='reviewed'?{dailySourceMemoryId:source.memoryId}:{})});
   }
   async function select({characterId,choiceId}={}){
     const generation=epoch;
@@ -269,23 +289,14 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     }
     pending=null;
     const label=current.choices.find(choice=>choice.id===choiceId).label;
-    if(current.sourceMemoryId){
+    if(current.sourceMemoryId||current.dailySourceMemoryId){
       try{
         const authorized=unlockedStoryMemories(await getBooks(),await getCatalog());
-        if(!authorized.some(memory=>memory.id===current.sourceMemoryId))
+        if(!authorized.some(memory=>memory.id===(current.sourceMemoryId||
+          current.dailySourceMemoryId)))
           return {text:GOODBYE[characterId]||'また森で会おうね。',choices:[],
             conversationComplete:true};
       }catch{return {text:GOODBYE[characterId]||'また森で会おうね。',choices:[],conversationComplete:true}}
-    }
-    if(current.thoughtSeedId&&activeThought?.seed){
-      try{
-        const authorized=availableForestThoughtSeeds({books:await getBooks(),
-          catalog:await getCatalog(),seeds:await getSeeds()});
-        if(!authorized.some(seed=>seed.id===activeThought.seed.id)){
-          return {text:GOODBYE[characterId]||'また森で会おうね。',choices:[],
-            conversationComplete:true};
-        }
-      }catch{return {text:'続きはまた今度ね。',choices:[],conversationComplete:true}}
     }
     daily.selected(characterId,label);
     const scriptedRelay=current.relayChoice?.id===choiceId;
@@ -295,10 +306,10 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
       return scripted(result,characterId);
     }
     history.push({playerChoice:label});history=history.slice(-4);
-    if(current.thoughtSeedId&&activeThought)thoughts.noteChoice(activeThought,characterId,label);
     record({event:'selected-offered-choice',characterId,label});
     const closing=repliesThisSession+1>=maxReplies;
-    const topic=current.thoughtSeedId?forestThoughtPrompt(activeThought,characterId):null;
+    const topic=current.sourceMemoryId&&activeDaily?.scene?.memoryId===current.sourceMemoryId?
+      {fact:activeDaily.scene.focus.slice(0,240),theme:activeDaily.scene.theme||''}:null;
     const generated=await request(characterId,'reply',current.text,label,closing,topic,
       current.sourceKind);
     if(closed||generation!==epoch)return null;
@@ -316,27 +327,32 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     history.push({npc:generated.text});history=history.slice(-4);
     repliesThisSession++;
     record({event:'generated-reply',characterId,text:generated.text,
-      ...(current.thoughtSeedId?{thoughtSeedId:current.thoughtSeedId}:{}),
+      dailyTopicKind:activeDaily?.scene?.kind||'ambient',
       choices:closing?[]:generated.labels,closing,modelId,promptVersion:PROMPT_VERSION,
       elapsedMs:generated.elapsedMs,turn:repliesThisSession});
     if(closing){pending=null;return {text:generated.text,choices:[],conversationComplete:true}}
     return decorate(characterId,generated.text,generated.labels,{
       fallbackChoiceId:current.fallbackChoiceId,sourceKind:current.sourceKind,
       sourceMemoryId:current.sourceMemoryId,
-      ...(current.thoughtSeedId?{thoughtSeedId:current.thoughtSeedId}:{})});
+      dailySourceMemoryId:current.dailySourceMemoryId});
   }
   return {
     start,select,
     onDisplayed(result,identity){
-      if(activeThought?.seed?.id&&result?.thoughtSeedId===activeThought.seed.id&&
-        identity?.characterId&&identity.characterId===pending?.characterId){
-        thoughts.displayed(activeThought,identity.characterId);
-      }
+      const scene=activeDaily?.scene;
+      if(scene?.evidence!=='reviewed'||!pending||
+        pending.characterId!==identity?.characterId||
+        result?.text!==pending.text||displayedTopicKey===scene.id)return;
+      displayedTopicKey=scene.id;
+      record({event:'daily-topic-displayed',characterId:identity.characterId,
+        topicKey:scene.id,kind:scene.kind,promptVersion:PROMPT_VERSION});
+      const seed=seedSelection();
+      if(seed)thoughtUsage.displayed(seed,identity.characterId);
     },
     advance(identity){return base.advance?.(identity)||null},
     end(){
       epoch++;closed=true;pending=null;pendingScripted=null;history=[];
-      activeThought=null;activeCharacterProfile=null;
+      activeCharacterProfile=null;
       activeVoiceExamples=[];
       activeDaily=null;
       if(inflight&&!inflight.controller.signal.aborted){

@@ -26,7 +26,9 @@ test('Firebase JWT verification checks RS256 signature, issuer, expiry and allow
   }
 });
 
-const prompt={task:'返答候補を作る',npc:{id:'kiki',voice:'元気'},context:{npcLine:'いい天気だね。',
+const prompt={mode:'choices',closing:false,task:'返答候補を作る',
+  npc:{id:'kiki',voice:'元気',approvedExamples:['荷物、気をつけてね。']},
+  context:{npcLine:'いい天気だね。',
   chosenLabel:'',recentTurns:[]},constraints:['短い日本語にする']};
 function request(path='/dialogue',{
   method='POST',headers={},body={prompt},from=origin}={}){
@@ -71,4 +73,18 @@ test('Worker fails closed without owner configuration and handles preflight and 
   const invalid=await handleRequest(request('/dialogue',{body:{prompt:{...prompt,npc:{id:'cat',voice:'ねこ'}}}}),
     liveEnv,{verifyToken:async()=>ownerUid});
   assert.equal(invalid.status,400);
+});
+
+test('Worker normalizes three offered choices and accepts a closing without buttons',async()=>{
+  const outputs=[{choices:['風の音を聞く','橋を見に行く','もう少し話す']},
+    {text:'じゃあ、またね。',choices:[]}];
+  const env={OWNER_UID:ownerUid,FIREBASE_PROJECT_ID:projectId,AI:{
+    run:async()=>({choices:[{message:{content:JSON.stringify(outputs.shift())}}]})}};
+  const verifyToken=async()=>ownerUid;
+  const first=await handleRequest(request(),env,{verifyToken});
+  assert.deepEqual(await first.json(),{choices:['風の音を聞く','橋を見に行く']});
+  const closing=await handleRequest(request('/dialogue',{body:{prompt:{...prompt,
+    mode:'reply',closing:true}}}),env,{verifyToken});
+  assert.equal(closing.status,200);
+  assert.deepEqual(await closing.json(),{text:'じゃあ、またね。',choices:[]});
 });

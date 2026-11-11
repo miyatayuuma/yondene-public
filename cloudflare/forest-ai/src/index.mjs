@@ -68,24 +68,36 @@ export async function verifyOwnerIdToken(token,{projectId,ownerUid,keys=signingK
 function validPrompt(prompt){
   return prompt&&typeof prompt==='object'&&!Array.isArray(prompt)&&
     typeof prompt.task==='string'&&prompt.task.length<100&&
+    (prompt.mode===undefined||['choices','reply'].includes(prompt.mode))&&
+    (prompt.closing===undefined||typeof prompt.closing==='boolean')&&
     NPCS.has(prompt.npc?.id)&&typeof prompt.npc.voice==='string'&&
+    prompt.npc.voice.length<=2500&&
+    (prompt.npc.approvedExamples===undefined||(Array.isArray(prompt.npc.approvedExamples)&&
+      prompt.npc.approvedExamples.length<=2&&prompt.npc.approvedExamples.every(line=>
+        typeof line==='string'&&line.length<=100)))&&
     typeof prompt.context?.npcLine==='string'&&
     Array.isArray(prompt.context.recentTurns)&&prompt.context.recentTurns.length<=4&&
     Array.isArray(prompt.constraints)&&prompt.constraints.length<=12;
 }
-function readCompletion(result){
+function readCompletion(result,{closing=false}={}){
   let content=result?.choices?.[0]?.message?.content??result?.response;
   if(typeof content!=='string'||content.length>3000)throw Error('Invalid model output');
   content=content.trim().replace(/^```(?:json)?\s*/iu,'').replace(/\s*```$/u,'');
   const parsed=JSON.parse(content);
+  if(closing){
+    if(typeof parsed?.text!=='string'||parsed.text.length>90)throw Error('Invalid closing line');
+    return {text:parsed.text,choices:[]};
+  }
   if(!Array.isArray(parsed?.choices)||parsed.choices.length<2||parsed.choices.length>3)
     throw Error('Invalid model output');
   const choices=parsed.choices.map(choice=>typeof choice==='string'?choice:choice?.label);
   if(choices.some(choice=>typeof choice!=='string'||choice.length<2||choice.length>24))
     throw Error('Invalid model choices');
-  if(parsed.text!==undefined&&(typeof parsed.text!=='string'||parsed.text.length>150))
+  if(parsed.text!==undefined&&(typeof parsed.text!=='string'||parsed.text.length>90))
     throw Error('Invalid model text');
-  return {choices,...(typeof parsed.text==='string'?{text:parsed.text}:{})};
+  // Gemma may supply a third button despite the requested two. Keep its valid
+  // NPC line and normalize the UI-only choices instead of discarding the turn.
+  return {choices:choices.slice(0,2),...(typeof parsed.text==='string'?{text:parsed.text}:{})};
 }
 
 export async function handleRequest(request,env,{verifyToken=verifyOwnerIdToken}={}){
@@ -118,14 +130,15 @@ export async function handleRequest(request,env,{verifyToken=verifyOwnerIdToken}
       messages:[{role:'system',content:
         'あなたは児童向け「本の森」で登場人物の短い即興会話を助ける。'+
         '子どもの個人情報を質問しない。物語にない出来事を断定しない。'+
-        '日本語で自然に短く話す。本人の声を守り、説明文を書かない。'+
-        '必ずJSONオブジェクトだけを返す。返答候補choicesは2〜3件、各24字以内。'+
-        'taskが返答作成ならNPCのひと言textも150字以内で返す。'},
+        '日本語で自然に短く話す。人物設定と承認済み台詞例から本人の声を守り、説明文を書かない。'+
+        '必ずJSONオブジェクトだけを返す。mode=choicesならtextを省略し、choicesを2件、各16字以内。'+
+        'mode=replyならNPC本人のひと言textを65字以内で返す。'+
+        'closing=trueなら新たな質問をせず、choicesは空配列とする。'},
         {role:'user',content:JSON.stringify(body.prompt)}],
       max_completion_tokens:320,temperature:.75,
       chat_template_kwargs:{enable_thinking:false}
     });
-    return json(readCompletion(result),200,origin);
+    return json(readCompletion(result,{closing:body.prompt.closing===true}),200,origin);
   }catch(error){
     const limited=error?.status===429||/quota|rate limit|neurons|exceeded/iu.test(String(error?.message||''));
     return json({error:limited?'AI quota reached':'AI unavailable'},limited?429:502,origin);

@@ -1,55 +1,134 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {forestDailyScene,createForestDailyContextSession} from './book-forest-daily-context.mjs';
+import {eligibleForestDailyTopics,createForestDailyContextSession} from './book-forest-daily-context.mjs';
 
 function storage(){
   const values=new Map();
   return {getItem:key=>values.get(key)||null,
     setItem:(key,value)=>values.set(key,value),values};
 }
+const day=Date.UTC(2026,10,11,13);
+const books=[{id:'book-k',status:'read',finishedAt:'2026-11-10'},
+  {id:'book-z',status:'read',finishedAt:'2026-11-08'}];
+const catalog=[
+  {schemaVersion:1,id:'mem-k',bookId:'book-k',characters:'kiki,ジジ',
+    text:'キキが店でパンを選んだ',tags:'パン、配達',spoilerLevel:1,
+    evidenceStatus:'approved',confidence:'high',sourceUrl:'https://example.org/k'},
+  {schemaVersion:1,id:'mem-z',bookId:'book-z',characters:'ゾロリ,イシシ',
+    text:'ゾロリが紙の仕掛けを考えた',tags:'作戦',spoilerLevel:1,
+    evidenceStatus:'approved',confidence:'high',sourceUrl:'https://example.org/z'},
+  {schemaVersion:1,id:'mem-u',bookId:'book-no',characters:'キキ',
+    text:'未読の物語',spoilerLevel:1,evidenceStatus:'approved',
+    confidence:'high',sourceUrl:'https://example.org/u'}
+];
+const seeds=[
+  {id:'seed-k',bookId:'book-k',memoryId:'mem-k',fact:'キキが店でパンを選んだ',
+    tags:'配達',question:'大切なのは何？',contrast:'善悪',spoiler:1,
+    sourceUrl:'https://example.org/k',status:'使用可',selectedCount:0,displayedCount:0},
+  {id:'seed-z',bookId:'book-z',memoryId:'mem-z',fact:'ゾロリが紙の仕掛けを考えた',
+    tags:'作戦',question:'本当の勇気とは？',contrast:'善悪',spoiler:1,
+    sourceUrl:'https://example.org/z',status:'使用可',selectedCount:0,displayedCount:0}
+];
+const cues=[{schemaVersion:1,id:'z-story',characterId:'zorori',kind:'story',
+  memoryId:'mem-z',approval:'approved',text:'おれさまの作戦だ！'}];
+const input={books,catalog,seeds,cues};
 
-test('every character has a different context, which rotates predictably the next day',()=>{
-  const today=Date.UTC(2026,10,11,13);
-  for(const npc of ['king','kiki','jiji','skipper','zorori','ishishi','noshishi']){
-    const a=forestDailyScene(npc,today),b=forestDailyScene(npc,today+86400000);
-    assert.ok(a.focus&&a.tone);
-    assert.notEqual(a.id,b.id,`${npc} must have new subject tomorrow`);
-    assert.notEqual(a.id,forestDailyScene(npc,today+6*86400000).id,
-      `${npc} must also have a different scene atmosphere next week`);
-    assert.deepEqual(forestDailyScene(npc,today),a);
-  }
-  assert.notEqual(forestDailyScene('kiki',today).focus,forestDailyScene('jiji',today).focus);
-  assert.equal(forestDailyScene('cat',today),null,'cat never generates human dialogue');
+test('topics draw only from approved, read episodes fitting that specific character',()=>{
+  const kiki=eligibleForestDailyTopics({characterId:'kiki',...input,now:day});
+  const zorori=eligibleForestDailyTopics({characterId:'zorori',...input,now:day});
+  const ishishi=eligibleForestDailyTopics({characterId:'ishishi',...input,now:day});
+  assert.deepEqual(kiki.map(item=>item.kind),['seed']);
+  assert.ok(kiki[0].fact.includes('パン'));
+  assert.deepEqual(zorori.map(item=>item.memoryId),['mem-z']);
+  assert.deepEqual(ishishi.map(item=>item.memoryId),['mem-z']);
+  assert.equal(eligibleForestDailyTopics({characterId:'skipper',...input}).length,0);
+  assert.equal(eligibleForestDailyTopics({characterId:'cat',...input}).length,0);
+  assert.ok(!JSON.stringify(kiki).includes('大切なのは何'),
+    'the philosophical question must not be sent as a daily topic');
+  assert.ok(!JSON.stringify(kiki).includes('善悪'));
 });
 
-test('meeting a related NPC after selecting a response carries only that game choice',()=>{
-  const local=storage(),time=Date.UTC(2026,10,11,13);
-  const scenes=createForestDailyContextSession({storage:local,now:()=>time});
-  const kiki=scenes.visit('kiki');
-  assert.equal(kiki.relatedEncounter,null);
-  scenes.selected('kiki','ジジと話してみる');
-  const jiji=scenes.visit('jiji');
-  assert.equal(jiji.previousNpc,'kiki');
-  assert.deepEqual(jiji.relatedEncounter,{npc:'kiki',
-    selectedLabel:'ジジと話してみる',scene:kiki.scene.id});
-  const zorori=scenes.visit('zorori');
-  assert.equal(zorori.relatedEncounter,null,'unrelated conversation is not invented');
-  assert.equal(zorori.metNpcCount,3);
-  const json=local.getItem('forest-daily-context-v1');
-  assert.equal(json.includes('ジジと話してみる'),true);
-  assert.equal(json.includes('bookId'),false);
-  assert.equal(json.includes('childReflection'),false);
+test('no fixed 24-day subject: no eligible source means honest ordinary conversation',()=>{
+  const session=createForestDailyContextSession({storage:storage(),now:()=>day});
+  const scene=session.visit('skipper',input).scene;
+  assert.equal(scene.kind,'ambient');
+  assert.equal(scene.evidence,'imagined');
+  assert.equal(scene.memoryId,undefined);
 });
 
-test('daily encounter continuity resets on the Japanese calendar day',()=>{
-  const local=storage();let timestamp=Date.UTC(2026,10,11,14);
-  const scenes=createForestDailyContextSession({storage:local,now:()=>timestamp});
-  scenes.visit('zorori');scenes.selected('zorori','これがいい');
-  const sameDay=scenes.visit('ishishi');
-  assert.equal(sameDay.relatedEncounter.selectedLabel,'これがいい');
+test('source-based themes stay stable within the day and never leak book IDs',()=>{
+  const local=storage(),session=createForestDailyContextSession({storage:local,
+    now:()=>day,storageKey:'daily-v2'});
+  const a=session.visit('kiki',input);
+  const b=session.visit('kiki',input);
+  assert.equal(a.scene.id,b.scene.id);
+  assert.equal(a.scene.evidence,'reviewed');
+  assert.equal(b.visitsToday,2);
+  const stored=local.getItem('daily-v2');
+  assert.ok(!stored.includes('book-k'));
+  assert.ok(!stored.includes('mem-k'));
+  assert.ok(!stored.includes('childReflection'));
+});
+
+test('a single eligible seed is not forced every day while the three-day cooldown runs',()=>{
+  const local=storage();let timestamp=day;
+  const session=createForestDailyContextSession({storage:local,now:()=>timestamp});
+  assert.equal(session.visit('kiki',input).scene.kind,'seed');
   timestamp+=86400000;
-  const followingDay=scenes.visit('ishishi');
-  assert.equal(followingDay.visitsToday,1);
-  assert.equal(followingDay.relatedEncounter,null);
-  assert.notEqual(followingDay.scene.id,sameDay.scene.id);
+  assert.equal(session.visit('kiki',input).scene.kind,'ambient');
+  timestamp+=86400000;
+  assert.equal(session.visit('kiki',input).scene.kind,'ambient');
+});
+
+test('the next day can continue a selected sourced topic, but not indefinitely',()=>{
+  const local=storage();let timestamp=day;
+  const session=createForestDailyContextSession({storage:local,
+    now:()=>timestamp});
+  const initial=session.visit('kiki',input);
+  assert.equal(initial.scene.evidence,'reviewed');
+  session.selected('kiki','見にいこう');
+  timestamp+=86400000;
+  const follow=session.visit('kiki',input);
+  assert.equal(follow.scene.kind,'continuation');
+  assert.equal(follow.scene.previousChoice,'見にいこう');
+  assert.equal(follow.scene.stage,2);
+  session.selected('kiki','またね');
+  timestamp+=86400000;
+  const third=session.visit('kiki',input);
+  assert.notEqual(third.scene.kind,'continuation',
+    'a polite goodbye or later choice should end the branch');
+});
+
+test('unreading a book revokes an active daily source, including follow-ups',()=>{
+  const local=storage();let timestamp=day;
+  const session=createForestDailyContextSession({storage:local,
+    now:()=>timestamp});
+  session.visit('kiki',input);session.selected('kiki','行ってみる');
+  timestamp+=86400000;
+  const revoked=session.visit('kiki',{...input,books:[{...books[0],status:'unread'},books[1]]});
+  assert.equal(revoked.scene.kind,'ambient');
+  assert.equal(revoked.scene.memoryId,undefined);
+});
+
+test('related characters inherit only the game choice; unrelated conversations do not',()=>{
+  const local=storage(),session=createForestDailyContextSession({storage:local,
+    now:()=>day});
+  session.visit('kiki',input);
+  session.selected('kiki','ジジと話す');
+  const jiji=session.visit('jiji',input);
+  assert.equal(jiji.previousNpc,'kiki');
+  assert.equal(jiji.relatedEncounter.npc,'kiki');
+  assert.equal(jiji.relatedEncounter.selectedLabel,'ジジと話す');
+  const zorori=session.visit('zorori',input);
+  assert.equal(zorori.relatedEncounter,null);
+  assert.equal(zorori.metNpcCount,3);
+});
+
+test('authored story opening always points at its own reviewed memory',()=>{
+  const local=storage(),session=createForestDailyContextSession({storage:local,now:()=>day});
+  const result=session.visit('zorori',{...input,sourceKind:'story',sourceMemoryId:'mem-z'});
+  assert.equal(result.scene.memoryId,'mem-z');
+  assert.equal(result.scene.evidence,'reviewed');
+  const greeting=session.visit('kiki',{...input,sourceKind:'meet'});
+  assert.equal(greeting.scene.kind,'ambient');
 });

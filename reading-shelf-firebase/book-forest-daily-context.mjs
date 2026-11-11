@@ -1,122 +1,190 @@
-// Small, character-specific happenings in the forest, not new canonical book facts.
-// A scene rotates each day in Japan, while chosen buttons provide short-lived
-// continuity between related NPCs. No child reflections or book IDs are stored.
-const SCENES={
-  king:[
-    ['こみち','ねこが選びそうな小道を、余も先回りして見つけたい','得意げだが、ねこの判断を頼りにしている'],
-    ['おちば','落ち葉を見て、王冠より立派な飾りを思いつく','威厳を保とうとして少し浮かれる'],
-    ['いっぷく','森の散歩にも休み時間がいると言い張る','ねこと一緒なら何でも楽しい'],
-    ['しごと','森の道案内を王さまの仕事にできないか考える','大仕事のように言うが不慣れ'],
-    ['あいさつ','すれ違う相手への立派なあいさつを考えている','見栄を張りながら親切'],
-    ['ひみつ','ねこが黙って見つめているものが気になる','知ったかぶりのあとで素直に聞く']
-  ],
-  kiki:[
-    ['まがりかど','いつもと違う道を選ぶと何が見えるか気になる','軽やかで好奇心旺盛、言葉は気取らない'],
-    ['かぜ','ほうきに乗るときの風と、歩くときの風を比べている','自分の経験から話す'],
-    ['ひとやすみ','急がない配達も悪くないかもしれないと思う','働き者だが少し休みたい'],
-    ['とどけもの','誰に何を届けたら喜ぶか想像している','相手を気にかけるが説教しない'],
-    ['ジジ','ジジが先に見つけそうなものを探している','親しい相棒との気安い距離'],
-    ['まよい','小道の分かれ目で少し迷っている','決める前に考えることもある']
-  ],
-  jiji:[
-    ['あしおと','遠くの足音を聞いて誰が来たか考える','短く観察して軽口を添える'],
-    ['ひなた','日なたと木陰のどちらで休むか迷っている','猫らしく実利的でゆったり'],
-    ['キキ','キキが急いでいないか少し気にしている','心配は冗談に紛らせる'],
-    ['におい','風が運んできた匂いの正体を探っている','先に気づいたことを得意げに言う'],
-    ['かくれみち','誰も見ない細い道を知っていそうな顔をする','全部は説明しない'],
-    ['ねむけ','眠るにはまだ早いと言い訳している','小さな皮肉と眠そうな間']
-  ],
-  skipper:[
-    ['はっぱ','形の違う葉っぱを静かに見比べている','無理に盛り上げず、見たことだけ言う'],
-    ['おと','風が止んだあとの森の音を聞いている','短い言葉と沈黙を許す'],
-    ['きのみ','木の実が落ちた場所を覚えておきたい','慎重な好奇心'],
-    ['あしあと','地面の小さな跡が気になる','決めつけず、確かめてみる'],
-    ['こかげ','木陰で見逃していた景色に気づく','観察が先で感想は少ない'],
-    ['ふたご','ふたごがさっきどこへ行ったか少し気にしている','親しみはあるが話しすぎない']
-  ],
-  zorori:[
-    ['さくせん','森で誰も考えないような大作戦をひらめいたつもり','自信満々だがちょっと抜けている'],
-    ['しかけ','落ち葉を使ってびっくりする仕掛けを考える','悪だくみは無害で大げさ'],
-    ['めいろ','森の道を迷路に変えたら面白いと考える','自慢したくてうずうず'],
-    ['おたから','普通の小石を大発見のように扱う','おれさま流の芝居がかった調子'],
-    ['イシシ','イシシに見せたい作戦を思いつく','相棒をからかうが見捨てない'],
-    ['ノシシ','ノシシがびっくりしそうな仕掛けを考える','勢いが先で結果はまだわからない']
-  ],
-  ishishi:[
-    ['おやつ','木陰で食べるおやつを真剣に選ぶ','食いしん坊で正直'],
-    ['メロンパン','メロンパンみたいな形のものを探す','思いつくとすぐ口にする'],
-    ['ノシシ','ノシシの分もおやつを残しておこうと考える','兄らしく気にかける'],
-    ['せんせ','ゾロリせんせの作戦にわくわくしている','期待が先に走る'],
-    ['きのみ','木の実を拾って食べられるか気になる','うっかりしても愛嬌がある'],
-    ['かけっこ','おやつをめぐって走り出しそう','元気で単純、深い教訓は言わない']
-  ],
-  noshishi:[
-    ['おにぎり','森でおにぎりを食べるならどこがいいか考える','のんびりしているが好奇心は強い'],
-    ['イシシ','イシシが何を見つけたか気になっている','弟らしく頼りにもからかいもする'],
-    ['せんせ','ゾロリせんせは今度どんなことを思いつくか考える','せんせへの信頼が素直に出る'],
-    ['こいし','形の変わった小石を拾って見せたい','子どものように目が輝く'],
-    ['みちくさ','寄り道の途中で面白いものを探す','ちょっとゆっくりした調子'],
-    ['はらぺこ','おなかが鳴って、何の音か少しごまかす','食べ物好きだがイシシの真似ではない']
-  ]
+// A character's daily interest comes from a reviewed episode or thought seed,
+// with ordinary idle conversation when no relevant source is available.
+// Never let a shared philosophical question replace the character's personality.
+import {unlockedStoryMemories} from './book-forest-story-memory.mjs';
+import {availableForestThoughtSeeds} from './book-forest-thought-seeds.mjs';
+
+const DAY_MS=86400000, MAX_EVENTS=24, MAX_RECENT=8;
+const ACTOR_NAMES={
+  king:['king','王さま','王様'],cat:['cat','ねこ'],
+  kiki:['kiki','キキ'],jiji:['jiji','ジジ'],
+  skipper:['skipper','スキッパー'],twins:['twins','ふたご','双子'],
+  zorori:['zorori','ゾロリ'],ishishi:['ishishi','イシシ'],
+  noshishi:['noshishi','ノシシ']
 };
 const RELATIONS={king:['cat'],cat:['king'],kiki:['jiji'],jiji:['kiki'],
   skipper:['twins'],twins:['skipper'],zorori:['ishishi','noshishi'],
   ishishi:['zorori','noshishi'],noshishi:['zorori','ishishi']};
-const MOMENTS=[
-  ['みち','森の道を歩く途中、ふと立ち止まった'],
-  ['こかげ','木陰でちょっと寄り道をしている'],
-  ['おと','森のかすかな音に耳をすませている'],
-  ['わかれみち','道の分かれ目で一息ついている']
-];
-const DAY_MS=86400000;
 const dayJapan=timestamp=>new Date(timestamp+9*3600000).toISOString().slice(0,10);
-const clean=value=>String(value??'').trim().replace(/\s+/gu,' ').slice(0,32);
+const dayNumber=day=>Math.floor(Date.parse(day+'T00:00:00Z')/DAY_MS);
+const clean=(value,max=32)=>String(value??'').trim().replace(/\s+/gu,' ').slice(0,max);
+function hash(value){
+  let n=2166136261;
+  for(const char of String(value))n=Math.imul(n^char.codePointAt(0),16777619);
+  return n>>>0;
+}
 function read(storage,key){try{return JSON.parse(storage?.getItem?.(key)||'null')||{}}catch{return {}}}
 function write(storage,key,value){try{storage?.setItem?.(key,JSON.stringify(value))}catch{}}
-
-export function forestDailyScene(characterId,now=Date.now()){
-  const scenes=SCENES[characterId];
-  if(!scenes)return null;
-  const dayNumber=Math.floor((now+9*3600000)/DAY_MS);
-  // A step of one guarantees tomorrow's subject differs from today's.
-  const offset=Object.keys(SCENES).indexOf(characterId)*3;
-  const turn=dayNumber+offset;
-  const [id,focus,tone]=scenes[turn%scenes.length];
-  const [momentId,moment]=MOMENTS[Math.floor(turn/scenes.length)%MOMENTS.length];
-  return {id:id+'-'+momentId,focus,tone,moment,day:dayJapan(now)};
+function actorsMatch(memory,characterId){
+  const actors=String(memory.characters||'').split(/[\s,，、|;；]+/u).filter(Boolean);
+  return actors.some(actor=>(ACTOR_NAMES[characterId]||[]).includes(actor));
+}
+function recentReadBonus(book,day){
+  const finished=String(book?.finishedAt||'').slice(0,10);
+  if(!/^\d{4}-\d{2}(?:-\d{2})?$/u.test(finished))return 0;
+  const exact=finished.length===7?finished+'-01':finished;
+  const age=dayNumber(day)-dayNumber(exact);
+  return age>=0&&age<=21?22:0;
 }
 
+/** All facts are rechecked against the current read-status snapshot on every visit. */
+export function eligibleForestDailyTopics({characterId,books=[],catalog=[],seeds=[],cues=[],now=Date.now()}={}){
+  if(!ACTOR_NAMES[characterId]||characterId==='cat'||characterId==='twins')return [];
+  const day=dayJapan(now),memories=unlockedStoryMemories(books,catalog);
+  const usable=availableForestThoughtSeeds({books,catalog,seeds});
+  const authored=new Set((Array.isArray(cues)?cues:[])
+    .filter(cue=>cue?.approval==='approved'&&cue.kind==='story'&&
+      cue.characterId===characterId&&typeof cue.memoryId==='string')
+    .map(cue=>cue.memoryId));
+  const bookById=new Map((Array.isArray(books)?books:[]).map(book=>[book.id,book]));
+  const result=[];
+  for(const memory of memories){
+    const affinity=authored.has(memory.id)?3:actorsMatch(memory,characterId)?2:0;
+    if(!affinity)continue; // Do not make characters recount unrelated books.
+    const relatedSeeds=usable.filter(seed=>seed.memoryId===memory.id);
+    const shared={memoryId:memory.id,affinity,
+      freshBonus:recentReadBonus(bookById.get(memory.bookId),day)};
+    if(relatedSeeds.length){
+      for(const seed of relatedSeeds){
+        result.push({...shared,key:'seed-'+hash(seed.id).toString(16),seedId:seed.id,
+          kind:'seed',fact:clean(seed.fact,220),theme:clean(seed.tags,60),
+          sourceUse:seed.displayedCount*2+seed.selectedCount});
+      }
+    }else{
+      result.push({...shared,key:'memory-'+hash(memory.id).toString(16),
+        kind:'memory',fact:clean(memory.text,220),theme:clean(memory.tags,60),
+        sourceUse:0});
+    }
+  }
+  return result;
+}
+
+const idleScene={
+  id:'daily-idle',kind:'ambient',
+  focus:'いま目の前の森のことを、本人らしく短く話す',
+  tone:'気取った教訓や質問にせず、自然な一言・身振り・沈黙でもよい',
+  evidence:'imagined'
+};
+function sceneFrom(topic,{continuationChoice='',stage=1}={}){
+  return {id:topic.key,kind:continuationChoice?'continuation':topic.kind,
+    focus:topic.fact,tone:'原作の事実を説明せず、本人らしい反応・小さな行動・会話にする',
+    theme:topic.theme,evidence:'reviewed',memoryId:topic.memoryId,
+    ...(topic.seedId?{seedId:topic.seedId}:{}),
+    ...(continuationChoice?{previousChoice:continuationChoice,stage}:{})};
+}
+function pickTopic(characterId,day,candidates,recent,usedToday){
+  if(!candidates.length)return null;
+  // A little ordinary life is essential: every NPC must not always lecture on a book.
+  if(hash(day+':idle:'+characterId)%5===0)return null;
+  const seen=Array.isArray(recent)?recent:[];
+  const recentKeys=new Set(seen.filter(entry=>{
+    if(!entry||typeof entry!=='object'||!entry.day)return false;
+    const age=dayNumber(day)-dayNumber(entry.day);
+    return age>=0&&age<=3;
+  }).map(entry=>entry.key));
+  // With only one available seed, speak normally for a few days instead of
+  // repeating the same supposed revelation every morning.
+  const fresh=candidates.filter(topic=>!recentKeys.has(topic.key));
+  if(!fresh.length)return null;
+  return fresh.map(topic=>{
+    const shared=usedToday.has(topic.key)?28:0;
+    return {topic,score:topic.affinity*22+topic.freshBonus+
+      (topic.kind==='seed'?10:0)+hash(day+':'+characterId+':'+topic.key)%17-
+      shared-Math.min(20,topic.sourceUse)};
+  }).sort((a,b)=>b.score-a.score||a.topic.key.localeCompare(b.topic.key))[0].topic;
+}
+function empty(day,prior={}){
+  return {version:2,day,events:[],visits:{},topics:{},
+    arcs:prior.version===2&&prior.arcs&&typeof prior.arcs==='object'?prior.arcs:{},
+    recent:prior.version===2&&prior.recent&&typeof prior.recent==='object'?prior.recent:{}};
+}
+
+/** Selection is local, deterministic and does not spend AI tokens. */
 export function createForestDailyContextSession({storage=null,
-  storageKey='forest-daily-context-v1',now=()=>Date.now()}={}){
+  storageKey='forest-daily-context-v2',now=()=>Date.now()}={}){
   function current(){
     const day=dayJapan(now()),previous=read(storage,storageKey);
-    return previous.day===day&&Array.isArray(previous.events)?previous:
-      {version:1,day,events:[],visits:{}};
+    return previous.version===2&&previous.day===day&&
+      Array.isArray(previous.events)?previous:empty(day,previous);
   }
-  function save(state){write(storage,storageKey,state)}
+  function save(state){
+    const topics=Object.fromEntries(Object.entries(state.topics||{}).map(([npc,scene])=>{
+      const {memoryId,seedId,...safe}=scene;
+      return [npc,safe];
+    }));
+    write(storage,storageKey,{...state,topics});
+  }
   return {
-    visit(characterId){
-      const state=current(),scene=forestDailyScene(characterId,now());
+    visit(characterId,{books=[],catalog=[],seeds=[],cues=[],sourceKind='',sourceMemoryId=''}={}){
+      const state=current(),candidates=['meet','reflection'].includes(sourceKind)?[]:
+        eligibleForestDailyTopics({characterId,books,catalog,seeds,cues,now:now()});
+      const usable=new Map(candidates.map(topic=>[topic.key,topic]));
       const earlier=state.events.slice().reverse();
-      const connected=earlier.find(event=>
-        event.npc!==characterId&&(RELATIONS[characterId]||[]).includes(event.npc));
+      const connected=earlier.find(event=>event.npc!==characterId&&
+        (RELATIONS[characterId]||[]).includes(event.npc));
       const last=earlier.find(event=>event.npc!==characterId);
       const visitsToday=(Number(state.visits[characterId])||0)+1;
+      let scene=state.topics[characterId];
+      // A local script about a sourced episode always overrides a different idle subject.
+      const authored=['story','relay'].includes(sourceKind)&&sourceMemoryId?
+        candidates.find(topic=>topic.memoryId===sourceMemoryId):null;
+      if(authored)scene=sceneFrom(authored);
+      else if(scene?.evidence==='reviewed'){
+        const source=candidates.find(topic=>topic.key===scene.id);
+        scene=source?{...scene,memoryId:source.memoryId,
+          ...(source.seedId?{seedId:source.seedId}:{})}:null;
+        // Read->unread revokes yesterday's or today's source.
+      }
+      if(!scene){
+        const previous=state.arcs[characterId],delta=previous?
+          dayNumber(state.day)-dayNumber(previous.day):0;
+        const candidate=previous&&delta===1&&previous.stage<3&&previous.choice&&
+          !/またね|帰る|やめる|おしまい/iu.test(previous.choice)?
+          usable.get(previous.key):null;
+        if(candidate)scene=sceneFrom(candidate,{continuationChoice:previous.choice,
+          stage:previous.stage+1});
+        else{
+          const usedToday=new Set(Object.values(state.topics).map(item=>item?.id));
+          const recent=state.recent[characterId];
+          const chosen=pickTopic(characterId,state.day,candidates,recent,usedToday);
+          scene=chosen?sceneFrom(chosen):{...idleScene,id:'daily-idle-'+characterId};
+        }
+      }
+      state.topics[characterId]=scene;
       state.visits[characterId]=visitsToday;
       state.events.push({npc:characterId,kind:'visit'});
-      state.events=state.events.slice(-24);
+      state.events=state.events.slice(-MAX_EVENTS);
+      if(scene.evidence==='reviewed'&&visitsToday===1){
+        const list=Array.isArray(state.recent[characterId])?
+          state.recent[characterId].slice(-MAX_RECENT+1):[];
+        state.recent[characterId]=[...list,{key:scene.id,day:state.day}];
+      }
       save(state);
       return {scene,visitsToday,metNpcCount:Object.keys(state.visits).length,
         previousNpc:last?.npc||'',
         relatedEncounter:connected?{
           npc:connected.npc,selectedLabel:clean(connected.kind==='choice'?connected.label:''),
-          scene:forestDailyScene(connected.npc,now())?.id||''}:null};
+          scene:state.topics[connected.npc]?.id||''}:null};
     },
     selected(characterId,label){
       if(!RELATIONS[characterId]||!clean(label))return;
-      const state=current();
+      const state=current(),scene=state.topics[characterId];
       state.events.push({npc:characterId,kind:'choice',label:clean(label)});
-      state.events=state.events.slice(-24);
+      state.events=state.events.slice(-MAX_EVENTS);
+      if(scene?.evidence==='reviewed'){
+        state.arcs[characterId]={day:state.day,key:scene.id,
+          choice:clean(label),stage:scene.stage||1};
+      }else delete state.arcs[characterId];
       save(state);
     },
     getState(){return current()}

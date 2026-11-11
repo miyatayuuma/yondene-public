@@ -40,7 +40,7 @@ test('generates contextual reply choices, then a character reply only after a ch
   const log=JSON.parse(storage.getItem('forest-ai-local-v1:log'));
   assert.deepEqual(log.map(x=>x.event),['generated-opening','selected-offered-choice','generated-reply']);
   assert.equal(log[0].text,first.text,'export can reconstruct the initial line');
-  assert.equal(log[0].promptVersion,'forest-daily-interaction-v9');
+  assert.equal(log[0].promptVersion,'forest-sourced-interaction-v10');
   assert.equal(log[1].label,'風の音を聞く');
   director.end();
 });
@@ -279,6 +279,7 @@ test('a related sourced thought informs replies without replacing the approved o
   const storage=memoryStorage(),prompts=[];
   const books=[{id:'book-1',status:'read'}];
   const catalog=[{schemaVersion:1,id:'mem-1',bookId:'book-1',text:'花を植えた',
+    characters:'kiki',
     spoilerLevel:1,evidenceStatus:'approved',confidence:'high',sourceUrl:'https://example.org'}];
   const seeds=[{id:'seed-1',bookId:'book-1',title:'テストの本',memoryId:'mem-1',
     fact:'花を植えた',question:'ひとりでやるのはえらい？',contrast:'助けてもらうのも勇気',
@@ -297,10 +298,14 @@ test('a related sourced thought informs replies without replacing the approved o
   assert.equal(prompts[0].context.topic.question,undefined);
   assert.equal(prompts[0].context.topic.philosophy,undefined);
   assert.equal(JSON.stringify(prompts[0]).includes('book-1'),false);
-  assert.equal(JSON.parse(storage.getItem('forest-ai-local-v1:thought:events')).length,1);
+  assert.equal(JSON.parse(storage.getItem('forest-ai-local-v1:thought:events')).length,1,
+    'character-specific seed selection preserves the private usage ledger');
+  assert.equal(JSON.parse(storage.getItem('forest-ai-local-v1:log')).length,1);
   director.onDisplayed(first,identity);
   director.onDisplayed(first,identity);
   assert.equal(JSON.parse(storage.getItem('forest-ai-local-v1:thought:events')).length,2);
+  assert.equal(JSON.parse(storage.getItem('forest-ai-local-v1:log')).length,2,
+    'the displayed topic is recorded once');
   books[0].status='unread';
   const revoked=await director.select({...identity,choiceId:first.choices[0].id});
   assert.equal(revoked.conversationComplete,true);
@@ -309,6 +314,41 @@ test('a related sourced thought informs replies without replacing the approved o
   await director.start(identity);
   assert.equal(prompts.length,2);
   assert.equal(prompts[1].context.topic,undefined,'unread book cannot be forwarded');
+});
+
+test('a daily approved seed can drive a new ambient opening without leaking source identifiers',async()=>{
+  const local=memoryStorage(),prompts=[],sourced={...base(),
+    start:async()=>({text:'今日はいい風がふいているね。',sourceKind:'ambient',
+      choices:[{id:'another-topic',label:'ほかの話も聞く'}]})};
+  const books=[{id:'private-b',status:'read',finishedAt:'2026-11-11'}];
+  const catalog=[{schemaVersion:1,id:'private-m',bookId:'private-b',
+    characters:'kiki',text:'キキが荷物を届けた',tags:'配達',
+    spoilerLevel:1,evidenceStatus:'approved',confidence:'high',sourceUrl:'https://example.org'}];
+  const seeds=[{id:'private-s',bookId:'private-b',memoryId:'private-m',fact:'キキが荷物を届けた',
+    tags:'配達',question:'人生に必要な勇気とは？',contrast:'慎重さと勇気',spoiler:1,
+    status:'使用可',sourceUrl:'https://example.org',selectedCount:0,displayedCount:0}];
+  const director=createForestLiveDialogueDirector({base:sourced,storage:local,startDelayMs:0,
+    now:()=>Date.UTC(2026,10,11,13),getBooks:()=>books,getCatalog:()=>catalog,getSeeds:()=>seeds,
+    generate:async prompt=>{prompts.push(prompt);return {text:'荷物は無事に届いたよ。',
+      choices:['よかったね','配達は大変？']}}});
+  const opening=await director.start(identity);
+  if(prompts[0].context.today.scene.evidence==='reviewed'){
+    const scene=prompts[0].context.today.scene;
+    assert.match(scene.focus,/荷物を届けた/u);
+    assert.equal(scene.kind,'seed');
+    assert.equal(JSON.stringify(prompts[0]).includes('private-b'),false);
+    assert.equal(JSON.stringify(prompts[0]).includes('private-m'),false);
+    assert.equal(JSON.stringify(prompts[0]).includes('private-s'),false);
+    assert.equal(JSON.stringify(prompts[0]).includes('人生に必要な勇気'),false);
+    books[0].status='unread';
+    const revoked=await director.select({...identity,choiceId:opening.choices[0].id});
+    assert.equal(revoked.conversationComplete,true,
+      'a once-read source cannot continue after read status is revoked');
+    assert.equal(prompts.length,1);
+  }else{
+    assert.equal(prompts[0].context.today.scene.kind,'ambient',
+      'a deliberately ordinary day may skip all book seeds');
+  }
 });
 
 test('repeat visits can generate choices without replacing an authored story line',async()=>{

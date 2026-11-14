@@ -110,3 +110,30 @@ test('Worker accepts a scene-specific opening with two choices, using the same o
     choices:['見に行く','少し休む']});
   assert.match(systemText,/今日のscene/);
 });
+
+
+test('Worker accepts an outsider reaction with bounded reader context and new NPCs',async()=>{
+  let forwarded,system;
+  const env={OWNER_UID:ownerUid,FIREBASE_PROJECT_ID:projectId,AI:{
+    run:async(_,body)=>{
+      forwarded=JSON.parse(body.messages[1].content);
+      system=body.messages[0].content;
+      return {choices:[{message:{content:JSON.stringify({
+        text:'へえ、そんな題名にするのか。ちょっと面白いな。',
+        choices:['そうだね','もっと考える']})}}]};
+    }}};
+  const response=await handleRequest(request('/dialogue',{body:{prompt:{
+    mode:'opening',closing:false,task:'感想に第三者として反応する',
+    npc:{id:'hachibee',voice:'せっかちな行動派',approvedExamples:[]},
+    context:{npcLine:'本の感想を聞いた。',recentTurns:[],readerReflection:{
+      bookTitle:'よその本',quote:'題名を変えたい',attribution:'verbatim',
+      perspective:'別作品なので他人の話として聞く'}},
+    constraints:['感想を要求しない','原作の出来事を捏造しない']
+  }}}),env,{verifyToken:async()=>ownerUid});
+  assert.equal(response.status,200);
+  assert.equal(forwarded.context.readerReflection.bookTitle,'よその本');
+  assert.match(system,/第三者の立場/);
+  assert.deepEqual(await response.json(),{
+    text:'へえ、そんな題名にするのか。ちょっと面白いな。',
+    choices:['そうだね','もっと考える']});
+});

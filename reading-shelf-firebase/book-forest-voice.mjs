@@ -28,7 +28,7 @@ export const FOREST_DEFAULT_VOICES=Object.freeze({
   ishishi:{rate:1.48,pitch:1.08,volume:1,voiceURI:''},
   hachibee:{rate:1.55,pitch:1.12,volume:1,voiceURI:''},
   hakase:{rate:1.41,pitch:1.02,volume:1,voiceURI:''},
-  mochan:{rate:1.29,pitch:.92,volume:1,voiceURI:''},
+  mochan:{rate:1.32,pitch:.92,volume:1,voiceURI:''},
   twins_first:{rate:1.45,pitch:1.16,volume:1,voiceURI:''}
 });
 

@@ -1,4 +1,4 @@
-import {FOREST_SPRITE_NAMES,validateForestSpriteManifest} from './book-forest-drive.mjs';
+import {validateForestSpriteManifest} from './book-forest-drive.mjs';
 
 // These entries are stored locally by the browser, not uploaded to Hosting.
 // The cache name is scoped to the Firebase user and family. It contains no
@@ -19,8 +19,8 @@ function cacheUrl(name){
 
 export async function saveCachedForestSprites({uid,familyId,manifest,blobs,cacheStorage=globalThis.caches}){
   if(!cacheStorage?.open)return false;
-  validateForestSpriteManifest(manifest);
-  for(const name of FOREST_SPRITE_NAMES){
+  const spriteNames=Object.keys(validateForestSpriteManifest(manifest));
+  for(const name of spriteNames){
     const blob=blobs?.[name];
     if(!(blob instanceof Blob)||blob.size>2000000||
       (blob.type&&!blob.type.includes('image/png'))){
@@ -32,7 +32,7 @@ export async function saveCachedForestSprites({uid,familyId,manifest,blobs,cache
   // cannot make a partially populated cache look ready.
   await cacheStorage.delete(name);
   const cache=await cacheStorage.open(name);
-  for(const assetName of FOREST_SPRITE_NAMES){
+  for(const assetName of spriteNames){
     await cache.put(cacheUrl(assetName),new Response(blobs[assetName],{
       headers:{'Content-Type':'image/png'}
     }));
@@ -55,9 +55,9 @@ export async function loadCachedForestSprites({
   const images={};
   try{
     const manifest=await manifestResponse.json();
-    validateForestSpriteManifest(manifest);
+    const spriteNames=Object.keys(validateForestSpriteManifest(manifest));
     const size=manifest.frameSize*2;
-    const results=await Promise.allSettled(FOREST_SPRITE_NAMES.map(async assetName=>{
+    const results=await Promise.allSettled(spriteNames.map(async assetName=>{
       const response=await cache.match(cacheUrl(assetName));
       if(!response)throw Error('森の画像キャッシュに不足があります');
       const blob=await response.blob();

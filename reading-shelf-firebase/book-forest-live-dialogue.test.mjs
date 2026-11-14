@@ -40,7 +40,7 @@ test('generates contextual reply choices, then a character reply only after a ch
   const log=JSON.parse(storage.getItem('forest-ai-local-v1:log'));
   assert.deepEqual(log.map(x=>x.event),['generated-opening','selected-offered-choice','generated-reply']);
   assert.equal(log[0].text,first.text,'export can reconstruct the initial line');
-  assert.equal(log[0].promptVersion,'forest-sourced-interaction-v10');
+  assert.equal(log[0].promptVersion,'forest-cross-book-reflections-v11');
   assert.equal(log[1].label,'風の音を聞く');
   director.end();
 });

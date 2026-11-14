@@ -5,7 +5,8 @@ import {createForestDailyContextSession} from './book-forest-daily-context.mjs';
 import {validateForestDialogueCues} from './book-forest-dialogue-director.mjs';
 import {unlockedStoryMemories} from './book-forest-story-memory.mjs';
 import {forestCharacterVoiceGuide,validForestCharacterProfiles} from './book-forest-character-profiles.mjs';
-const CHARACTERS=new Set(['king','cat','kiki','jiji','skipper','zorori','ishishi','noshishi']);
+const CHARACTERS=new Set(['king','cat','kiki','jiji','skipper','zorori','ishishi','noshishi',
+  'hachibee','hakase','mochan']);
 const VOICES={
   king:'王さま。自分のことは「余」。大げさで好奇心があり、子どもを歓迎する。',
   cat:'王さまのねこ。人間の言葉は話さない。地の文で短い動作だけを書く。',
@@ -14,15 +15,22 @@ const VOICES={
   skipper:'スキッパー。無口で慎重。小さな発見を静かに観察する。',
   zorori:'ゾロリ。いたずら好きで得意げだが、子どもを怖がらせない。',
   ishishi:'イシシ。食べ物や面白いことに目がなく、おっちょこちょい。',
-  noshishi:'ノシシ。のんびりしていて相棒との掛け合いが好き。'
+  noshishi:'ノシシ。のんびりしていて相棒との掛け合いが好き。',
+  hachibee:'ハチベエ。せっかちな行動派。思いついたら飛び出す。理屈より現場。',
+  hakase:'ハカセ。知識好きで慎重。観察を好むが理屈っぽくなることも。',
+  mochan:'モーちゃん。のんびりした気のいい友だち。自分のペースで反応する。'
 };
 const SELF_NAMES={king:'王さま',kiki:'キキ',jiji:'ジジ',skipper:'スキッパー',
-  zorori:'ゾロリ',ishishi:'イシシ',noshishi:'ノシシ'};
+  zorori:'ゾロリ',ishishi:'イシシ',noshishi:'ノシシ',
+  hachibee:'ハチベエ',hakase:'ハカセ',mochan:'モーちゃん'};
 const PROMPT_VERSION='forest-sourced-interaction-v10';
 const GOODBYE={king:'続きはまた今度だ。達者でな！',kiki:'じゃあ、また森で会おうね！',
   jiji:'またね。気をつけて歩くんだよ。',skipper:'またいっしょに探検しよう！',
   zorori:'次はもっと面白い話をしてやるぜ！',ishishi:'じゃあな！また遊ぼうぜ！',
-  noshishi:'またね。のんびり待ってるよ。'};
+  noshishi:'またね。のんびり待ってるよ。',
+  hachibee:'じゃあな！　おれ、もう少し森を見てくるぜ。',
+  hakase:'またね。次は別の手がかりも見つかるといいな。',
+  mochan:'またね。ぼく、ここでもう少し休んでいくよ。'};
 const clean=value=>typeof value==='string'?value.trim().replace(/\s+/gu,' '):'';
 // These are unambiguous first-person declarations, not a requirement to repeat
 // a catchphrase in every line. Profile-guided nuance is assessed separately.

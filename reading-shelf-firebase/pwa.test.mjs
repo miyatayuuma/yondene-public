@@ -169,7 +169,7 @@ test('single-step sorting options have distinct clear Japanese descriptions',()=
 });
 test('PWA build integrates activity previews and preserves forest module versions',()=>{
   const html=text('index.html'),app=text('app.mjs'),recs=text('recommendations.mjs');
-  const build='20261114-zukkoke-npcs-v1',activityBuild='20261111-activity-preview-v1',
+  const build='20261115-forest-reflection-v11',activityBuild='20261111-activity-preview-v1',
     forestBuild='20261110-forest-ai-v6',voiceBuild='20261111-forest-voice-v1',
     personaBuild='20261111-forest-persona-v1',voiceV8Build='20261111-forest-voice-v8',
     dailyV10Build='20261112-forest-stories-v10',zukkokeBuild='20261114-zukkoke-v1',
@@ -197,7 +197,7 @@ test('PWA build integrates activity previews and preserves forest module version
     assert.ok(app.includes("'./"+module+".mjs?build="+zukkokeBuild+"'"),
       'voice-v8 import: '+module);
   }
-  assert.ok(app.includes("'./book-forest-live-dialogue.mjs?build="+zukkokeBuild+"'"));
+  assert.ok(app.includes("'./book-forest-live-dialogue.mjs?build=20261115-forest-reflection-v11'"));
   for(const module of ['book-community','recommendations','bibliography-identity','invite-links','cover-thumbnails','nickname','reader-name','pending-reflections','startup-recovery']){
     assert.ok(app.includes("'./"+module+".mjs?build="+unchanged+"'"),'unchanged versioned import: '+module);
   }

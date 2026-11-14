@@ -328,7 +328,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
             conversationComplete:true};
       }catch{return {text:GOODBYE[characterId]||'また森で会おうね。',choices:[],conversationComplete:true}}
     }
-    daily.selected(characterId,label);
+    if(current.sourceKind!=='review-reaction')daily.selected(characterId,label);
     const scriptedRelay=current.relayChoice?.id===choiceId;
     if(scriptedRelay){
       const result=await base.select({characterId,choiceId});
@@ -357,7 +357,8 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     history.push({npc:generated.text});history=history.slice(-4);
     repliesThisSession++;
     record({event:'generated-reply',characterId,text:generated.text,
-      dailyTopicKind:activeDaily?.scene?.kind||'ambient',
+      dailyTopicKind:current.sourceKind==='review-reaction'?'reflection':
+        activeDaily?.scene?.kind||'ambient',
       choices:closing?[]:generated.labels,closing,modelId,promptVersion:PROMPT_VERSION,
       elapsedMs:generated.elapsedMs,turn:repliesThisSession});
     if(closing){pending=null;return {text:generated.text,choices:[],conversationComplete:true}}
@@ -377,6 +378,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
         record({event:'reflection-reaction-displayed',characterId:identity.characterId,
           promptVersion:PROMPT_VERSION});
       }
+      if(pending?.sourceKind==='review-reaction')return;
       const scene=activeDaily?.scene;
       if(scene?.evidence!=='reviewed'||!pending||
         pending.characterId!==identity?.characterId||

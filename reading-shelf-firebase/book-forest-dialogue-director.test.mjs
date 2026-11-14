@@ -32,6 +32,28 @@ function setup({books=[{id:'book-1',status:'read'},{id:'book-2',status:'unread'}
     getCues:()=>cues,getReflections:async()=>reviews,storage:cache,storageKey:'test-dialogue'}),cache};
 }
 
+test('the three Zukkoke characters are independent and do not leak unread episodes',async()=>{
+  const ids=['hachibee','hakase','mochan'];
+  const intros=ids.map(id=>cue('meet-'+id,id,'meet','こんにちは、'+id+'だよ。'));
+  const storyCues=ids.map(id=>cue('story-'+id,id,'story',
+    id+'の探偵団の思い出だよ。',{memoryId:'zukkoke-memory'}));
+  const memory=story('zukkoke-memory','zukkoke-book','三人は事件に巻き込まれた。',ids.join(','));
+  const books=[{id:'zukkoke-book',status:'read'}];
+  const director=createForestDialogueDirector({getBooks:()=>books,getCatalog:()=>[memory],
+    getCues:()=>[...intros,...storyCues],storage:storage()});
+  for(const id of ids){
+    const meet=await director.start({characterId:id});
+    assert.match(meet.text,new RegExp(id));
+    director.end();
+    const recall=await director.start({characterId:id});
+    assert.match(recall.text,/探偵団の思い出/);
+    director.end();
+  }
+  books[0].status='unread';
+  for(const id of ids)assert.doesNotMatch(
+    (await director.start({characterId:id})).text,/探偵団の思い出/);
+});
+
 test('first conversation is an introduction, next conversation uses only read books',async()=>{
   const {director}=setup();
   assert.match((await director.start({characterId:'king'})).text,/お城の外/);

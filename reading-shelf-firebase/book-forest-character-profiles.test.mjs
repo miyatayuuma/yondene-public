@@ -25,6 +25,18 @@ test('private settings join by stable character ID and never expose unsupported 
   assert.match(forestCharacterVoiceGuide({...profiles[0],firstPerson:'ぼく（第5巻で確認）'}),/一人称:ぼく\n/);
 });
 
+test('Zukkoke friends remain three independent private character profiles',()=>{
+  const ids=['hachibee','hakase','mochan'];
+  const characterRows=ids.map(id=>[id,id+'の人物像','大切なこと','願い','友だち',
+    '行動','反応','確認済']);
+  const speechRows=ids.map(id=>[id,'ぼく（仮案）','友だち','それぞれ違う声',
+    '語尾未照合','頻度低め','短い言葉','戸惑い','同一口調にしない','検証中']);
+  const profiles=parseForestCharacterProfiles([people[0],...characterRows],
+    [voices[0],...speechRows]);
+  assert.deepEqual(profiles.map(p=>p.id),ids);
+  assert.equal(validForestCharacterProfiles(profiles).length,3);
+});
+
 test('missing sheet columns, unverified identities, malformed or oversized profiles fail closed',()=>{
   assert.deepEqual(parseForestCharacterProfiles([['違うヘッダー']],voices),[]);
   assert.deepEqual(parseForestCharacterProfiles(people,[['誤ったヘッダー']]),[]);

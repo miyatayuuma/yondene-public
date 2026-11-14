@@ -20,7 +20,7 @@ import {saveCachedForestSprites,loadCachedForestSprites,clearCachedForestSprites
 import {loadPrivateForestDialogue} from './book-forest-private-dialogue.mjs?build=20261114-zukkoke-v1';
 import {saveCachedForestDialogue,loadCachedForestDialogue,clearCachedForestDialogue} from './book-forest-dialogue-cache.mjs?build=20261111-forest-persona-v1';
 import {createForestDialogueDirector} from './book-forest-dialogue-director.mjs?build=20261114-zukkoke-v1';
-import {createForestLiveDialogueDirector} from './book-forest-live-dialogue.mjs?build=20261114-zukkoke-v1';
+import {createForestLiveDialogueDirector} from './book-forest-live-dialogue.mjs?build=20261115-forest-reflection-v11';
 import {createForestThoughtSession} from './book-forest-thought-seeds.mjs?build=20261114-zukkoke-v1';
 import {authorizeForestThoughtUsageWrite,syncForestThoughtUsage} from './book-forest-thought-sync.mjs?build=20261110-forest-ai-v6';
 import {resetForestConversationHistoryOnce} from './book-forest-conversation-reset.mjs?build=20261110-forest-ai-v6';
@@ -29,7 +29,7 @@ import {createForestAIGenerator} from './book-forest-ai-provider.mjs?build=20261
 import {createForestCloudflareGenerator} from './book-forest-cloudflare-provider.mjs?build=20261110-forest-ai-v6';
 import {STATUSES,ACTIVE_READ_FILTER,filteredBooks,readPeriodLabel,compactReadPeriodLabel,readingModeLabel,emptyStateMessage} from './domain.mjs?build=20261110-forest-ai-v6';
 
-const APP_BUILD='20261114-zukkoke-npcs-v1';
+const APP_BUILD='20261115-forest-reflection-v11';
 const $=id=>{const element=document.getElementById(id);if(!element)throw new Error('APP_DOM_MISMATCH: missing #'+id);return element};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const safeCover=url=>/^(https:\/\/|data:image\/(jpeg|png|webp);base64,)/i.test(String(url||''))?String(url):'';
@@ -83,7 +83,8 @@ function initUI(){
       const aiKey='yondene-forest-ai-local-v1:'+leavingUid+':'+leavingFamily;
       try{localStorage.removeItem(aiKey+':budget');localStorage.removeItem(aiKey+':log')}catch{}
       const cloudflareKey='yondene-forest-ai-local-v2:'+leavingUid+':'+leavingFamily;
-      try{localStorage.removeItem(cloudflareKey+':budget');localStorage.removeItem(cloudflareKey+':log')}catch{}
+      try{localStorage.removeItem(cloudflareKey+':budget');localStorage.removeItem(cloudflareKey+':log');
+        localStorage.removeItem(cloudflareKey+':review-reactions')}catch{}
     }
     await signOut(auth);
   };
@@ -721,6 +722,48 @@ function renderFamily(){
                   .catch(error=>{forestAIGeneratorPromise=null;throw error});
               }
               const generate=await forestAIGeneratorPromise;
+              // Activity is already ordered by creation date. Resolve only a few
+              // real, non-withdrawn reflections, not every book subcollection.
+              let recentReflectionsPromise=null;
+              const getRecentReflections=()=>{
+                if(recentReflectionsPromise)return recentReflectionsPromise;
+                recentReflectionsPromise=(async()=>{
+                  if(role!=='owner'||fid!==familyId||user?.uid!==ownerUid)return [];
+                  const readIds=new Set(books.filter(book=>book.status==='read').map(book=>book.id));
+                  const snapshot=await getDocs(query(familyCollection('activity'),
+                    orderBy('createdAt','desc'),limit(60)));
+                  const seen=new Set(),selected=[];
+                  for(const entry of snapshot.docs.map(item=>item.data())){
+                    if(entry.kind!=='reflection'||entry.hidden||
+                      !readIds.has(entry.bookId)||typeof entry.sourceId!=='string'||
+                      !entry.sourceId)continue;
+                    const key=entry.bookId+':'+entry.sourceId;
+                    if(seen.has(key))continue;
+                    seen.add(key);selected.push(entry);
+                    if(selected.length>=12)break;
+                  }
+                  const recent=await Promise.all(selected.map(async entry=>{
+                    try{
+                      const item=await getDoc(familyDoc('books',entry.bookId,
+                        'childReflections',entry.sourceId));
+                      if(!item.exists())return null;
+                      const value=item.data();
+                      if(value.hidden||!['verbatim','parent-summary'].includes(value.attribution))return null;
+                      const quote=String(value.quote||value.text||'').trim();
+                      const createdAt=value.createdAt?.toMillis?.()||entry.createdAt?.toMillis?.()||0;
+                      return quote&&createdAt?{id:item.id,bookId:entry.bookId,
+                        quote,attribution:value.attribution,createdAt}:null;
+                    }catch{return null}
+                  }));
+                  if(role!=='owner'||fid!==familyId||user?.uid!==ownerUid)return [];
+                  return recent.filter(Boolean);
+                })().catch(error=>{
+                  recentReflectionsPromise=null;
+                  console.warn('Forest reflection topics unavailable',error?.code||'read-failed');
+                  return [];
+                });
+                return recentReflectionsPromise;
+              };
               dialogueEngine=createForestLiveDialogueDirector({base:conversation,generate,
                 storage:localStorage,storageKey:'yondene-forest-ai-local-v2:'+ownerUid+':'+familyId,
                 dailyLimit:forestAIConfig.workerUrl?300:12,
@@ -728,6 +771,7 @@ function renderFamily(){
                 getBooks:()=>books,getCatalog:()=>forestDialogueCache?.catalog||[],
                 getCues:()=>forestDialogueCache?.cues||[],
                 getSeeds:()=>forestDialogueCache?.thoughtSeeds||[],
+                getRecentReflections,
                 getCharacterProfiles:()=>forestDialogueCache?.characterProfiles||[],
                 requireCharacterProfile:true,
                 modelId:forestAIConfig.workerUrl?'@cf/google/gemma-4-26b-a4b-it':forestAIConfig.modelId});

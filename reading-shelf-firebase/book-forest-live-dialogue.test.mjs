@@ -40,7 +40,7 @@ test('generates contextual reply choices, then a character reply only after a ch
   const log=JSON.parse(storage.getItem('forest-ai-local-v1:log'));
   assert.deepEqual(log.map(x=>x.event),['generated-opening','selected-offered-choice','generated-reply']);
   assert.equal(log[0].text,first.text,'export can reconstruct the initial line');
-  assert.equal(log[0].promptVersion,'forest-sourced-interaction-v10');
+  assert.equal(log[0].promptVersion,'forest-cross-book-reflections-v11');
   assert.equal(log[1].label,'風の音を聞く');
   director.end();
 });
@@ -384,4 +384,72 @@ test('AI reply failure resumes the authored continuation when possible',async()=
   const next=await director.select({...identity,choiceId:first.choices[0].id});
   assert.equal(next.text,'あの葉っぱ、見てごらん。');
   assert.equal(selected,1);
+});
+
+
+test('a fresh reflection on a different book changes an unrelated NPC opening',async()=>{
+  const storage=memoryStorage(),prompts=[];
+  const books=[{id:'b-other',title:'ほかの作品',status:'read',
+    synopsis:'旅に出る話',synopsisSourceUrl:'https://example.org/story'}];
+  const getRecentReflections=async()=>[
+    {id:'review-random-id',bookId:'b-other',quote:'タイトルを変えたほうがいい',
+      attribution:'verbatim',createdAt:Date.UTC(2026,10,15)}];
+  const generator=async prompt=>{
+    prompts.push(prompt);
+    return {text:'題名を変えるって？ へえ、ちょっと気になるね。',
+      choices:['こんな題名は？','別の本は？']};
+  };
+  const director=createForestLiveDialogueDirector({base:base(),generate:generator,
+    storage,startDelayMs:0,now:()=>Date.UTC(2026,10,15,3),
+    getBooks:()=>books,getRecentReflections,getCharacterProfiles:()=>[]});
+  const line=await director.start(identity);
+  assert.equal(prompts.length,1);
+  assert.equal(prompts[0].mode,'opening');
+  assert.equal(prompts[0].context.sourceKind,'review-reaction');
+  assert.equal(prompts[0].context.readerReflection.bookTitle,'ほかの作品');
+  assert.equal(prompts[0].context.readerReflection.quote,'タイトルを変えたほうがいい');
+  assert.equal(prompts[0].context.readerReflection.summary,'旅に出る話');
+  assert.equal(prompts[0].context.readerReflection.key,undefined);
+  assert.equal(prompts[0].context.today,undefined,'unrelated daily scene must not intrude');
+  assert.ok(prompts[0].constraints.some(text=>text.includes('別作品')));
+  assert.equal(line.text,'題名を変えるって？ へえ、ちょっと気になるね。');
+  director.onDisplayed(line,identity);
+  const raw=JSON.stringify([...storage.entries]);
+  assert.equal(raw.includes('review-random-id'),false);
+  assert.equal(raw.includes('b-other'),false);
+  assert.equal(raw.includes('タイトルを変えたほうがいい'),false,
+    'never persist a private reflection excerpt');
+  assert.ok(raw.includes('reflection-reaction-displayed'));
+  director.end();
+  const second=createForestLiveDialogueDirector({base:base(),generate:generator,storage,
+    startDelayMs:0,now:()=>Date.UTC(2026,10,15,3),
+    getBooks:()=>books,getRecentReflections});
+  await second.start(identity);
+  assert.equal(prompts[1].context.readerReflection,undefined,
+    'review is not replayed to the same character after actual display');
+});
+
+test('a private reflection cue is AI-reactive only with an authorized fresh source',async()=>{
+  const storage=memoryStorage(),books=[{id:'b',title:'本',status:'read'}],prompts=[];
+  const script={async start(){return {text:'きみのことばに「タイトルを変えたい」とあったね。',
+      sourceKind:'reflection',choices:[{id:'another-topic',label:'ほかの話'}]}},
+    select:async()=>null,end(){}};
+  const reactions=[{id:'r',bookId:'b',createdAt:Date.UTC(2026,10,15),
+    quote:'タイトルを変えたい',attribution:'parent-summary'}];
+  const director=createForestLiveDialogueDirector({base:script,storage,startDelayMs:0,
+    now:()=>Date.UTC(2026,10,15,5),getBooks:()=>books,
+    getRecentReflections:async()=>reactions,generate:async prompt=>{
+      prompts.push(prompt);return {text:'そうか、題名を考えてるんだね。',
+        choices:['そうだよ','別の名前もある']};
+    }});
+  const result=await director.start(identity);
+  assert.match(result.text,/題名/);
+  assert.equal(prompts[0].context.readerReflection.attribution,'parent-summary');
+  assert.equal(prompts[0].context.npcLine,'最近の本の感想を聞いた。');
+  director.end();
+  const noReview=createForestLiveDialogueDirector({base:script,storage:memoryStorage(),
+    getBooks:()=>books,getRecentReflections:async()=>[],
+    generate:async()=>{throw Error('not called')}});
+  const original=await noReview.start(identity);
+  assert.equal(original.sourceKind,'reflection');
 });

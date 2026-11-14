@@ -4,7 +4,8 @@ const MODEL='@cf/google/gemma-4-26b-a4b-it';
 const JWKS_URL='https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com';
 const ORIGINS=new Set(['https://kodomo-reading-shelf-87f11.web.app',
   'https://kodomo-reading-shelf-87f11.firebaseapp.com']);
-const NPCS=new Set(['king','kiki','jiji','skipper','zorori','ishishi','noshishi']);
+const NPCS=new Set(['king','kiki','jiji','skipper','zorori','ishishi','noshishi',
+  'hachibee','hakase','mochan']);
 let cachedKeys=null,keysExpireAt=0;
 
 function json(data,status=200,origin=''){
@@ -133,6 +134,9 @@ export async function handleRequest(request,env,{verifyToken=verifyOwnerIdToken}
         '日本語で自然に短く話す。人物設定と承認済み台詞例から本人の声を守り、説明文を書かない。'+
         '今日のsceneはevidence=reviewedなら読了済み原作の承認済み事実を含み、evidence=imaginedなら森の即興の出来事。'+
         '原作の事実から新たな物語上の出来事を捏造しない。思考の問いや教訓を話す必要はない。'+
+        'readerReflectionがある場合は本の感想を受け止め、別作品の人物なら第三者の立場で反応する。'+
+        '原作に登場した・直接目撃したと偽らず、本人の気持ちを勝手に決めつけない。'+
+        '保護者による要約を子どもの直接の発言として扱わず、感想の追記を要求しない。'+
         '別のNPCの会話内容を聞いたふりをせず、選択肢を子どもの信念とみなさない。'+
         '必ずJSONオブジェクトだけを返す。mode=choicesならtextを省略し、choicesを2件、各16字以内。'+
         'mode=openingなら承認済み台詞のコピーはせず、今日のsceneに合う短い本人の台詞textとchoicesを2件作る。'+

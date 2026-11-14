@@ -111,7 +111,8 @@ function promptFor({characterId,mode,npcLine,chosenLabel='',history=[],closing=f
     context:{npcLine:clean(npcLine).slice(0,170),sourceKind,
       chosenLabel:clean(chosenLabel).slice(0,24),
       recentTurns:history.slice(-4),...(topic?{topic}:{}),
-      ...(reviewSpotlight?{readerReflection:reviewSpotlight}:{}),
+      ...(reviewSpotlight?{readerReflection:Object.fromEntries(
+        Object.entries(reviewSpotlight).filter(([key])=>key!=='key'))}:{}),
       ...(dailyContext?{today:{scene:promptScene(dailyContext.scene,sourceKind),
         visitsToday:dailyContext.visitsToday,
         previousNpc:dailyContext.previousNpc,
@@ -191,7 +192,8 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
       .slice(-3).map(entry=>clean(entry.text).slice(0,90));
     const context=promptFor({characterId,mode,npcLine,chosenLabel,history,closing,topic,
       characterProfile:activeCharacterProfile,voiceExamples:activeVoiceExamples,sourceKind,
-      dailyContext:reviewSpotlight?null:activeDaily,recentLines,reviewSpotlight});
+      dailyContext:reviewSpotlight||sourceKind==='review-reaction'?null:activeDaily,
+      recentLines,reviewSpotlight});
     const controller=new AbortController(),startedAt=now();
     inflight={controller,characterId,mode,startedAt};
     let timeout;

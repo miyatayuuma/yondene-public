@@ -108,7 +108,7 @@ test('no removed DOM ID can silently cause a null property assignment',()=>{
 test('PWA cannot combine stale JS with current HTML after deployment',()=>{
   const html=text('index.html'),sw=text('sw.js');
   const config=JSON.parse(text('firebase.json'));
-  assert.match(html,/app\.mjs\?build=20261112-forest-stories-v10/);
+  assert.match(html,/app\.mjs\?build=20261114-zukkoke-npcs-v1/);
   assert.match(sw,/const ARTWORK_PATHS=new Set\(ARTWORK\)/);
   assert.ok(!sw.includes('PUBLIC_ASSETS'));
   for(const path of ['/app.mjs','/index.html','/domain.mjs','/book-community.mjs','/recommendations.mjs']){
@@ -169,10 +169,10 @@ test('single-step sorting options have distinct clear Japanese descriptions',()=
 });
 test('PWA build integrates activity previews and preserves forest module versions',()=>{
   const html=text('index.html'),app=text('app.mjs'),recs=text('recommendations.mjs');
-  const build='20261112-forest-stories-v10',activityBuild='20261111-activity-preview-v1',
+  const build='20261114-zukkoke-npcs-v1',activityBuild='20261111-activity-preview-v1',
     forestBuild='20261110-forest-ai-v6',voiceBuild='20261111-forest-voice-v1',
     personaBuild='20261111-forest-persona-v1',voiceV8Build='20261111-forest-voice-v8',
-    dailyV10Build='20261112-forest-stories-v10',
+    dailyV10Build='20261112-forest-stories-v10',zukkokeBuild='20261114-zukkoke-v1',
     unchanged='20261019-shelf-v28',readingBuild='20261025-reading-legacy-v1';
   assert.match(html,new RegExp('data-app-build="'+build+'"'));
   assert.match(html,new RegExp('app\\.mjs\\?build='+build));
@@ -182,21 +182,22 @@ test('PWA build integrates activity previews and preserves forest module version
   assert.ok(app.includes("'./reading-record-editor.mjs?build="+readingBuild+"'"));
   assert.ok(text('reading-record-editor.mjs').includes("'./reading-record-domain.mjs?build="+readingBuild+"'"));
   assert.ok(app.includes("'./domain.mjs?build="+forestBuild+"'"));
-  assert.ok(app.includes("'./book-forest.mjs?build="+voiceBuild+"'"));
-  assert.ok(app.includes("'./book-forest-drive.mjs?build="+forestBuild+"'"));
-  assert.ok(app.includes("'./book-forest-cache.mjs?build="+forestBuild+"'"));
+  assert.ok(app.includes("'./book-forest.mjs?build="+zukkokeBuild+"'"));
+  assert.ok(app.includes("'./book-forest-drive.mjs?build="+zukkokeBuild+"'"));
+  assert.ok(app.includes("'./book-forest-cache.mjs?build="+zukkokeBuild+"'"));
   assert.ok(html.includes('book-forest.css?build='+voiceBuild));
   assert.ok(app.includes("'./firebase-config.mjs?build="+forestBuild+"'"));
   assert.ok(app.includes("'./activity.mjs?build="+activityBuild+"'"));
-  for(const module of ['book-forest-private-dialogue','book-forest-dialogue-cache']){
+  assert.ok(app.includes("'./book-forest-private-dialogue.mjs?build="+zukkokeBuild+"'"));
+  for(const module of ['book-forest-dialogue-cache']){
     assert.ok(app.includes("'./"+module+".mjs?build="+personaBuild+"'"),
       'persona-enabled import: '+module);
   }
   for(const module of ['book-forest-dialogue-director','book-forest-thought-seeds']){
-    assert.ok(app.includes("'./"+module+".mjs?build="+voiceV8Build+"'"),
+    assert.ok(app.includes("'./"+module+".mjs?build="+zukkokeBuild+"'"),
       'voice-v8 import: '+module);
   }
-  assert.ok(app.includes("'./book-forest-live-dialogue.mjs?build="+dailyV10Build+"'"));
+  assert.ok(app.includes("'./book-forest-live-dialogue.mjs?build="+zukkokeBuild+"'"));
   for(const module of ['book-community','recommendations','bibliography-identity','invite-links','cover-thumbnails','nickname','reader-name','pending-reflections','startup-recovery']){
     assert.ok(app.includes("'./"+module+".mjs?build="+unchanged+"'"),'unchanged versioned import: '+module);
   }

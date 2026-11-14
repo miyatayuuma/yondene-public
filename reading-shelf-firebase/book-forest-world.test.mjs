@@ -54,7 +54,9 @@ test('each character and both banks can be reached from the start on the navigat
       if(!seen.has(key)&&isWalkable(nx,nz)){seen.add(key);queue.push([nx,nz])}
     }
   }
-  assert.equal(new Set(CHARACTERS.map(c=>c.id)).size,10);
+  assert.equal(new Set(CHARACTERS.map(c=>c.id)).size,13);
+  assert.deepEqual(CHARACTERS.filter(c=>c.requiresSprite).map(c=>c.id),
+    ['hachibee','hakase','mochan']);
   for(const c of CHARACTERS)assert.ok(queue.some(([x,z])=>Math.hypot(x-c.x,z-c.z)<6),c.id);
 });
 

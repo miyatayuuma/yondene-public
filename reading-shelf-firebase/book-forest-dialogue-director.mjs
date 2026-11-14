@@ -4,11 +4,12 @@ import {createTwinConversationDirector} from './book-forest-twins.mjs';
 // The conversation director is intentionally independent of Firebase, Sheets,
 // Google Drive and Three.js. Real dialogue and story facts are PRIVATE inputs.
 // There is no runtime LLM call and no reader text is persisted by this module.
-const CHARACTERS=new Set(['king','cat','kiki','jiji','skipper','twins','zorori','ishishi','noshishi']);
+const CHARACTERS=new Set(['king','cat','kiki','jiji','skipper','twins','zorori','ishishi','noshishi','hachibee','hakase','mochan']);
 const KINDS=new Set(['meet','ambient','story','reflection','relay']);
 const MAX_CUES=600,MAX_SEEN=100,MAX_TEXT=230;
 const SELF_NAMES={king:'王さま',kiki:'キキ',jiji:'ジジ',skipper:'スキッパー',
-  zorori:'ゾロリ',ishishi:'イシシ',noshishi:'ノシシ'};
+  zorori:'ゾロリ',ishishi:'イシシ',noshishi:'ノシシ',
+  hachibee:'ハチベエ',hakase:'ハカセ',mochan:'モーちゃん'};
 const validId=value=>typeof value==='string'&&/^[a-zA-Z0-9_-]{1,100}$/.test(value);
 const normalizeText=value=>typeof value==='string'?value.trim().replace(/\s+/gu,' '):'';
 const numbers=(value,min,max)=>Number.isSafeInteger(value)&&value>=min&&value<=max?value:min;

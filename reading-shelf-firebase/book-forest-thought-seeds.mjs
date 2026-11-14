@@ -9,7 +9,8 @@ const HEADER={id:'種ID',bookId:'書籍ID',title:'書名',memoryId:'物語記憶
   tags:'テーマタグ',lenses:'キャラごとの視点ヒント',spoiler:'ネタバレ度',
   status:'利用状態',sourceUrl:'原作出典URL',selected:'選抜回数',displayed:'実表示回数'};
 
-const THOUGHT_SPEAKERS=new Set(['king','kiki','jiji','skipper','zorori','ishishi','noshishi']);
+const THOUGHT_SPEAKERS=new Set(['king','kiki','jiji','skipper','zorori','ishishi','noshishi',
+  'hachibee','hakase','mochan']);
 const normalize=value=>String(value??'').trim().replace(/\s+/gu,' ');
 const count=value=>Number.isSafeInteger(Number(value))&&Number(value)>=0?Number(value):0;
 const dayJapan=timestamp=>new Date(timestamp+9*3600000).toISOString().slice(0,10);

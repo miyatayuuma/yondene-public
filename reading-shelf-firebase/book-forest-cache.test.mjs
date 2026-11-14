@@ -45,6 +45,19 @@ test('restores all high-resolution character sheets without a Drive token or fet
   assert.equal(closed,FOREST_SPRITE_NAMES.length);
 });
 
+test('optional NPC images round-trip through private cache while old manifests remain valid',async()=>{
+  const cacheStorage=fakeStorage(),extras=['hachibee','hakase','mochan'];
+  const extended={...manifest,assets:{...manifest.assets}};
+  for(const [i,name] of extras.entries())extended.assets[name]='abcdefghijklmnopqrstuv0'+i;
+  const withBlobs={...blobs};
+  for(const name of extras)withBlobs[name]=new Blob([name],{type:'image/png'});
+  await saveCachedForestSprites({uid:'u',familyId:'f',manifest:extended,blobs:withBlobs,cacheStorage});
+  const loaded=await loadCachedForestSprites({uid:'u',familyId:'f',cacheStorage,
+    decodeImage:async()=>({width:1254,height:1254,close(){}})});
+  assert.equal(Object.keys(loaded.images).length,14);
+  loaded.dispose();
+});
+
 test('cached images are isolated by Firebase user and family and purged on logout',async()=>{
   const cacheStorage=fakeStorage();
   await saveCachedForestSprites({uid:'owner123',familyId:'familyA',manifest,blobs,cacheStorage});

@@ -8,6 +8,9 @@ export const FOREST_VOICE_CHARACTERS=Object.freeze([
   {id:'skipper',name:'スキッパー'},
   {id:'zorori',name:'ゾロリ'},
   {id:'ishishi',name:'イシシ・ノシシ（共通）'},
+  {id:'hachibee',name:'ハチベエ'},
+  {id:'hakase',name:'ハカセ'},
+  {id:'mochan',name:'モーちゃん'}, 
   // The twins' names rotate; both speakers use the same voice profile.
   {id:'twins_first',name:'ふたご（2人共通）'}
 ]);
@@ -23,6 +26,9 @@ export const FOREST_DEFAULT_VOICES=Object.freeze({
   skipper:{rate:1.38,pitch:.93,volume:1,voiceURI:''},
   zorori:{rate:1.52,pitch:.91,volume:1,voiceURI:''},
   ishishi:{rate:1.48,pitch:1.08,volume:1,voiceURI:''},
+  hachibee:{rate:1.55,pitch:1.12,volume:1,voiceURI:''},
+  hakase:{rate:1.41,pitch:1.02,volume:1,voiceURI:''},
+  mochan:{rate:1.32,pitch:.92,volume:1,voiceURI:''},
   twins_first:{rate:1.45,pitch:1.16,volume:1,voiceURI:''}
 });
 
@@ -57,7 +63,10 @@ const READINGS=Object.freeze({
   'スグリ':'すぐり',
   'イシシ':'いしし',
   'ノシシ':'のしし',
-  'ゾロリ':'ぞろり'
+  'ゾロリ':'ぞろり',
+  'ハチベエ':'はちべえ',
+  'ハカセ':'はかせ',
+  'モーちゃん':'もーちゃん'
 });
 export function forestSpeechText(text){
   let spoken=String(text??'');

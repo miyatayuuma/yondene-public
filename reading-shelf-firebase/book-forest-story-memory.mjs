@@ -15,7 +15,8 @@ const DEFAULT_CONTEXT_CHARS=680;
 const MAX_CONTEXT_CHARS=1200;
 const MAX_ITEMS=4;
 const ALLOWED_CHARACTERS=new Set([
-  'king','cat','kiki','jiji','zorori','ishishi','noshishi','skipper','twins'
+  'king','cat','kiki','jiji','zorori','ishishi','noshishi','skipper','twins',
+  'hachibee','hakase','mochan'
 ]);
 
 function normalized(text){return String(text??'').normalize('NFKC').toLocaleLowerCase('ja-JP').trim()}

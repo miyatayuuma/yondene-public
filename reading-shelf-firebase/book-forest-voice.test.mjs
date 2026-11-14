@@ -14,9 +14,9 @@ function fakeSpeech(){
   return {synth,voices};
 }
 
-test('seven voice profiles cover nine characters, with silent cat and shared pairs',()=>{
-  assert.equal(FOREST_VOICE_CHARACTERS.length,7);
-  assert.equal(new Set(FOREST_VOICE_CHARACTERS.map(c=>c.id)).size,7);
+test('ten voice profiles cover thirteen forest actors, with silent cat and shared pairs',()=>{
+  assert.equal(FOREST_VOICE_CHARACTERS.length,10);
+  assert.equal(new Set(FOREST_VOICE_CHARACTERS.map(c=>c.id)).size,10);
   for(const {id} of FOREST_VOICE_CHARACTERS){
     assert.ok(FOREST_DEFAULT_VOICES[id]);
     const profile=forestVoiceProfile(id);
@@ -27,6 +27,7 @@ test('seven voice profiles cover nine characters, with silent cat and shared pai
   assert.deepEqual(forestVoiceProfile('ishishi'),forestVoiceProfile('noshishi'));
   assert.deepEqual(forestVoiceProfile('twins_first'),forestVoiceProfile('twins_second'));
   assert.deepEqual(forestVoiceProfile('twins'),forestVoiceProfile('twins_first'));
+  for(const id of ['hachibee','hakase','mochan'])assert.ok(forestVoiceProfile(id));
   assert.equal(forestVoiceProfile('cat'),null);
   assert.equal(forestVoiceProfile('unknown'),null);
   const custom={ishishi:{rate:1.85,pitch:.72},twins_first:{rate:1.65,pitch:.8}};
@@ -45,6 +46,8 @@ test('normalization constrains all values and ignores unsafe data types',()=>{
 test('only known proper names receive reading substitutions',()=>{
   assert.equal(forestSpeechText('アケビとスグリは王さまに会った。'),
     'あけびとすぐりはおうさまに会った。');
+  assert.equal(forestSpeechText('ハチベエ、ハカセ、モーちゃん'),
+    'はちべえ、はかせ、もーちゃん');
   assert.equal(forestSpeechText('橋をわたった。'),'橋をわたった。');
 });
 

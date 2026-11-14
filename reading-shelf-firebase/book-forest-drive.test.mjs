@@ -13,6 +13,25 @@ test('only declared private Drive pixel sprites are accepted',()=>{
   assert.throws(()=>validateForestSpriteManifest({...manifest,schemaVersion:2,frameSize:64}));
 });
 
+test('optional Zukkoke sprites are accepted without changing the legacy 11-image manifest',async()=>{
+  const extended={...manifest,assets:{...assets,
+    hachibee:'abcdefghijklmnopqrstuv01',
+    hakase:'abcdefghijklmnopqrstuv02',
+    mochan:'abcdefghijklmnopqrstuv03'}};
+  assert.equal(Object.keys(validateForestSpriteManifest(manifest)).length,11);
+  assert.equal(Object.keys(validateForestSpriteManifest(extended)).length,14);
+  assert.throws(()=>validateForestSpriteManifest({...extended,assets:{...extended.assets,
+    invalid:'abcdefghijklmnopqrstuv04'}}));
+  let calls=0;
+  const loaded=await loadPrivateForestSprites('test-token',{fetchImpl:async()=>{
+    calls++;return calls===1?{ok:true,json:async()=>extended}:
+      {ok:true,blob:async()=>({size:100,type:'image/png'})};
+  },decodeImage:async()=>({width:128,height:128,close(){}})});
+  assert.equal(calls,15);
+  assert.deepEqual(Object.keys(loaded.images).sort(),Object.keys(extended.assets).sort());
+  loaded.dispose();
+});
+
 test('fetches only the manifest and its validated PNGs via bearer headers',async()=>{
   const calls=[],decoded=[];
   const fetchImpl=async(url,options)=>{

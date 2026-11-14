@@ -1,7 +1,7 @@
 // The authoritative character profiles live in the owner's PRIVATE spreadsheet.
 // Public code contains only column contracts and validation, never real rows.
 const CHARACTER_IDS=new Set(['king','cat','kiki','jiji','skipper','zorori',
-  'ishishi','noshishi','twins']);
+  'ishishi','noshishi','twins','hachibee','hakase','mochan']);
 const CHARACTER_COLUMNS={id:'NPC ID',summary:'人物像の要約',values:'大切にすること',
   motivation:'望み・動機',relationships:'関係性',behavior:'普段の行動',
   reactions:'状況への反応',verification:'原作確認'};

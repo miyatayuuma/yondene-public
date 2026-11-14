@@ -31,7 +31,11 @@ export const CHARACTERS=[
   {id:'twins_second',dialogueId:'twins',spriteId:'twins',name:'ふたご',groupId:'twins',x:56,z:33,scale:.8,roamRadius:4.5,walkSpeed:1.2},
   {id:'zorori',name:'ゾロリ',x:-72,z:-8,scale:1.2,roamRadius:7,walkSpeed:1.35},
   {id:'ishishi',name:'イシシ',x:61,z:60,scale:.8,roamRadius:4,walkSpeed:1.2},
-  {id:'noshishi',name:'ノシシ',x:66,z:62,scale:.8,roamRadius:4,walkSpeed:1.2}
+  {id:'noshishi',name:'ノシシ',x:66,z:62,scale:.8,roamRadius:4,walkSpeed:1.2},
+  // Optional private sprites: never display unlicensed placeholders for new NPCs.
+  {id:'hachibee',name:'ハチベエ',x:-28,z:41,scale:.77,roamRadius:4,walkSpeed:1.5,requiresSprite:true},
+  {id:'hakase',name:'ハカセ',x:-33,z:43,scale:.85,roamRadius:3.5,walkSpeed:1.15,requiresSprite:true},
+  {id:'mochan',name:'モーちゃん',x:-37,z:47,scale:1.03,roamRadius:3,walkSpeed:.88,requiresSprite:true}
 ];
 export const START={x:-22,z:27,yaw:.15};
 export const riverX=z=>5+4*Math.sin(z*.038)+1.4*Math.sin(z*.09);

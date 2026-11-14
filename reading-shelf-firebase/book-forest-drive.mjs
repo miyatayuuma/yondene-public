@@ -8,6 +8,8 @@ export const FOREST_SPRITE_NAMES=[
   'player_cat','player_rabbit'
 ];
 const FILE_ID=/^[A-Za-z0-9_-]{20,120}$/;
+// Additional book characters are activated only after their private PNGs are uploaded.
+export const FOREST_OPTIONAL_SPRITE_NAMES=['hachibee','hakase','mochan'];
 
 export function validateForestSpriteManifest(manifest){
   const legacy=manifest?.schemaVersion===1&&manifest?.frameSize===64;
@@ -17,8 +19,9 @@ export function validateForestSpriteManifest(manifest){
     manifest?.frameDurationMs!==250||
     !manifest.assets||typeof manifest.assets!=='object')throw Error('ドット絵の一覧が正しくありません');
   const entries=Object.entries(manifest.assets);
-  if(entries.length!==FOREST_SPRITE_NAMES.length||
-    entries.some(([name,id])=>!FOREST_SPRITE_NAMES.includes(name)||!FILE_ID.test(id))||
+  const supported=[...FOREST_SPRITE_NAMES,...FOREST_OPTIONAL_SPRITE_NAMES];
+  if(entries.length<FOREST_SPRITE_NAMES.length||entries.length>supported.length||
+    entries.some(([name,id])=>!supported.includes(name)||!FILE_ID.test(id))||
     FOREST_SPRITE_NAMES.some(name=>!manifest.assets[name])){
     throw Error('ドット絵のファイル一覧が一致しません');
   }
@@ -59,12 +62,13 @@ export async function loadPrivateForestSprites(token,{
   const manifestResponse=await get(FOREST_MANIFEST_ID);
   const manifest=await manifestResponse.json();
   const assets=validateForestSpriteManifest(manifest);
+  const spriteNames=Object.keys(assets);
   const sheetSize=manifest.frameSize*2;
   const images={};
   const blobs=onValidatedAssets?{}:null;
   try{
     // At 128x128 and 64 colors the 11 images collectively weigh ~30 KiB.
-    await Promise.all(FOREST_SPRITE_NAMES.map(async name=>{
+    await Promise.all(spriteNames.map(async name=>{
       const response=await get(assets[name]);
       const blob=await response.blob();
       if(blob.size>2000000||blob.type&&!blob.type.includes('image/png'))throw Error('PNG画像の形式が正しくありません');

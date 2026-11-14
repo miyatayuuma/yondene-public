@@ -108,7 +108,7 @@ test('no removed DOM ID can silently cause a null property assignment',()=>{
 test('PWA cannot combine stale JS with current HTML after deployment',()=>{
   const html=text('index.html'),sw=text('sw.js');
   const config=JSON.parse(text('firebase.json'));
-  assert.match(html,/app\.mjs\?build=20261114-zukkoke-npcs-v1/);
+  assert.match(html,/app\.mjs\?build=20261115-forest-reflection-v11/);
   assert.match(sw,/const ARTWORK_PATHS=new Set\(ARTWORK\)/);
   assert.ok(!sw.includes('PUBLIC_ASSETS'));
   for(const path of ['/app.mjs','/index.html','/domain.mjs','/book-community.mjs','/recommendations.mjs']){

@@ -47,7 +47,7 @@ export function chooseForestReflectionSpotlight({characterId,books=[],reflection
     const key=hash(review.bookId+':'+review.id);
     const usedBy=Object.entries(seen).filter(([,entries])=>
       Array.isArray(entries)&&entries.includes(key)).length;
-    if((seen[characterId]||[]).includes(key))continue;
+    if(Array.isArray(seen[characterId])&&seen[characterId].includes(key))continue;
     const age=Math.max(0,Math.floor((now-at)/86400000));
     const ageBonus=age<=2?120:age<=14?60:age<=45?20:0;
     const score=ageBonus-Math.min(8,usedBy)*18+Math.min(20,at/1e12);

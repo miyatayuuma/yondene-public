@@ -1,0 +1,42 @@
+name: Forest WebGL preview
+on:
+  pull_request:
+    paths:
+      - 'reading-shelf-firebase/book-forest*.mjs'
+      - 'reading-shelf-firebase/forest-assets/**'
+      - 'scripts/forest-visual-check.py'
+      - 'scripts/forest-dialogue-browser-check.py'
+      - '.github/workflows/forest-visual.yml'
+permissions:
+  contents: read
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: after
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: before
+      - name: Capture both versions with synthetic sprites
+        run: |
+          sudo apt-get -qq install fonts-noto-cjk
+          python -m pip install playwright==1.55.0 pillow==11.3.0
+          export CHROME_BIN="$(command -v google-chrome)"
+          for version in before after; do
+            python -m http.server 8123 --bind 127.0.0.1 --directory "$version" >/tmp/forest-server.log 2>&1 &
+            server=$!
+            python after/scripts/forest-visual-check.py http://127.0.0.1:8123/scripts/forest-preview.html "captures/$version"
+            kill "$server"
+            wait "$server" || true
+          done
+      - name: Verify generated opening, replies and fallback in the real forest UI
+        run: python after/scripts/forest-dialogue-browser-check.py captures/dialogue
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: forest-webgl
+          path: captures

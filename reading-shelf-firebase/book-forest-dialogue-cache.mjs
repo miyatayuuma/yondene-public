@@ -1,0 +1,76 @@
+import {validateForestDialogueCues} from './book-forest-dialogue-director.mjs';
+import {unlockedStoryMemories} from './book-forest-story-memory.mjs';
+import {validateTwinNamePairs,validateTwinScenes} from './book-forest-twins.mjs';
+import {validForestCharacterProfiles} from './book-forest-character-profiles.mjs';
+
+const PREFIX='private-book-forest-dialogue-v5-';
+const LEGACY_PREFIXES=['private-book-forest-dialogue-v1-','private-book-forest-dialogue-v2-',
+  'private-book-forest-dialogue-v3-','private-book-forest-dialogue-v4-'];
+const IDS=/^[A-Za-z0-9_-]{1,160}$/u;
+const pathname='/__book_forest_private_dialogue__/package';
+const scopedName=(uid,familyId)=>{
+  if(!IDS.test(uid)||!IDS.test(familyId))throw Error('森の会話データの所有者が不明です');
+  return PREFIX+uid+'-'+familyId;
+};
+const url=()=>new URL(pathname,globalThis.location?.origin||'https://local.test').href;
+
+export async function saveCachedForestDialogue({uid,familyId,packageData,cacheStorage=globalThis.caches}={}){
+  if(!cacheStorage?.open)return false;
+  if(!Array.isArray(packageData?.cues))throw Error('会話資料の形式が正しくありません');
+  if(!Array.isArray(packageData?.catalog)||packageData.catalog.length>140)
+    throw Error('物語記憶の件数が正しくありません');
+  if(!Array.isArray(packageData?.thoughtSeeds)||packageData.thoughtSeeds.length>180)
+    throw Error('思考の種台帳の形式が正しくありません');
+  if(!Array.isArray(packageData?.characterProfiles)||
+    validForestCharacterProfiles(packageData.characterProfiles).length!==packageData.characterProfiles.length)
+    throw Error('非公開キャラクター設定の形式が正しくありません');
+  if(!Array.isArray(packageData?.twinNames)||!Array.isArray(packageData?.twinScenes))
+    throw Error('ふたご会話の形式が正しくありません');
+  const body=JSON.stringify(packageData);
+  if(body.length>200000)throw Error('会話台本が大きすぎます');
+  const name=scopedName(uid,familyId);
+  const cache=await cacheStorage.open(name);
+  await cache.put(url(),new Response(body,{headers:{'Content-Type':'application/json'}}));
+  return true;
+}
+
+export async function loadCachedForestDialogue({uid,familyId,cacheStorage=globalThis.caches}={}){
+  if(!cacheStorage?.open)return null;
+  const name=scopedName(uid,familyId);
+  if(cacheStorage.keys&&!(await cacheStorage.keys()).includes(name))return null;
+  const cache=await cacheStorage.open(name),response=await cache.match(url());
+  if(!response)return null;
+  try{
+    const text=await response.text();
+    if(text.length>200000)throw Error('oversized');
+    const data=JSON.parse(text);
+    if(!Array.isArray(data.catalog)||data.catalog.length>140||!Array.isArray(data.cues))
+      throw Error('invalid');
+    if(!Array.isArray(data.thoughtSeeds)||data.thoughtSeeds.length>180)throw Error('invalid seeds');
+    if(!Array.isArray(data.characterProfiles)||
+      validForestCharacterProfiles(data.characterProfiles).length!==data.characterProfiles.length)
+      throw Error('invalid profiles');
+    const twinNames=validateTwinNamePairs(data.twinNames),twinScenes=validateTwinScenes(data.twinScenes);
+    if(!Array.isArray(data.twinNames)||!Array.isArray(data.twinScenes))throw Error('invalid twins');
+    // Fact-level authorization still happens with the current Firestore shelf
+    // snapshot in the director. Never persist reading state or review quotes.
+    return {catalog:data.catalog,cues:validateForestDialogueCues(data.cues),twinNames,twinScenes,
+      thoughtSeeds:data.thoughtSeeds,characterProfiles:validForestCharacterProfiles(data.characterProfiles)};
+  }catch{
+    await cacheStorage.delete(name);return null;
+  }
+}
+
+export async function clearCachedForestDialogue({uid,familyId,cacheStorage=globalThis.caches}={}){
+  if(!cacheStorage?.delete)return;
+  if(uid&&familyId){
+    await Promise.all([cacheStorage.delete(scopedName(uid,familyId)),
+      ...LEGACY_PREFIXES.map(prefix=>cacheStorage.delete(prefix+uid+'-'+familyId))]);
+    return;
+  }
+  if(cacheStorage.keys){
+    await Promise.all((await cacheStorage.keys()).filter(name=>
+      name.startsWith(PREFIX)||LEGACY_PREFIXES.some(prefix=>name.startsWith(prefix)))
+      .map(name=>cacheStorage.delete(name)));
+  }
+}

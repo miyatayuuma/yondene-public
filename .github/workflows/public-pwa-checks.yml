@@ -1,0 +1,54 @@
+name: Public PWA checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: public-pwa-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Check public data boundary
+        run: node scripts/check-public-boundary.mjs
+      - name: Test GAS queue safety with fake data
+        run: node --test gas/*.test.mjs
+      - name: Test all app tests except emulator-dependent Firestore rules
+        working-directory: reading-shelf-firebase
+        run: |
+          find . -maxdepth 1 -name '*.test.mjs' ! -name 'firestore.rules.test.mjs' -print0 |
+            xargs -0 -r node --test
+      - name: Verify standalone voice lab matches shared source
+        run: |
+          node scripts/build-forest-voice-lab.mjs
+          git diff --exit-code -- reading-shelf-firebase/forest-voice-lab.html
+      - name: Test Cloudflare forest AI Worker without external API calls
+        run: node --test cloudflare/forest-ai/src/index.test.mjs
+      - name: Verify Worker bundle includes the shared character registry
+        working-directory: cloudflare/forest-ai
+        run: npx --yes wrangler@4 deploy --dry-run --outdir /tmp/forest-worker-bundle
+  rules:
+    runs-on: ubuntu-latest
+    needs: static
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Install Firebase emulator tooling
+        working-directory: reading-shelf-firebase
+        run: npm install --no-audit --no-fund
+      - name: Test Firestore security rules locally
+        working-directory: reading-shelf-firebase
+        run: npx firebase emulators:exec --only firestore --project demo-reading-shelf-rules "node --test firestore.rules.test.mjs"

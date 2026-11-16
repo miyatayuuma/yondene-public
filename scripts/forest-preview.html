@@ -1,0 +1,13 @@
+<!doctype html><html lang="ja"><head><title>本の森プレビュー（仮画像）</title><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="stylesheet" href="../reading-shelf-firebase/book-forest.css"><style>html,body{margin:0;height:100%}</style></head><body><script type="module">
+import {mountBookForest} from '../reading-shelf-firebase/book-forest.mjs';
+const colors={king:'#e2bd51',cat:'#ddc69d',kiki:'#37486f',jiji:'#3f4146',skipper:'#bd8365',twins:'#e8b4a3',zorori:'#f6b861',ishishi:'#c09b75',noshishi:'#ae9d86',player_cat:'#e8e3da',player_rabbit:'#e8ded8'};
+const images={};
+for(const [name,c] of Object.entries(colors)){
+ const s=document.createElement('canvas');s.width=s.height=128;const ctx=s.getContext('2d');
+ for(let f=0;f<4;f++){const x=(f%2)*64,y=Math.floor(f/2)*64;ctx.fillStyle='rgba(0,0,0,0)';ctx.clearRect(x,y,64,64);ctx.fillStyle=c;ctx.fillRect(x+16,y+13,32,37);ctx.fillRect(x+17,y+7,8,10);ctx.fillRect(x+39,y+7,8,10);ctx.fillStyle='#4e4943';ctx.fillRect(x+24,y+25,3,3);ctx.fillRect(x+38,y+25,3,3);ctx.fillStyle='#faf4e8';ctx.fillRect(x+24,y+38,16,10);ctx.fillStyle=c;ctx.fillRect(x+18,y+49,9,5);ctx.fillRect(x+37,y+49+(f%2),9,5)}images[name]=s;
+}
+window.forestErrors=[];window.addEventListener('error',e=>forestErrors.push(e.message));window.addEventListener('unhandledrejection',e=>forestErrors.push(String(e.reason)));
+const params=new URLSearchParams(location.search),month=Number(params.get('month'))||4;
+const views={start:{x:-22,z:27,yaw:.15},bridge:{x:-7,z:6,yaw:Math.PI/2},forest:{x:-72,z:-13,yaw:Math.PI},valley:{x:-35,z:8,yaw:.9},hill:{x:65,z:63,yaw:-.94}};
+window.closeForest=mountBookForest({familyId:'test',privateSprites:{images},debug:{avatar:'player_cat',month,onReady(api){window.forest=api;api.setView(views[params.get('view')]||views.start)}}});
+</script></body></html>

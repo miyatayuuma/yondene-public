@@ -1,5 +1,6 @@
 import {FOREST_CHARACTER_IDS,FOREST_FALLBACK_VOICES,FOREST_SELF_NAMES,
-  FOREST_GOODBYES,FOREST_WRONG_FIRST_PERSON,FOREST_ACTION_WRITING_IDS} from './forest-character-registry.mjs';
+  FOREST_GOODBYES,FOREST_WRONG_FIRST_PERSON,FOREST_ACTION_WRITING_IDS,
+  FOREST_DIALOGUE_PROTOCOL} from './forest-character-registry.mjs';
 import {validateForestGestureMark,validateForestGestureText} from './book-forest-gesture.mjs';
 // Character-first AI dialogue: local scripts choose topics and provide safe fallbacks.
 // The generator is injected: this module never holds a key or makes a network call.
@@ -22,13 +23,19 @@ function readJson(storage,key,fallback){
 }
 function generationErrorKind(error){
   const message=String(error?.message||'');
+  if(/Forest AI diagnostic model-json/u.test(message))return 'model-json';
+  if(/Forest AI diagnostic output-validation/u.test(message))return 'output-validation';
+  if(/Invalid Forest AI JSON/u.test(message))return 'response-json';
   const status=/Forest AI unavailable \((\d{3})\)/u.exec(message)?.[1];
+  if(status==='401'||status==='403')return 'authentication';
   if(status)return 'worker-http-'+status;
   if(/quota reached|neurons.*exceeded|daily free allocation|exhausted/iu.test(message))
     return 'quota';
   if(/timeout/iu.test(message))return 'timeout';
   if(/Firebase login|Unauthorized|token/iu.test(message))return 'authentication';
   if(/Invalid Forest AI response|Invalid model/iu.test(message))return 'invalid-response';
+  if(/NetworkError|Failed to fetch|fetch failed|network request failed/iu.test(message))
+    return 'network';
   if(/cancelled|aborted/iu.test(message))return 'cancelled';
   return 'request-error';
 }
@@ -161,7 +168,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
   maxReplies=2,startDelayMs=280,modelId='unknown',getBooks=()=>[],getCatalog=()=>[],
   getCues=()=>[],
   getCharacterProfiles=()=>[],getRecentReflections=async()=>[],
-  requireCharacterProfile=false}={}){
+  requireCharacterProfile=false,requestTimeoutMs=11000}={}){
   if(!base||typeof base.start!=='function'||typeof base.select!=='function'||
     typeof generate!=='function')throw Error('base and generate are required');
   let pending=null,pendingScripted=null,history=[],sessionCount=0,repliesThisSession=0,serial=0,closed=false,epoch=0,
@@ -174,7 +181,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
   function record(item){
     const existing=readJson(storage,logKey,[]);
     const entries=Array.isArray(existing)?existing.slice(-299):[];
-    entries.push({at:now(),...item});
+    entries.push({at:now(),protocolRevision:FOREST_DIALOGUE_PROTOCOL,...item});
     try{storage?.setItem?.(logKey,JSON.stringify(entries))}catch{}
   }
   function reserve(){
@@ -205,12 +212,12 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
       recentLines,reviewSpotlight});
     const controller=new AbortController(),startedAt=now();
     inflight={controller,characterId,mode,startedAt};
-    let timeout;
+    let timeout,timedOut=false;
     try{
       const raw=await Promise.race([Promise.resolve().then(()=>generate(context,{signal:controller.signal})),
         new Promise((_,reject)=>{timeout=setTimeout(()=>{
-          controller.abort();reject(Error('timeout'));
-        },11000)})]);
+          timedOut=true;controller.abort();reject(Error('timeout'));
+        },Math.max(1,Math.min(11000,Number(requestTimeoutMs)||11000)))})]);
       const result=validateLiveForestOutput(raw,{characterId,
         requireLine:mode!=='choices',closing});
       if(controller.signal.aborted)return null;
@@ -224,8 +231,10 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
         try{storage?.setItem?.(budgetKey,JSON.stringify({day,
           count:previous.day===day?Number(previous.count)||1:1,exhausted:true}))}catch{}
       }
-      if(!controller.signal.aborted)record({event:'generation-failed',characterId,mode,
-        reason:generationErrorKind(error),modelId,
+      // Timeouts abort the fetch as well, but unlike user cancellation they
+      // must remain visible in diagnosis and exported causal history.
+      if(timedOut||!controller.signal.aborted)record({event:'generation-failed',characterId,mode,
+        reason:timedOut?'timeout':generationErrorKind(error),modelId,
         promptVersion:PROMPT_VERSION,elapsedMs:Math.max(0,now()-startedAt)});
       return null;
     }finally{clearTimeout(timeout);if(inflight?.controller===controller)inflight=null}

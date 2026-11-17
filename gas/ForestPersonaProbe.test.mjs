@@ -35,8 +35,94 @@ test('generated Apps Script saves actual output and exact model input before mar
         text:'（ねこは木の下で道具をならべる。）',mark:null,choices:['いっしょに見る','またね']})}})};}}});
   vm.runInContext(readFileSync(new URL('./ForestPersonaProbe.gs',import.meta.url),'utf8'),ctx);
   vm.runInContext('yondeneGemmaTestProcessQueue()',ctx);
-  assert.equal(requests.length,1);assert.equal(output.length,1);assert.equal(output[0].length,18);
+  assert.equal(requests.length,1);assert.equal(output.length,1);assert.equal(output[0].length,28);
   assert.equal(output[0][17],'PASS');assert.match(output[0][7],/profile2-/);
+  assert.equal(output[0][18],'synthetic');assert.equal(output[0][22],'SYNTHETIC');
   assert.equal(JSON.parse(output[0][15]).messages[1].content,requests[0].messages[1].content);
   assert.ok(marks.some(([row,col,value])=>row===2&&col===5&&value==='APPLIED'));
+});
+
+test('real mirror reflection uses the production selector and labels parent summaries as summaries',()=>{
+  const now=Date.parse('2026-11-17T07:00:00.000Z');
+  const books=[{id:'fake-read',title:'架空の読了本',status:'read'},
+    {id:'fake-unread',title:'架空の未読本',status:'unread'}];
+  const reflection={id:'fake-review',bookId:'fake-read',quote:'実際に見た気がする（架空の保護者要約）',
+    attribution:'parent-summary',createdAt:now-3600000};
+  const mirror={books,reflections:[reflection,
+    {id:'bad',bookId:'fake-unread',quote:'未読の記録',attribution:'verbatim',createdAt:now}],
+    snapshotAt:now-60000};
+  const p=probeInput(people,sources,'cat','ignored','ignored',
+    {mode:'mirror-reflection',mirror,now});
+  const sent=JSON.parse(p.input.messages[1].content);
+  assert.equal(sent.context.sourceKind,'review-reaction');
+  assert.equal(sent.context.readerReflection.attribution,'parent-summary');
+  assert.equal(sent.context.readerReflection.quote,reflection.quote);
+  assert.equal(sent.context.readerReflection.bookTitle,'架空の読了本');
+  assert.equal(p.meta.bookId,'fake-read');
+  assert.equal(p.meta.reflectionId,'fake-review');
+  assert.equal(p.meta.attribution,'parent-summary');
+  assert.equal(sent.npc.profileRevision,p.profile.revision);
+  assert.doesNotMatch(sent.context.readerReflection.perspective,/この本に登場した/u);
+  assert.throws(()=>probeInput(people,sources,'cat','','',
+    {mode:'mirror-reflection',mirror,now,bookId:'fake-unread'}),/BOOK_NOT_READ/);
+  assert.throws(()=>probeInput(people,sources,'cat','','',
+    {mode:'mirror-reflection',mirror:{...mirror,reflections:[]},now}),/NO_ELIGIBLE_REFLECTION/);
+});
+
+test('real read-only story and daily inputs retain provenance and reject unread facts',()=>{
+  const now=Date.parse('2026-11-17T07:00:00Z');
+  const books=[{id:'fake-read',title:'架空の本',status:'read',finishedAt:'2026-11-15'},
+    {id:'fake-unread',title:'未読の本',status:'unread'}];
+  const catalog=[
+    {schemaVersion:1,id:'fiction-1',bookId:'fake-read',text:'ねこが枝を見つけた（架空の事実）',
+      tags:'道具',characters:'cat',spoilerLevel:1,evidenceStatus:'approved',confidence:'high',
+      sourceUrl:'https://example.org/fake'},
+    {schemaVersion:1,id:'fiction-2',bookId:'fake-unread',text:'未読の出来事',
+      tags:'道具',characters:'cat',spoilerLevel:1,evidenceStatus:'approved',confidence:'high',
+      sourceUrl:'https://example.org/unread'}
+  ];
+  const mirror={books,reflections:[],snapshotAt:now-60000};
+  const story=probeInput(people,sources,'cat','no','no',
+    {mode:'mirror-story',mirror,catalog,now});
+  assert.equal(story.prompt.context.sourceKind,'story');
+  assert.match(story.prompt.context.topic.fact,/枝を見つけた/);
+  assert.doesNotMatch(JSON.stringify(story.prompt),/未読の出来事/);
+  assert.equal(story.meta.bookId,'fake-read');
+  const daily=probeInput(people,sources,'cat','','',
+    {mode:'mirror-daily',mirror,catalog,now});
+  assert.equal(daily.prompt.context.sourceKind,'ambient');
+  assert.equal(daily.prompt.context.today.visitsToday,1);
+  assert.ok(['imagined','reviewed'].includes(daily.prompt.context.today.scene.evidence));
+  assert.throws(()=>probeInput(people,sources,'cat','','',
+    {mode:'mirror-story',mirror:{...mirror,books:[{id:'fake-read',status:'unread'}]},catalog,now}),
+    /NO_VERIFIED_STORY/);
+});
+
+test('continuation reuses the same prompt builder, checks offered choices and revoked reading records',()=>{
+  const now=Date.parse('2026-11-17T07:00:00Z');
+  const books=[{id:'fake-read',title:'架空本',status:'read'}];
+  const record={id:'fake-review',bookId:'fake-read',quote:'架空の感想',
+    attribution:'verbatim',createdAt:now-10000};
+  const mirror={books,reflections:[record],snapshotAt:now};
+  const opening=probeInput(people,sources,'cat','','',{mode:'mirror-reflection',mirror,now});
+  const previous={characterId:'cat',prompt:opening.prompt,bookId:opening.meta.bookId,
+    reflectionId:opening.meta.reflectionId,attribution:'verbatim',turn:0,
+    raw:JSON.stringify({text:'（ねこは枝を持って川べりへ行った。）',
+      mark:null,choices:['いっしょに行く','待っている']})};
+  const reply=probeInput(people,sources,'cat','','',{mode:'continuation',mirror,
+    previous,previousId:'fixture-previous',choice:'いっしょに行く',now});
+  assert.equal(reply.prompt.mode,'reply');assert.equal(reply.prompt.closing,false);
+  assert.deepEqual(reply.prompt.context.recentTurns,[{npc:'（ねこは枝を持って川べりへ行った。）'},
+    {playerChoice:'いっしょに行く'}]);
+  assert.equal(reply.prompt.context.readerReflection.attribution,'verbatim');
+  const finish=probeInput(people,sources,'cat','','',{mode:'continuation',mirror,
+    previous:{...previous,prompt:reply.prompt,turn:1},previousId:'fixture-previous',
+    choice:'待っている',now});
+  assert.equal(finish.prompt.closing,true);
+  assert.throws(()=>probeInput(people,sources,'cat','','',
+    {mode:'continuation',mirror,previous,previousId:'fixture-previous',choice:'うそ',now}),
+    /INVALID_CHOICE/);
+  assert.throws(()=>probeInput(people,sources,'cat','','',
+    {mode:'continuation',mirror:{...mirror,books:[{id:'fake-read',status:'unread'}]},
+      previous,previousId:'fixture-previous',choice:'いっしょに行く',now}),/READ_REVOKED/);
 });

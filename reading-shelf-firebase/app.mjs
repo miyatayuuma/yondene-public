@@ -22,7 +22,7 @@ import {loadPrivateForestDialogue} from './book-forest-private-dialogue.mjs?buil
 import {saveCachedForestDialogue,loadCachedForestDialogue,clearCachedForestDialogue,freshForestDialogue} from './book-forest-dialogue-cache.mjs?build=20261117-forest-profile-contract-v19';
 import {createForestDialogueDirector} from './book-forest-dialogue-director.mjs?build=20261116-forest-cat-persona-v17';
 import {diagnoseForestCharacters} from './book-forest-character-profiles.mjs?build=20261117-forest-profile-contract-v19';
-import {createForestLiveDialogueDirector} from './book-forest-live-dialogue.mjs?build=20261117-forest-profile-contract-v19';
+import {createForestLiveDialogueDirector} from './book-forest-live-dialogue.mjs?build=20261117-forest-silent-reactions-v21';
 import {selectRecentForestReflectionEntries,normalizeRecentForestReflection} from './book-forest-reflection-source.mjs?build=20261117-forest-context-probe-v1';
 import {resetForestConversationHistoryOnce} from './book-forest-conversation-reset.mjs?build=20261110-forest-ai-v6';
 import {forestConversationLog} from './book-forest-conversation-log.mjs?build=20261110-forest-ai-v6';
@@ -30,7 +30,7 @@ import {createForestAIGenerator} from './book-forest-ai-provider.mjs?build=20261
 import {createForestCloudflareGenerator,verifyForestCloudflareRoster} from './book-forest-cloudflare-provider.mjs?build=20261117-forest-profile-contract-v19';
 import {STATUSES,ACTIVE_READ_FILTER,filteredBooks,readPeriodLabel,compactReadPeriodLabel,readingModeLabel,emptyStateMessage,seriesVolumeLabel,sortSeriesBooks} from './domain.mjs?build=20261115-series-order-v1';
 
-const APP_BUILD='20261117-forest-context-probe-v20';
+const APP_BUILD='20261117-forest-silent-reactions-v21';
 const $=id=>{const element=document.getElementById(id);if(!element)throw new Error('APP_DOM_MISMATCH: missing #'+id);return element};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const safeCover=url=>/^(https:\/\/|data:image\/(jpeg|png|webp);base64,)/i.test(String(url||''))?String(url):'';

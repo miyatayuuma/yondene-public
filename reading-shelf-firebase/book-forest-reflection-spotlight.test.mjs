@@ -44,7 +44,7 @@ test('all generated NPCs, including non-speaking cat, CAN react as outsiders',()
   assert.equal(cat.quote,'タイトルを変えたいな。');
   assert.match(cat.perspective,/第三者/);
   assert.equal(cat.sourceBookId,'other-book');
-  assert.equal(chooseForestReflectionSpotlight({characterId:'twins',books,reflections,now}),null);
+  assert.equal(chooseForestReflectionSpotlight({characterId:'twins',books,reflections,now})?.attribution,'verbatim');
 });
 
 test('one displayed review is acknowledged forest-wide, other NPCs do not repeat it',()=>{

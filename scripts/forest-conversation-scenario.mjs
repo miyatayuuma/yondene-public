@@ -58,8 +58,11 @@ export async function runForestConversationScenario({visits=[],transport,
       }catch(error){entry.validation='rejected';
         // Do not retain provider exception bodies or credentials in traces.
         entry.failure=/timeout/iu.test(String(error?.message||''))?'timeout':
-          /Invalid model JSON/u.test(String(error?.message||''))?'model-json':
-          /Invalid model|Invalid silent|Invalid closing/u.test(String(error?.message||''))?'output-validation':'model-or-transport';
+          /Invalid model unsafe-foraging/u.test(String(error?.message||''))?'unsafe-foraging':
+          /Invalid silent cat action/u.test(String(error?.message||''))?'silent-output-contract':
+          /Model HTTP (\d{3})/u.exec(String(error?.message||''))?.[0]?.toLowerCase().replaceAll(' ','-')||
+          (/Invalid model JSON/u.test(String(error?.message||''))?'model-json':
+          /Invalid model|Invalid silent|Invalid closing/u.test(String(error?.message||''))?'output-validation':'model-or-transport');
         throw error;}
     }});
   async function display(result,identity,visit,turn,visible=true){
@@ -72,20 +75,27 @@ export async function runForestConversationScenario({visits=[],transport,
     for(const [visit,item] of visits.entries()){
       const identity={characterId:item.characterId};
       let result=await live.start(identity);
-      await display(result,identity,visit,0,item.display!==false);
-      for(const [turn,selection] of (item.choices||[]).entries()){
-        if(result?.conversationComplete&&!result.choices?.length)break;
+      let frameNumber=0;
+      async function showSegment(){
+        await display(result,identity,visit,frameNumber++,item.display!==false);
+        for(let n=0;result?.autoNext&&!result.choices?.length&&n<10;n++){
+          result=await live.advance(identity);
+          if(!result)break;
+          await display(result,identity,visit,frameNumber++,item.display!==false);
+        }
+      }
+      await showSegment();
+      for(const selection of item.choices||[]){
+        if(!result||result.conversationComplete&&!result.choices?.length)break;
         const choice=typeof selection==='number'?result?.choices?.[selection]:
           result?.choices?.find(c=>c.label===selection);
         if(!choice)throw Error('Scenario selected a choice that was not displayed');
         result=await live.select({...identity,choiceId:choice.id});
-        await display(result,identity,visit,turn+1,item.display!==false);
+        await showSegment();
       }
-      // Twins retain their existing local presentation, until the separate
-      // structured multi-speaker migration has passed real-model acceptance.
       for(let n=0;result?.autoNext&&n<10;n++){
         result=await live.advance(identity);if(!result)break;
-        await display(result,identity,visit,n+1,item.display!==false);
+        await display(result,identity,visit,frameNumber++,item.display!==false);
       }
       live.end();
     }

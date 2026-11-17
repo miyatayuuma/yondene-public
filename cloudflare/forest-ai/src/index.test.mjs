@@ -141,13 +141,13 @@ test('Worker accepts an outsider reaction with bounded reader context and new NP
 });
 
 
-test('v17 health reports all supported generators, including non-speaking cat',async()=>{
+test('Health reports all supported generators, including non-speaking cat',async()=>{
   const response=await handleRequest(request('/health',{method:'GET'}),{
     OWNER_UID:ownerUid,AI:{run:async()=>({})}});
   assert.equal(response.status,200);
-  assert.equal(response.headers.get('X-Forest-AI-Version'),'forest-dialogue-v21-profile2');
+  assert.equal(response.headers.get('X-Forest-AI-Version'),'forest-dialogue-v22-profile2');
   assert.deepEqual((({profileRevision,...rest})=>rest)(await response.json()),{
-    model:'@cf/google/gemma-4-26b-a4b-it',version:'forest-dialogue-v21-profile2',
+    model:'@cf/google/gemma-4-26b-a4b-it',version:'forest-dialogue-v22-profile2',
     registryRevision:FOREST_ROSTER_REVISION,protocolRevision:FOREST_DIALOGUE_PROTOCOL,
     supportedNpcCount:FOREST_AI_GENERATION_IDS.length,configured:true});
 });

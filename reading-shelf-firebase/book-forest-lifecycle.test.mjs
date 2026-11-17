@@ -150,7 +150,7 @@ test('twin conversation displays alternating names, autoplays, pauses in backgro
     const history=find(env.document.body,'bookForestTwinHistory');
     const waiting=find(env.document.body,'bookForestTwinWaiting');
     const dismiss=find(env.document.body,'bookForestDismiss');
-    assert.equal(dismiss.hidden,true,'no close button during the pre-generated scene');
+    assert.equal(dismiss.hidden,false,'the child can interrupt a twin exchange');
     assert.equal(history.children[0].children[0].textContent,'ふたご');
     assert.equal(waiting.hidden,false,'animated dots indicate more twin dialogue is coming');
     assert.equal(waiting.children[0].textContent,'テストA','next speaker is visible immediately');

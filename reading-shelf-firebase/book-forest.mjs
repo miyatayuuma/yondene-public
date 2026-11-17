@@ -150,7 +150,7 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
     makeSpeechTarget(message,'',character.dialogueId||character.id,chatSession);
     twinHistory.replaceChildren();replies.replaceChildren();
     const session=++chatSession,identity={characterId:character.dialogueId||character.id,displayName:character.name};
-    dismiss.hidden=identity.characterId==='twins';dismiss.textContent='とじる';
+    dismiss.hidden=false;dismiss.textContent='とじる';
     try{
       const result=await (dialogue?.start||defaultDialogue.start)(identity);
       if(!chatOpen||session!==chatSession||disposed)return;
@@ -161,7 +161,7 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
     stopSpeech();cancelAutoDialogue();currentDialogue=[result,identity,session];
     if(identity.characterId==='cat'&&result?.mark)catWriting?.show(result.mark,activeCharacter);
     else catWriting?.clear();
-    dismiss.hidden=result?.mode==='twins'&&result?.conversationComplete!==true;
+    dismiss.hidden=false;
     dismiss.textContent=result?.conversationComplete===true?'またね':'とじる';
     if(result?.mode==='twins'){
       speaker.textContent='ふたご';message.hidden=true;twinHistory.hidden=false;

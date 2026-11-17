@@ -10,12 +10,13 @@ test('written marks accept hiragana and all 80 grade-one kanji, but never higher
   for(const word of ['こっち','またね','おはよう','おーい','木','王さま、雨がふりそう。','森へいこう！']){
     assert.deepEqual(validateForestGestureMark({surface:'ground',word}),{surface:'ground',word});
   }
-  for(const word of ['Hello','猫','読','道','前','カタカナ','１２３','', 'あ'.repeat(49),'あ い','おうさま「おかえり」','！']){
+  for(const word of ['Hello','猫','読','道','前','カタカナ','１２３','', 'あ'.repeat(49),'あ\nい','おうさま「おかえり」','！']){
     assert.equal(validateForestGestureMark({surface:'ground',word}),undefined,word);
   }
   assert.equal(validateForestGestureMark({surface:'lake',word:'こっち'}),undefined);
   assert.equal(validateForestGestureMark(null),null);
   assert.equal(validateForestGestureMark({surface:'leaf',word:'またね'}).word,'またね');
+  assert.equal(validateForestGestureMark({surface:'note',word:'木の 上を　見て。'}).word,'木の上を見て。');
   const note='おうさま、いそがなくていいよ。ひとつずつやればだいじょうぶ！';
   assert.deepEqual(validateForestGestureMark({surface:'note',word:note}),
     {surface:'note',word:note});

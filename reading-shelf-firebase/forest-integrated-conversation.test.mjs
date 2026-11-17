@@ -148,3 +148,51 @@ test('a model-format success rejected by the real browser validator is not a pip
   assert.equal(run.trace[0].validation,'rejected');
   assert.doesNotMatch(run.frames[0].result.text,/キキは/);
 });
+
+const twinNames=[{id:'sample-pair',schemaVersion:1,approval:'approved',firstName:'あお',secondName:'そら'}];
+const twinDefaults={...defaults,getTwinNames:()=>twinNames,
+  getCharacterProfiles:()=>[...profiles,profileFixture({id:'twins'})]};
+const twinRaw=(closing=false)=>({response:JSON.stringify({
+  turns:[{speakerSlot:1,text:'あっ、小川だ。'},{speakerSlot:2,text:'水の音がするね。'}],
+  choices:closing?[]:['耳をすます','橋を見たい']})});
+
+test('twins use the shared generator through opening, choices, closing and a persisted revisit',async()=>{
+  const transport=async(_input,args)=>args.prompt.npc.id==='twins'?twinRaw(args.prompt.closing):raw(args);
+  const first=await runForestConversationScenario({...twinDefaults,transport,
+    visits:[{characterId:'twins',choices:[0,1]},{characterId:'skipper',choices:[0]}]});
+  assert.deepEqual(first.frames.slice(0,6).map(f=>f.result?.speakerName),['あお','そら','あお','そら','あお','そら']);
+  assert.equal(first.frames[0].result.choices.length,0);
+  assert.equal(first.frames[1].result.choices.length,2);
+  assert.equal(first.frames[5].result.conversationComplete,true);
+  assert.equal(first.trace[1].prompt.context.chosenLabel,'耳をすます');
+  assert.equal(first.trace[1].prompt.context.recentTurns[0].turns[1].speakerSlot,2);
+  assert.equal(first.trace[3].prompt.context.today.previousNpc,'twins');
+  assert.equal(first.progress.visits.twins,1);
+  const second=await runForestConversationScenario({...twinDefaults,transport,
+    storage:scenarioStorage(first.storage),
+    getTwinNames:()=>[{...twinNames[0],id:'other-pair',firstName:'なつ'},...twinNames],
+    visits:[{characterId:'twins'}]});
+  assert.equal(second.trace[0].prompt.context.situation.firstEncounter,false);
+  assert.equal(second.frames[0].result.speakerName,'あお');
+  assert.equal(second.frames[1].result.speakerName,'そら');
+  assert.equal(second.progress.visits.twins,2);
+});
+
+test('twins reject dangerous lines across speakers and stop cleanly after reply failure',async()=>{
+  const context={situation:{place:'本の森'}};
+  const bad={turns:[{speakerSlot:1,text:'赤い実がなってるよ。'},
+    {speakerSlot:2,text:'食べてみよう！'}],choices:['見てみる','調べる']};
+  assert.throws(()=>readCompletion({response:JSON.stringify(bad)},
+    {characterId:'twins',mode:'opening',context}),/unsafe-foraging/);
+  const run=await runForestConversationScenario({...twinDefaults,
+    visits:[{characterId:'twins',choices:[0,0]},{characterId:'skipper'}],
+    transport:async(_input,args)=>{
+      if(args.prompt.npc.id!=='twins')return raw(args);
+      if(args.prompt.mode==='reply')throw Error('Model HTTP 503');
+      return twinRaw();
+    }});
+  assert.equal(run.trace[1].failure,'model-http-503');
+  assert.equal(run.frames[2].result.conversationComplete,true);
+  assert.equal(run.frames[2].result.choices.length,0);
+  assert.equal(run.trace[2].prompt.context.today.previousNpc,'twins');
+});

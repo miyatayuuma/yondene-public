@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createForestLiveDialogueDirector,validateLiveForestOutput} from './book-forest-live-dialogue.mjs';
+import {createForestLiveDialogueDirector,validateLiveForestOutput,promptFor} from './book-forest-live-dialogue.mjs';
 import {parseForestCharacterProfiles} from './book-forest-character-profiles.mjs';
 import {profileFixture,legacyFixture} from './forest-profile-fixture.mjs';
 
@@ -583,6 +583,43 @@ test('a long approved reflection cue is a prompt reference, not an output to rej
   assert.equal(captured[0].context.sourceKind,'reflection');
   assert.equal(captured[0].context.npcLine,'');
   assert.equal(local.getItem('forest-ai-local-v1:log').includes(longCue),false);
+});
+
+test('nonverbal NPC chooses reactions by context, with writing optional and no hardcoded persona',()=>{
+  const characterProfile=mockCatProfiles()[0];
+  const base={characterId:'cat',characterProfile,mode:'opening'};
+  const review={bookTitle:'架空の読了本',quote:'石がころがるところがおもしろい',
+    attribution:'verbatim',perspective:'別作品を聞いた第三者'};
+  const reflection=promptFor({...base,sourceKind:'review-reaction',reviewSpotlight:review});
+  const casual=promptFor({...base,sourceKind:'ambient'});
+  const story=promptFor({...base,sourceKind:'story',topic:{fact:'架空の本の出来事'}});
+  const reply=promptFor({...base,mode:'reply',sourceKind:'review-reaction',
+    reviewSpotlight:review,chosenLabel:'もう少し見る',history:[{npc:'（石を見つめる。）'}]});
+  const closing=promptFor({...base,mode:'reply',closing:true,
+    sourceKind:'review-reaction',reviewSpotlight:review});
+  assert.match(reflection.task,/readerReflection.*具体的な内容/u);
+  assert.match(story.task,/確認済みの既読/u);
+  assert.match(reply.task,/直前の行動/u);
+  assert.match(closing.task,/自然に終える/u);
+  assert.notEqual(reflection.task,casual.task);
+  assert.ok(reflection.constraints.some(line=>/書かない場面はmark:null/.test(line)));
+  assert.ok(reflection.constraints.some(line=>/動くことや解決することを強制しない/.test(line)));
+  assert.ok(reflection.constraints.some(line=>/帰属|本人の発言/.test(line)));
+  assert.equal(reflection.context.readerReflection.quote,review.quote);
+  assert.equal(reflection.context.readerReflection.attribution,'verbatim');
+  assert.equal(reflection.npc.voice.includes('家事・買い物'),true);
+  assert.doesNotMatch(reflection.constraints.join(' '),/家事・買い物|王さまとの友情/u,
+    'character personality must come from the private profile');
+  assert.deepEqual(validateLiveForestOutput({text:'（石を指して、しばらく静かに見守る。）',
+    mark:null,choices:['近くで見てみる','そのまま待つ']},
+  {characterId:'cat',requireLine:true}),{text:'（石を指して、しばらく静かに見守る。）',
+    labels:['近くで見てみる','そのまま待つ']});
+  assert.deepEqual(validateLiveForestOutput({text:'（枝を拾い、転がりそうな石の前に置いた。）',
+    mark:null,choices:['いっしょに見る','別の道へ行く']},
+  {characterId:'cat',requireLine:true}),{text:'（枝を拾い、転がりそうな石の前に置いた。）',
+    labels:['いっしょに見る','別の道へ行く']});
+  assert.equal(validateLiveForestOutput({text:'（「そうね」と心の中で思った。）',
+    mark:null,choices:['近くで見る','もう帰る']},{characterId:'cat',requireLine:true}),null);
 });
 
 test('cat uses a private Sheets persona for nonverbal AI action and writing, never TTS',async()=>{

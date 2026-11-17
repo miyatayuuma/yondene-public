@@ -103,8 +103,5 @@ export async function loadPrivateForestDialogue(token,{fetchImpl=fetch}={}){
   const twinScenes=parseTwinSceneRows(data.valueRanges[3]?.values);
   const characterProfiles=parseForestCharacterProfiles(data.valueRanges[4]?.values,
     parseForestProfileSources(data.valueRanges[5]?.values));
-  // Legacy callers still expect thoughtSeeds in the private package; this is
-  // intentionally empty. Character-driven topics now come from verified
-  // story memories and each NPC's profile, not philosophical seed rows.
-  return {catalog,cues,twinNames,twinScenes,thoughtSeeds:[],characterProfiles,loadedAt:Date.now()};
+  return {catalog,cues,twinNames,twinScenes,characterProfiles,loadedAt:Date.now()};
 }

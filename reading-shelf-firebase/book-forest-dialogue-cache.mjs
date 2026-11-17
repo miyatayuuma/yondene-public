@@ -1,5 +1,4 @@
 import {validateForestDialogueCues} from './book-forest-dialogue-director.mjs';
-import {unlockedStoryMemories} from './book-forest-story-memory.mjs';
 import {validateTwinNamePairs,validateTwinScenes} from './book-forest-twins.mjs';
 import {validForestCharacterProfiles} from './book-forest-character-profiles.mjs';
 
@@ -25,8 +24,6 @@ export async function saveCachedForestDialogue({uid,familyId,packageData,cacheSt
   if(!Array.isArray(packageData?.cues))throw Error('会話資料の形式が正しくありません');
   if(!Array.isArray(packageData?.catalog)||packageData.catalog.length>140)
     throw Error('物語記憶の件数が正しくありません');
-  if(!Array.isArray(packageData?.thoughtSeeds)||packageData.thoughtSeeds.length>180)
-    throw Error('思考の種台帳の形式が正しくありません');
   if(!Array.isArray(packageData?.characterProfiles)||
     validForestCharacterProfiles(packageData.characterProfiles).length!==packageData.characterProfiles.length)
     throw Error('非公開キャラクター設定の形式が正しくありません');
@@ -53,7 +50,6 @@ export async function loadCachedForestDialogue({uid,familyId,cacheStorage=global
     if(!freshForestDialogue(data))throw Error('expired');
     if(!Array.isArray(data.catalog)||data.catalog.length>140||!Array.isArray(data.cues))
       throw Error('invalid');
-    if(!Array.isArray(data.thoughtSeeds)||data.thoughtSeeds.length>180)throw Error('invalid seeds');
     if(!Array.isArray(data.characterProfiles)||
       validForestCharacterProfiles(data.characterProfiles).length!==data.characterProfiles.length)
       throw Error('invalid profiles');
@@ -62,7 +58,7 @@ export async function loadCachedForestDialogue({uid,familyId,cacheStorage=global
     // Fact-level authorization still happens with the current Firestore shelf
     // snapshot in the director. Never persist reading state or review quotes.
     return {catalog:data.catalog,cues:validateForestDialogueCues(data.cues),twinNames,twinScenes,
-      loadedAt:data.loadedAt,thoughtSeeds:data.thoughtSeeds,characterProfiles:validForestCharacterProfiles(data.characterProfiles)};
+      loadedAt:data.loadedAt,characterProfiles:validForestCharacterProfiles(data.characterProfiles)};
   }catch{
     await cacheStorage.delete(name);return null;
   }

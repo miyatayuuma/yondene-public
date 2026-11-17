@@ -63,7 +63,7 @@ test('Drive lookup and Google Sheets batchGet are owner-authorized, bounded, and
   assert.equal(result.cues.length,2);
   assert.equal(result.twinNames.length,1);
   assert.equal(result.twinScenes.length,2);
-  assert.deepEqual(result.thoughtSeeds,[]);
+  assert.equal('thoughtSeeds' in result,false);
   assert.equal(result.characterProfiles[0].firstPerson,'ぼく');
   assert.match(calls[0].url,/drive\/v3\/files/);
   assert.match(calls[1].url,/sheets\.googleapis\.com\/v4\/spreadsheets/);
@@ -87,7 +87,7 @@ test('private conversation cache uses owner scope and clears on command',async()
   const recovered=await loadCachedForestDialogue({uid:'user-1',familyId:'family-1',cacheStorage:storage});
   assert.equal(recovered.catalog[0].id,'mem-1');
   assert.equal(recovered.twinScenes[0].id,'intro');
-  assert.deepEqual(recovered.thoughtSeeds,[]);
+  assert.equal('thoughtSeeds' in recovered,false);
   assert.equal(recovered.characterProfiles[0].id,'jiji');
   assert.equal(await loadCachedForestDialogue({uid:'user-2',familyId:'family-1',cacheStorage:storage}),null);
   await clearCachedForestDialogue({uid:'user-1',familyId:'family-1',cacheStorage:storage});

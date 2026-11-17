@@ -42,7 +42,7 @@ export function probeInput(personRows,sourceRows,id,scene,utterance,options={}){
     if(!prev||prev.characterId!==id||!idPattern.test(norm(options.previousId))||
       !norm(options.choice))throw Error('INVALID_CONTINUATION');
     const previous=readCompletion({response:prev.raw},{mode:prev.prompt.mode||'opening',
-      characterId:id,closing:prev.prompt.closing===true});
+      characterId:id,closing:prev.prompt.closing===true,context:prev.prompt.context});
     if(!previous.choices?.includes(norm(options.choice)))throw Error('INVALID_CHOICE');
     const previousTurns=Array.isArray(prev.prompt.context?.recentTurns)?
       prev.prompt.context.recentTurns:[];
@@ -226,7 +226,7 @@ export function processQueue(){
       const raw=result?.response??result?.choices?.[0]?.message?.content;
       let valid=false;
       try{readCompletion(result,{mode:prepared.prompt.mode,characterId:npc,
-        closing:prepared.prompt.closing===true});valid=true}catch{}
+        closing:prepared.prompt.closing===true,context:prepared.prompt.context});valid=true}catch{}
       out.getRange(1,16,1,13).setValues([[
         '生成入力JSON','人物設定取得時刻','出力形式検証','文脈モード',
         '本棚同期日時','対象書籍ID','感想帰属','文脈確認','先行requestId',

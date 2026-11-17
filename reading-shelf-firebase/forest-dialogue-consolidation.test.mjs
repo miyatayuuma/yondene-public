@@ -23,7 +23,7 @@ test('private dialogue loads without legacy thought seed tab', async ()=>{
   assert.equal(ranges.some(range=>range.includes('思考の種')),false);
   assert.equal(ranges.some(range=>range.includes('人物設定')),true);
   assert.equal(ranges.some(range=>range.includes('根拠資料')),true);
-  assert.deepEqual(data.thoughtSeeds,[]);
+  assert.equal('thoughtSeeds' in data,false);
   assert.deepEqual(data.characterProfiles,[]);
 });
 

@@ -234,3 +234,20 @@ test('Worker rejects nonverbal speech and writing outside grade-one glyphs',asyn
     assert.equal(res.status,502);
   }
 });
+
+
+test('Worker returns only safe model JSON/validation categories without raw exceptions',async()=>{
+  const failures=[
+    {payload:'this is not JSON',code:'model-json'},
+    {payload:JSON.stringify({text:'返事だけで選択肢がない'}),code:'output-validation'}
+  ];
+  for(const {payload,code} of failures){
+    const env={OWNER_UID:ownerUid,FIREBASE_PROJECT_ID:projectId,
+      AI:{run:async()=>({response:payload})}};
+    const response=await handleRequest(request('/dialogue',{body:{prompt:{...prompt,mode:'opening'}}}),
+      env,{verifyToken:async()=>ownerUid});
+    assert.equal(response.status,502);
+    assert.deepEqual(await response.json(),{error:'AI unavailable',code});
+    assert.equal(response.headers.get('Cache-Control'),'no-store');
+  }
+});

@@ -78,3 +78,21 @@ test('Cloudflare health roster handshake rejects old or misconfigured Workers be
   await assert.rejects(verifyForestCloudflareRoster({
     workerUrl:'http://demo.workers.dev',expectedRevision:expected}),/configuration invalid/);
 });
+
+
+test('Cloudflare provider preserves safe Worker diagnostic categories without exposing raw error text',async()=>{
+  const key=async()=>('signed.'+'token'.repeat(6));
+  for(const code of ['model-json','output-validation']){
+    const generate=createForestCloudflareGenerator({workerUrl:'https://demo.workers.dev',
+      getIdToken:key,fetchImpl:async()=>({ok:false,status:502,json:async()=>({
+        error:'AI unavailable',code,privateStack:'do-not-export'})})});
+    await assert.rejects(()=>generate({task:'診断'}),new RegExp('Forest AI diagnostic '+code));
+  }
+  const unexpected=createForestCloudflareGenerator({workerUrl:'https://demo.workers.dev',
+    getIdToken:key,fetchImpl:async()=>({ok:false,status:502,json:async()=>({
+      error:'AI unavailable',code:'private-secret-value'})})});
+  await assert.rejects(()=>unexpected({}),/^Error: Forest AI unavailable \(502\)$/u);
+  const malformed=createForestCloudflareGenerator({workerUrl:'https://demo.workers.dev',
+    getIdToken:key,fetchImpl:async()=>({ok:true,json:async()=>{throw SyntaxError('private content')}})});
+  await assert.rejects(()=>malformed({}),/Invalid Forest AI JSON/u);
+});

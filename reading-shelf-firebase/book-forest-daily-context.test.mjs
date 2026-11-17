@@ -37,7 +37,7 @@ test('topics draw only from approved, read episodes fitting that specific charac
   const kiki=eligibleForestDailyTopics({characterId:'kiki',...input,now:day});
   const zorori=eligibleForestDailyTopics({characterId:'zorori',...input,now:day});
   const ishishi=eligibleForestDailyTopics({characterId:'ishishi',...input,now:day});
-  assert.deepEqual(kiki.map(item=>item.kind),['seed']);
+  assert.deepEqual(kiki.map(item=>item.kind),['memory']);
   assert.ok(kiki[0].fact.includes('パン'));
   assert.deepEqual(zorori.map(item=>item.memoryId),['mem-z']);
   assert.deepEqual(ishishi.map(item=>item.memoryId),['mem-z']);
@@ -70,10 +70,10 @@ test('source-based themes stay stable within the day and never leak book IDs',()
   assert.ok(!stored.includes('childReflection'));
 });
 
-test('a single eligible seed is not forced every day while the three-day cooldown runs',()=>{
+test('a single eligible memory is not forced every day while the three-day cooldown runs',()=>{
   const local=storage();let timestamp=day;
   const session=createForestDailyContextSession({storage:local,now:()=>timestamp});
-  assert.equal(session.visit('kiki',input).scene.kind,'seed');
+  assert.equal(session.visit('kiki',input).scene.kind,'memory');
   timestamp+=86400000;
   assert.equal(session.visit('kiki',input).scene.kind,'ambient');
   timestamp+=86400000;

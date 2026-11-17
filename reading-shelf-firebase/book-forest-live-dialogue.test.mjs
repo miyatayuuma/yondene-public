@@ -41,7 +41,7 @@ test('generates contextual reply choices, then a character reply only after a ch
   assert.equal(prompts.length,1,'one call on an active encounter, never background loops');
   assert.equal(first.text,'この風、少し遠くまで行きたくなるね。','ambient opening changes');
   assert.deepEqual(first.choices.map(x=>x.label),['風の音を聞く','どこに行く？']);
-  assert.equal(prompts[0].context.npcLine,'今日はいい風がふいているね。');
+  assert.equal(prompts[0].context.npcLine,'','legacy script must not enter prompt');
   assert.equal(prompts[0].mode,'opening');
   assert.ok(prompts[0].context.today.scene.focus);
   const second=await director.select({...identity,choiceId:first.choices[0].id});
@@ -53,7 +53,7 @@ test('generates contextual reply choices, then a character reply only after a ch
   const log=JSON.parse(storage.getItem('forest-ai-local-v1:log'));
   assert.deepEqual(log.map(x=>x.event),['generated-opening','selected-offered-choice','generated-reply']);
   assert.equal(log[0].text,first.text,'export can reconstruct the initial line');
-  assert.equal(log[0].promptVersion,'forest-scene-generation-v17');
+  assert.equal(log[0].promptVersion,'forest-scene-generation-v18');
   assert.equal(log[1].label,'風の音を聞く');
   director.end();
 });
@@ -203,8 +203,7 @@ test('private persona governs each live opening and reply; the shared theme is o
   assert.equal(result.text,'ぼくは先に見ておくよ。');
   assert.match(prompts[0].npc.voice,/一人称:ぼく/);
   assert.match(prompts[0].npc.voice,/関係性:キキ/);
-  assert.deepEqual(prompts[0].npc.approvedExamples,
-    ['あの木、ちょっと曲がってるね。','ふうん。きみはそっちに行くんだ。']);
+  assert.equal('approvedExamples' in prompts[0].npc,false,'finished examples must stay in fallback only');
   assert.equal(prompts[0].mode,'opening');
   assert.equal(prompts[0].context.sourceKind,'meet');
   assert.ok(prompts[0].constraints.some(rule=>rule.includes('情報量や深い話')));
@@ -312,7 +311,7 @@ test('sourced story drives generated opening without unrelated daily seed',async
   assert.equal(first.text,'わたしも楽しみだな。');
   assert.equal(prompts[0].mode,'opening');
   assert.equal(prompts[0].context.sourceKind,'story');
-  assert.equal(prompts[0].context.npcLine,'花が咲くといいな。');
+  assert.equal(prompts[0].context.npcLine,'');
   assert.equal(prompts[0].context.topic.fact,'花を植えた');
   assert.equal(prompts[0].context.topic.question,undefined);
   assert.equal(prompts[0].context.topic.philosophy,undefined);
@@ -333,7 +332,7 @@ test('sourced story drives generated opening without unrelated daily seed',async
   assert.equal(prompts.length,1,'a stale source cue must not send revoked prose as npcLine');
 });
 
-test('a daily approved seed can drive a new ambient opening without leaking source identifiers',async()=>{
+test('a verified memory can drive an ambient opening without seed prompts or source identifiers',async()=>{
   const local=memoryStorage(),prompts=[],sourced={...base(),
     start:async()=>({text:'今日はいい風がふいているね。',sourceKind:'ambient',
       choices:[{id:'another-topic',label:'ほかの話も聞く'}]})};
@@ -352,7 +351,7 @@ test('a daily approved seed can drive a new ambient opening without leaking sour
   if(prompts[0].context.today.scene.evidence==='reviewed'){
     const scene=prompts[0].context.today.scene;
     assert.match(scene.focus,/荷物を届けた/u);
-    assert.equal(scene.kind,'seed');
+    assert.equal(scene.kind,'memory');
     assert.equal(JSON.stringify(prompts[0]).includes('private-b'),false);
     assert.equal(JSON.stringify(prompts[0]).includes('private-m'),false);
     assert.equal(JSON.stringify(prompts[0]).includes('private-s'),false);
@@ -587,7 +586,7 @@ test('a long approved reflection cue is a prompt reference, not an output to rej
   const result=await director.start(identity);
   assert.equal(result.text,'へえ、そんなことが気になったんだ。');
   assert.equal(captured[0].context.sourceKind,'reflection');
-  assert.ok(captured[0].context.npcLine.length<=170);
+  assert.equal(captured[0].context.npcLine,'');
   assert.equal(local.getItem('forest-ai-local-v1:log').includes(longCue),false);
 });
 

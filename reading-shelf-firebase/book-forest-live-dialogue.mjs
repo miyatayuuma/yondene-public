@@ -3,10 +3,8 @@ import {FOREST_CHARACTER_IDS,FOREST_FALLBACK_VOICES,FOREST_SELF_NAMES,
 import {validateForestGestureMark,validateForestGestureText} from './book-forest-gesture.mjs';
 // Character-first AI dialogue: local scripts choose topics and provide safe fallbacks.
 // The generator is injected: this module never holds a key or makes a network call.
-import {createForestThoughtSession} from './book-forest-thought-seeds.mjs';
 import {createForestDailyContextSession} from './book-forest-daily-context.mjs';
 import {createForestReflectionSpotlightSession} from './book-forest-reflection-spotlight.mjs';
-import {validateForestDialogueCues} from './book-forest-dialogue-director.mjs';
 import {unlockedStoryMemories} from './book-forest-story-memory.mjs';
 import {forestCharacterVoiceGuide,validForestCharacterProfiles} from './book-forest-character-profiles.mjs';
 const CHARACTERS=new Set(FOREST_CHARACTER_IDS.filter(id=>id!=='twins'));
@@ -17,7 +15,7 @@ const ACTION_WRITING_IDS=new Set(FOREST_ACTION_WRITING_IDS);
 const safeEnd=(id,comma=false)=>ACTION_WRITING_IDS.has(id)?
   '（ねこはしっぽをゆっくりふった。）':GOODBYE[id]||(comma?'また、森で会おうね。':'また森で会おうね。');
 const WRONG_FIRST_PERSON=FOREST_WRONG_FIRST_PERSON;
-const PROMPT_VERSION='forest-scene-generation-v17';
+const PROMPT_VERSION='forest-scene-generation-v18';
 const clean=value=>typeof value==='string'?value.trim().replace(/\s+/gu,' '):'';
 function readJson(storage,key,fallback){
   try{return JSON.parse(storage?.getItem?.(key)||'null')||fallback}catch{return fallback}
@@ -69,15 +67,6 @@ export function validateLiveForestOutput(raw,{characterId,requireLine=false,clos
   return {text:requireLine?text:null,labels,...(mark?{mark}:{})};
 }
 
-function approvedVoiceExamples(cues,characterId,currentLine){
-  const lines=validateForestDialogueCues(cues).filter(cue=>
-    cue.characterId===characterId&&['meet','ambient'].includes(cue.kind)&&
-    !cue.bookId&&!cue.memoryId)
-    .map(cue=>clean(cue.text)).filter(line=>line&&line!==clean(currentLine)&&
-      line.length<=100&&!/[{}]/u.test(line));
-  return [...new Set(lines)].slice(0,2);
-}
-
 function promptScene(scene,sourceKind){
   if(!scene)return {};
   if(sourceKind!=='ambient')return {tone:scene.tone||''};
@@ -87,13 +76,15 @@ function promptScene(scene,sourceKind){
     ...(previousChoice?{previousChoice,stage}:{})};
 }
 
-function promptFor({characterId,mode,npcLine,chosenLabel='',history=[],closing=false,topic=null,
-  characterProfile=null,voiceExamples=[],sourceKind='',dailyContext=null,recentLines=[],reviewSpotlight=null,situation=null}){
+export function promptFor({characterId,mode,chosenLabel='',history=[],closing=false,topic=null,
+  characterProfile=null,sourceKind='',dailyContext=null,recentLines=[],reviewSpotlight=null,situation=null}){
   const guide=forestCharacterVoiceGuide(characterProfile);
   // Personhood is always loaded from the same private Sheets as other NPCs.
   // Only the response format differs; this code has no cat personality text.
   const nonverbal=ACTION_WRITING_IDS.has(characterId);
-  const context={npcLine:clean(npcLine).slice(0,170),sourceKind,
+  // Existing Worker protocol requires a string field; keep it empty rather than
+  // sending a completed script as a model-generation anchor.
+  const context={npcLine:'',sourceKind,
     chosenLabel:clean(chosenLabel).slice(0,24),...(situation?{situation}:{}),
     recentTurns:history.slice(-4),...(topic?{topic}:{}),
     ...(reviewSpotlight?{readerReflection:Object.fromEntries(
@@ -110,7 +101,7 @@ function promptFor({characterId,mode,npcLine,chosenLabel='',history=[],closing=f
       mode==='reply'?'相手が選んだ行動を受けて、人物設定に合う次の行動を表す':
       sourceKind==='meet'?'初対面の相手に、人物設定に合う無言の初めの反応をする':
       'この状況と人物設定に合う、具体的で自然な行動を一つ示す',
-    npc:{id:characterId,voice:guide,approvedExamples:voiceExamples.slice(0,2)},
+    npc:{id:characterId,voice:guide},
     context,
     constraints:[
       '最優先はnpc.voiceの人物像・関係性・動機・ふるまい。設定の説明や一般的な教訓で代用しない',
@@ -142,8 +133,7 @@ function promptFor({characterId,mode,npcLine,chosenLabel='',history=[],closing=f
       sourceKind==='ambient'&&situation?.focus==='character'?
         '人物設定の関心・普段の行動から、本人らしい雑談や冗談と返答候補2つを作る':
       firstLineTask[sourceKind]||firstLineTask.ambient,
-    npc:{id:characterId,voice:guide||VOICES[characterId],
-      approvedExamples:voiceExamples.slice(0,2)},
+    npc:{id:characterId,voice:guide||VOICES[characterId]},
     context,
     constraints:[
       '会話は日本語。小学校低学年が読める短い言葉と簡単な漢字にする',
@@ -151,7 +141,7 @@ function promptFor({characterId,mode,npcLine,chosenLabel='',history=[],closing=f
       '原作の出来事を勝手に作らない。別作品の出来事をその場で目撃したと装わず、台詞引用・あらすじ・教訓にしない',
       '感想に書かれていない本人の行動・感情や読書中の様子を知っているふりをしない',
       '最優先はNPC本人らしい言葉、間、反応、行動。情報量や深い話を求めず、思考の種から質問・教訓・立派な気づきを全員に強いない',
-      '台帳のnpcLine・承認済み台詞例は発話の手本と話題の手がかり。コピーせず、今の状況に適した新しい第一声を作る',
+      '完成済み台本を参照せず、人物像・目の前の状況・許可された既読事実から自然な発話を新規に作る',
       'NPCの返事は自然な一言〜2文で65字以内。前の発言を繰り返さず、設定の説明を会話に混ぜない',
       '返答候補は2個、各16字以内。ありきたりな相づちや無意味な質問を続けない',
       '選択肢はゲーム上の反応であり子どもの実際の信念とはみなさない。別NPCの会話を本人が聞いたふりはしない',
@@ -170,14 +160,13 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
   storageKey='forest-ai-local-v1',now=()=>Date.now(),dailyLimit=300,sessionLimit=3,
   maxReplies=2,startDelayMs=280,modelId='unknown',getBooks=()=>[],getCatalog=()=>[],
   getCues=()=>[],
-  getSeeds=()=>[],getCharacterProfiles=()=>[],getRecentReflections=async()=>[],
+  getCharacterProfiles=()=>[],getRecentReflections=async()=>[],
   requireCharacterProfile=false}={}){
   if(!base||typeof base.start!=='function'||typeof base.select!=='function'||
     typeof generate!=='function')throw Error('base and generate are required');
   let pending=null,pendingScripted=null,history=[],sessionCount=0,repliesThisSession=0,serial=0,closed=false,epoch=0,
-    inflight=null,activeCharacterProfile=null,activeVoiceExamples=[],activeDaily=null,
+    inflight=null,activeCharacterProfile=null,activeDaily=null,
     displayedTopicKey='',encounterDisplayed=false,activeSituation=null;
-  const thoughtUsage=createForestThoughtSession({storage,storageKey:storageKey+':thought',now});
   const daily=createForestDailyContextSession({storage,storageKey:storageKey+':daily',now});
   const reviewSession=createForestReflectionSpotlightSession({storage,
     storageKey:storageKey+':review-reactions',now});
@@ -187,12 +176,6 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     const entries=Array.isArray(existing)?existing.slice(-299):[];
     entries.push({at:now(),...item});
     try{storage?.setItem?.(logKey,JSON.stringify(entries))}catch{}
-  }
-  function seedSelection(){
-    const scene=activeDaily?.scene;
-    if(!scene?.seedId)return null;
-    return {seed:{id:scene.seedId},day:new Date(now()+9*3600000).toISOString().slice(0,10),
-      visit:activeDaily.visitsToday,allowGeneration:true};
   }
   function reserve(){
     if(typeof storage?.getItem!=='function'||typeof storage?.setItem!=='function')return false;
@@ -216,8 +199,8 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     const recentLines=(Array.isArray(previousLogs)?previousLogs:[]).filter(entry=>entry?.characterId===characterId&&
       ['generated-opening','generated-reply'].includes(entry.event)&&typeof entry.text==='string')
       .slice(-3).map(entry=>clean(entry.text).slice(0,90));
-    const context=promptFor({characterId,mode,npcLine,chosenLabel,history,closing,topic,
-      characterProfile:activeCharacterProfile,voiceExamples:activeVoiceExamples,sourceKind,
+    const context=promptFor({characterId,mode,chosenLabel,history,closing,topic,
+      characterProfile:activeCharacterProfile,sourceKind,
       dailyContext:reviewSpotlight||sourceKind==='review-reaction'?null:activeDaily,situation:activeSituation,
       recentLines,reviewSpotlight});
     const controller=new AbortController(),startedAt=now();
@@ -252,7 +235,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     const choices=labels.slice(0,relay?1:2).map((label,i)=>({id:`ai-${++serial}-${i}`,label}));
     if(relay)choices.push({id:relay.id,label:relay.label,relayTo:relay.relayTo});
     pending={characterId,text,choices,...meta};
-    return {text,choices,...(meta.mark?{mark:meta.mark}:{}),...(meta.thoughtSeedId?{thoughtSeedId:meta.thoughtSeedId}:{})};
+    return {text,choices,...(meta.mark?{mark:meta.mark}:{})};
   }
   function scripted(result,characterId){
     pendingScripted=result?.choices?.length?{characterId,choices:result.choices}:null;
@@ -263,7 +246,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     closed=false;pending=null;pendingScripted=null;history=[];sessionCount=0;
     repliesThisSession=0;
     displayedTopicKey='';encounterDisplayed=false;
-    activeCharacterProfile=null;activeVoiceExamples=[];
+    activeCharacterProfile=null;
     activeDaily=null;activeSituation=null;
     let spotlight=null;
     const characterId=identity?.characterId;
@@ -280,14 +263,14 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     const canReact=original&&CHARACTERS.has(characterId)&&
       original.sourceKind==='ambient'&&
       (!requireCharacterProfile||activeCharacterProfile);
-    let books=[],catalog=[],seeds=[],cues=[];
+    let books=[],catalog=[],cues=[];
     try{
-      [books,catalog,seeds,cues]=await Promise.all([
-        getBooks(),getCatalog(),getSeeds(),getCues()]);
+      [books,catalog,cues]=await Promise.all([
+        getBooks(),getCatalog(),getCues()]);
       if(closed||generation!==epoch)return null;
     }catch{
       // The approved script remains usable without optional topic metadata.
-      books=[];catalog=[];seeds=[];cues=[];
+      books=[];catalog=[];cues=[];
     }
     if(canReact){
       try{
@@ -300,7 +283,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
       try{
         activeDaily=daily.visit(characterId,{books,
           catalog:original.situation&&original.sourceKind==='ambient'?[]:catalog,
-          seeds:original.situation&&original.sourceKind==='ambient'?[]:seeds,cues,
+          cues,
           sourceKind:spotlight?'reflection':original.sourceKind,
           sourceMemoryId:original.sourceMemoryId});
       }catch{activeDaily=daily.visit(characterId)}
@@ -318,9 +301,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
         sourceKind:original.sourceKind||'unknown',promptVersion:PROMPT_VERSION});
       return scripted(original,characterId);
     }
-    // Repeated encounters are allowed while the true API allowance remains.
-    try{activeVoiceExamples=approvedVoiceExamples(await getCues(),characterId,original.text)}
-    catch{activeVoiceExamples=[]}
+    // Approved script text is reserved for explicit fallback; it is never model context.
     if(startDelayMs>0)await new Promise(resolve=>setTimeout(resolve,startDelayMs));
     if(closed||generation!==epoch)return null;
     const source=activeDaily?.scene;
@@ -334,8 +315,6 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
         bookTitle:clean(books.find(book=>book.id===sourceMemory.bookId)?.title).slice(0,80)}:null;
     if(original.sourceMemoryId&&!sourceMemory)return scripted({text:safeEnd(characterId),choices:[]},characterId);
     const mode='opening';
-    const seed=!spotlight&&sourceKind==='ambient'?seedSelection():null;
-    if(seed)thoughtUsage.selected(seed,characterId);
     const result=await request(characterId,mode,
       spotlight?'最近の本の感想を聞いた。':original.text,'',false,topic,
       sourceKind,spotlight);
@@ -476,14 +455,11 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
       displayedTopicKey=scene.id;
       record({event:'daily-topic-displayed',characterId:identity.characterId,
         topicKey:scene.id,kind:scene.kind,promptVersion:PROMPT_VERSION});
-      const seed=pending.sourceKind==='ambient'?seedSelection():null;
-      if(seed)thoughtUsage.displayed(seed,identity.characterId);
     },
     advance(identity){return base.advance?.(identity)||null},
     end(){
       epoch++;closed=true;pending=null;pendingScripted=null;history=[];
       activeCharacterProfile=null;
-      activeVoiceExamples=[];
       activeDaily=null;
       if(inflight&&!inflight.controller.signal.aborted){
         record({event:'cancel-requested',characterId:inflight.characterId,mode:inflight.mode,

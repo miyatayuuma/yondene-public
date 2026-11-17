@@ -50,7 +50,7 @@ export function validateForestDialogueCues(cues){
 }
 
 function emptyState(){return {version:1,visits:{},lastKinds:{},seen:[],seenMemories:[],seenReviews:[],
-  knownRead:[],freshRead:[],readInitialized:false,pendingRelay:null,twinPairId:null};}
+  recentEncounters:[],knownRead:[],freshRead:[],readInitialized:false,pendingRelay:null,twinPairId:null};}
 function parseState(raw){
   try{
     const value=JSON.parse(raw);
@@ -68,6 +68,8 @@ function parseState(raw){
     const relay=value.pendingRelay;
     return {version:1,visits,lastKinds,seen:ids('seen'),seenMemories:ids('seenMemories'),
       seenReviews:ids('seenReviews'),knownRead:ids('knownRead'),freshRead:ids('freshRead'),
+      recentEncounters:(Array.isArray(value.recentEncounters)?value.recentEncounters:[]).filter(e=>
+        CHARACTERS.has(e?.npc)&&KINDS.has(e.kind)&&(!e.memoryId||validId(e.memoryId))).slice(-24),
       readInitialized:value.readInitialized===true,twinPairId:validId(value.twinPairId)?value.twinPairId:null,pendingRelay:
         CHARACTERS.has(relay?.to)&&CHARACTERS.has(relay?.from)?{from:relay.from,to:relay.to,
           memoryId:validId(relay.memoryId)?relay.memoryId:null}:null};
@@ -107,6 +109,15 @@ export function createForestDialogueDirector({getBooks=()=>[],getCatalog=()=>[],
     }}});
   function persist(){
     try{storage?.setItem?.(storageKey,JSON.stringify(state))}catch{}
+  }
+  function memoryPenalty(memoryId,characterId){
+    const recent=state.recentEncounters.slice().reverse();
+    const own=recent.filter(e=>e.npc===characterId);
+    const distance=own.findIndex(e=>e.memoryId===memoryId);
+    // A recent scene cools down over actual encounters, never permanently bans
+    // a book. Other related NPCs may revisit it from their own perspective.
+    return (distance<0?0:Math.max(0,50-distance*12))+
+      (recent.slice(0,2).some(e=>e.npc!==characterId&&e.memoryId===memoryId)?12:0);
   }
   async function candidates(characterId,generation=false){
     const books=await getBooks(),catalog=await getCatalog();
@@ -157,7 +168,7 @@ export function createForestDialogueDirector({getBooks=()=>[],getCatalog=()=>[],
       add('ambient',70);
       for(const memory of memories.filter(item=>forestMemoryBelongsToCharacter(item,characterId))){
         add('story',90+(state.freshRead.includes(memory.bookId)?30:0)-
-          (state.seenMemories.includes(memory.id)?50:0)-(last==='story'?55:0),memory);
+          memoryPenalty(memory.id,characterId)-(last==='story'?55:0),memory);
       }
       return options.sort((a,b)=>b.score-a.score||a.index-b.index);
     }
@@ -244,7 +255,14 @@ export function createForestDialogueDirector({getBooks=()=>[],getCatalog=()=>[],
   }
   function selectOption(option,characterId){
     const response=render(option);if(!response)return null;
-    active={characterId,option,choices:response.choices};
+    active={characterId,option,choices:response.choices,committed:false};
+    if(!option.situation)commitActive();
+    return response;
+  }
+  function commitActive(){
+    if(!active||active.committed)return;
+    active.committed=true;
+    const {option,characterId}=active;
     remember(state.seen,option.cue.id);
     state.lastKinds[characterId]=option.cue.kind;
     if(option.memory)remember(state.seenMemories,option.memory.id);
@@ -253,7 +271,11 @@ export function createForestDialogueDirector({getBooks=()=>[],getCatalog=()=>[],
     }
     if(option.review)remember(state.seenReviews,option.review.id);
     if(option.cue.kind==='relay')state.pendingRelay=null;
-    persist();return response;
+    state.recentEncounters.push({npc:characterId,kind:option.cue.kind,
+      ...(option.memory?{memoryId:option.memory.id}:{})});
+    state.recentEncounters=state.recentEncounters.slice(-24);
+    if(option.situation)state.visits[characterId]=numbers((state.visits[characterId]||0)+1,0,100000);
+    persist();
   }
   async function nextTopic(characterId,excludeKey='',preferredMemoryId='',generation=false){
     const options=await candidates(characterId,generation);
@@ -276,8 +298,11 @@ export function createForestDialogueDirector({getBooks=()=>[],getCatalog=()=>[],
           persist();return result}
       }
       const result=await nextTopic(characterId,'',preferredMemoryId,generation);
-      state.visits[characterId]=numbers((state.visits[characterId]||0)+1,0,100000);
-      persist();return result;
+      if(!generation){state.visits[characterId]=numbers((state.visits[characterId]||0)+1,0,100000);persist()}
+      return result;
+    },
+    onDisplayed(result,{characterId}={}){
+      if(active?.characterId===characterId&&result?.situation)commitActive();
     },
     async select({characterId,choiceId}={}){
       if(characterId==='twins'&&twins.getActiveNames())return twins.select({choiceId});

@@ -5,7 +5,7 @@ import {
   FOREST_CHARACTER_REGISTRY,FOREST_CHARACTER_IDS,FOREST_AI_SPEAKER_IDS,
   FOREST_AI_GENERATION_IDS,FOREST_ACTION_WRITING_IDS,
   FOREST_ACTORS,FOREST_REQUIRED_SPRITE_NAMES,FOREST_OPTIONAL_SPRITE_NAMES,
-  FOREST_ACTOR_NAMES,FOREST_RELATIONS,FOREST_SELF_NAMES,FOREST_FALLBACK_VOICES,
+  FOREST_ACTOR_NAMES,FOREST_RELATIONS,FOREST_SELF_NAMES,
   FOREST_GOODBYES,FOREST_WRONG_FIRST_PERSON,FOREST_VOICE_ALIASES,
   FOREST_DEFAULT_VOICES,FOREST_VOICE_CHARACTERS,FOREST_CHARACTER_ROW_LIMIT
 } from './forest-character-registry.mjs';
@@ -42,7 +42,7 @@ test('one canonical record drives every registered actor and AI speaker',()=>{
       FOREST_CHARACTER_IDS.includes(related),character.id+' relation '+related);
     if(character.mode==='ai'){
       assert.ok(FOREST_SELF_NAMES[character.id]);
-      assert.ok(FOREST_FALLBACK_VOICES[character.id]);
+      assert.equal('fallbackVoice' in character,false);
       assert.ok(FOREST_GOODBYES[character.id]);
       assert.ok(forestVoiceProfile(character.id));
       assert.equal(typeof FOREST_WRONG_FIRST_PERSON[character.id]==='undefined'||

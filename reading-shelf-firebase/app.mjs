@@ -14,15 +14,15 @@ import {mountFamilyActivity} from './activity.mjs?build=20261111-activity-previe
 import {mountChildRating} from './child-rating.mjs?build=20261019-shelf-v28';
 import {mountReadingRecordEditor} from './reading-record-editor.mjs?build=20261025-reading-legacy-v1';
 import {readerNameFromShelf} from './reader-name.mjs?build=20261019-shelf-v28';
-import {FOREST_CHARACTER_REGISTRY,FOREST_ROSTER_REVISION} from './forest-character-registry.mjs?build=20261117-forest-profile-contract-v19';
+import {FOREST_CHARACTER_REGISTRY,FOREST_ROSTER_REVISION} from './forest-character-registry.mjs?build=20261117-forest-integrated-dialogue-v22';
 import {mountBookForest,getForestAvatar,setForestAvatar} from './book-forest.mjs?build=20261116-forest-cat-persona-v17';
 import {authorizeForestDrive,loadPrivateForestSprites} from './book-forest-drive.mjs?build=20261116-forest-drive-discovery-v18';
 import {saveCachedForestSprites,loadCachedForestSprites,clearCachedForestSprites} from './book-forest-cache.mjs?build=20261114-zukkoke-v1';
 import {loadPrivateForestDialogue} from './book-forest-private-dialogue.mjs?build=20261117-forest-profile-contract-v19';
 import {saveCachedForestDialogue,loadCachedForestDialogue,clearCachedForestDialogue,freshForestDialogue} from './book-forest-dialogue-cache.mjs?build=20261117-forest-profile-contract-v19';
-import {createForestDialogueDirector} from './book-forest-dialogue-director.mjs?build=20261116-forest-cat-persona-v17';
+import {createForestDialogueDirector} from './book-forest-dialogue-director.mjs?build=20261117-forest-integrated-dialogue-v22';
 import {diagnoseForestCharacters} from './book-forest-character-profiles.mjs?build=20261117-forest-profile-contract-v19';
-import {createForestLiveDialogueDirector} from './book-forest-live-dialogue.mjs?build=20261117-forest-silent-reactions-v21';
+import {createForestLiveDialogueDirector} from './book-forest-live-dialogue.mjs?build=20261117-forest-integrated-dialogue-v22';
 import {selectRecentForestReflectionEntries,normalizeRecentForestReflection} from './book-forest-reflection-source.mjs?build=20261117-forest-context-probe-v1';
 import {resetForestConversationHistoryOnce} from './book-forest-conversation-reset.mjs?build=20261110-forest-ai-v6';
 import {forestConversationLog} from './book-forest-conversation-log.mjs?build=20261110-forest-ai-v6';
@@ -30,7 +30,7 @@ import {createForestAIGenerator} from './book-forest-ai-provider.mjs?build=20261
 import {createForestCloudflareGenerator,verifyForestCloudflareRoster} from './book-forest-cloudflare-provider.mjs?build=20261117-forest-profile-contract-v19';
 import {STATUSES,ACTIVE_READ_FILTER,filteredBooks,readPeriodLabel,compactReadPeriodLabel,readingModeLabel,emptyStateMessage,seriesVolumeLabel,sortSeriesBooks} from './domain.mjs?build=20261115-series-order-v1';
 
-const APP_BUILD='20261117-forest-silent-reactions-v21';
+const APP_BUILD='20261117-forest-integrated-dialogue-v22';
 const $=id=>{const element=document.getElementById(id);if(!element)throw new Error('APP_DOM_MISMATCH: missing #'+id);return element};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const safeCover=url=>/^(https:\/\/|data:image\/(jpeg|png|webp);base64,)/i.test(String(url||''))?String(url):'';
@@ -777,7 +777,7 @@ function renderFamily(){
                   recentReflectionsPromise=null;
                   console.warn('Forest reflection topics unavailable',error?.code||'read-failed');
                   return [];
-                });
+                }).finally(()=>{recentReflectionsPromise=null});
                 return recentReflectionsPromise;
               };
               dialogueEngine=createForestLiveDialogueDirector({base:conversation,generate,

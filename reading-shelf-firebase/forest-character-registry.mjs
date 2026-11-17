@@ -19,7 +19,6 @@ const roster=[
   {id:'king',name:'王さま',aliases:['王さま','王様'],related:['cat'],
     actor:{x:-22,z:17,scale:1.2,roamRadius:5,walkSpeed:1.1},
     voice:{rate:1.34,pitch:.88},mode:'ai',
-    fallbackVoice:'王さま。自分のことは「余」。大げさで好奇心があり、子どもを歓迎する。',
     goodbye:'続きはまた今度だ。達者でな！'},
   {id:'cat',name:'ねこ',aliases:['ねこ'],related:['king'],
     actor:{x:-49,z:23,scale:.7,roamRadius:5,walkSpeed:1.35},mode:'silent',
@@ -27,17 +26,14 @@ const roster=[
   {id:'kiki',name:'キキ',aliases:['キキ'],related:['jiji'],
     actor:{x:24,z:9,scale:1,roamRadius:5,walkSpeed:1.3},
     voice:{rate:1.48,pitch:1.13},mode:'ai',
-    fallbackVoice:'キキ。自分の経験を一人称で話し、率直で活発。自分を「キキは」と呼ばない。',
     goodbye:'じゃあ、また森で会おうね！'},
   {id:'jiji',name:'ジジ',aliases:['ジジ'],related:['kiki'],
     actor:{x:29,z:13,scale:.5,roamRadius:3.8,walkSpeed:1.65},
     voice:{rate:1.42,pitch:.98},mode:'ai',
-    fallbackVoice:'ジジ。気さくで少し皮肉屋だが、相手を傷つけない。',
     goodbye:'またね。気をつけて歩くんだよ。'},
   {id:'skipper',name:'スキッパー',aliases:['スキッパー'],related:['twins'],
     actor:{x:41,z:-10,scale:.8,roamRadius:6,walkSpeed:1.15},
     voice:{rate:1.38,pitch:.93},mode:'ai',
-    fallbackVoice:'スキッパー。無口で慎重。小さな発見を静かに観察する。',
     goodbye:'またいっしょに探検しよう！'},
   {id:'twins',name:'ふたご',aliases:['ふたご','双子'],related:['skipper'],
     actor:{x:52,z:30,scale:.8,roamRadius:4.5,walkSpeed:1.2,groupId:'twins'},
@@ -48,32 +44,27 @@ const roster=[
   {id:'zorori',name:'ゾロリ',aliases:['ゾロリ'],related:['ishishi','noshishi'],
     actor:{x:-72,z:-8,scale:1.2,roamRadius:7,walkSpeed:1.35},
     voice:{rate:1.52,pitch:.91},mode:'ai',
-    fallbackVoice:'ゾロリ。いたずら好きで得意げだが、子どもを怖がらせない。',
     goodbye:'次はもっと面白い話をしてやるぜ！'},
   {id:'ishishi',name:'イシシ',aliases:['イシシ'],related:['zorori','noshishi'],
     actor:{x:61,z:60,scale:.8,roamRadius:4,walkSpeed:1.2},
     voice:{rate:1.48,pitch:1.08},voiceLabel:'イシシ・ノシシ（共通）',
-    mode:'ai',fallbackVoice:'イシシ。食べ物や面白いことに目がなく、おっちょこちょい。',
+    mode:'ai',
     goodbye:'じゃあな！また遊ぼうぜ！'},
   {id:'noshishi',name:'ノシシ',aliases:['ノシシ'],related:['zorori','ishishi'],
     actor:{x:66,z:62,scale:.8,roamRadius:4,walkSpeed:1.2},
     voiceId:'ishishi',mode:'ai',
-    fallbackVoice:'ノシシ。のんびりしていて相棒との掛け合いが好き。',
     goodbye:'またね。のんびり待ってるよ。'},
   {id:'hachibee',name:'ハチベエ',aliases:['ハチベエ'],related:['hakase','mochan'],
     actor:{x:-28,z:41,scale:.77,roamRadius:4,walkSpeed:1.5},
     sprite:'optional',voice:{rate:1.55,pitch:1.12},mode:'ai',
-    fallbackVoice:'ハチベエ。せっかちな行動派。思いついたら飛び出す。理屈より現場。',
     goodbye:'じゃあな！　おれ、もう少し森を見てくるぜ。'},
   {id:'hakase',name:'ハカセ',aliases:['ハカセ'],related:['hachibee','mochan'],
     actor:{x:-33,z:43,scale:.85,roamRadius:3.5,walkSpeed:1.15},
     sprite:'optional',voice:{rate:1.41,pitch:1.02},mode:'ai',
-    fallbackVoice:'ハカセ。知識好きで慎重。観察を好むが理屈っぽくなることも。',
     goodbye:'またね。次は別の手がかりも見つかるといいな。'},
   {id:'mochan',name:'モーちゃん',aliases:['モーちゃん'],related:['hachibee','hakase'],
     actor:{x:-37,z:47,scale:1.03,roamRadius:3,walkSpeed:.88},
     sprite:'optional',voice:{rate:1.32,pitch:.92},mode:'ai',
-    fallbackVoice:'モーちゃん。のんびりした気のいい友だち。自分のペースで反応する。',
     goodbye:'またね。ぼく、ここでもう少し休んでいくよ。'}
 ];
 
@@ -113,8 +104,6 @@ export const FOREST_RELATIONS=Object.freeze(Object.fromEntries(
   roster.filter(item=>item.related?.length).map(item=>[item.id,[...item.related]])));
 export const FOREST_SELF_NAMES=Object.freeze(Object.fromEntries(
   roster.filter(item=>item.mode==='ai').map(item=>[item.id,item.name])));
-export const FOREST_FALLBACK_VOICES=Object.freeze(Object.fromEntries(
-  roster.filter(item=>item.fallbackVoice).map(item=>[item.id,item.fallbackVoice])));
 export const FOREST_GOODBYES=Object.freeze(Object.fromEntries(
   roster.filter(item=>item.goodbye).map(item=>[item.id,item.goodbye])));
 export const FOREST_WRONG_FIRST_PERSON=Object.freeze(FIRST_PERSON);
@@ -139,7 +128,7 @@ export const FOREST_VOICE_CHARACTERS=Object.freeze([
 ]);
 
 // Version the browser/Worker input contract separately from roster membership.
-export const FOREST_DIALOGUE_PROTOCOL='scene-dialogue-v19-profile2';
+export const FOREST_DIALOGUE_PROTOCOL='scene-dialogue-v20-profile2';
 
 export function forestMemoryBelongsToCharacter(memory,characterId){
   const names=FOREST_ACTOR_NAMES[characterId]||[];

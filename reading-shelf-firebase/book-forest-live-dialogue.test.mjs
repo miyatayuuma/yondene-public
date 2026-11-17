@@ -48,7 +48,7 @@ test('generates contextual reply choices, then a character reply only after a ch
   const log=JSON.parse(storage.getItem('forest-ai-local-v1:log'));
   assert.deepEqual(log.map(x=>x.event),['generated-opening','selected-offered-choice','generated-reply']);
   assert.equal(log[0].text,first.text,'export can reconstruct the initial line');
-  assert.equal(log[0].promptVersion,'forest-scene-generation-v19-profile2');
+  assert.equal(log[0].promptVersion,'forest-scene-generation-v20-profile2');
   assert.equal(log[1].label,'風の音を聞く');
   director.end();
 });
@@ -72,7 +72,7 @@ test('a second AI reply ends the encounter naturally without requesting or showi
   const generator=async prompt=>{
     prompts.push(prompt);
     return prompt.task.includes('返答候補だけ')?{choices:['森を歩こう','お話ししよう']}:
-      {text:'また森で会えるのが楽しみだね。',choices:['またね','うん、またね']};
+      {text:'また森で会えるのが楽しみだね。',choices:['もう少し聞く','ここで待つ']};
   };
   const director=createForestLiveDialogueDirector({base:base(),generate:generator,storage});
   let result=await director.start(identity);
@@ -720,7 +720,7 @@ test('cat does not call Gemma without its private Sheets persona, even if output
     storage:memoryStorage(),startDelayMs:0,getCharacterProfiles:()=>[],
     requireCharacterProfile:false
   });
-  assert.deepEqual(await director.start({characterId:'cat'}),original);
+  assert.deepEqual(await director.start({characterId:'cat'}),{...original,conversationComplete:true});
   assert.equal(requests,0);
   director.end();
 });

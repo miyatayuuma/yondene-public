@@ -1,9 +1,11 @@
+import {unsafeForestForaging} from '../../../reading-shelf-firebase/book-forest-output-safety.mjs';
 import {FOREST_AI_GENERATION_IDS,FOREST_ACTION_WRITING_IDS,FOREST_ROSTER_REVISION,FOREST_DIALOGUE_PROTOCOL} from '../../../reading-shelf-firebase/forest-character-registry.mjs';
 import {validateForestGestureMark,validateForestGestureText} from '../../../reading-shelf-firebase/book-forest-gesture.mjs';
 // よんでね 本の森: a small, owner-only proxy for the free Workers AI allowance.
 // No bookshelf data, Firebase private credentials, or Cloudflare API keys here.
 const MODEL='@cf/google/gemma-4-26b-a4b-it';
-const VERSION='forest-dialogue-v19-profile2';
+export const FOREST_WORKER_VERSION='forest-dialogue-v20-profile2';
+const VERSION=FOREST_WORKER_VERSION;
 const JWKS_URL='https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com';
 const ORIGINS=new Set(['https://kodomo-reading-shelf-87f11.web.app',
   'https://kodomo-reading-shelf-87f11.firebaseapp.com']);
@@ -87,12 +89,13 @@ function validPrompt(prompt){
     Array.isArray(prompt.constraints)&&prompt.constraints.length<=12&&
     prompt.constraints.every(item=>typeof item==='string'&&item.length<=500);
 }
-export function readCompletion(result,{closing=false,mode='reply',characterId=''}={}){
+export function readCompletion(result,{closing=false,mode='reply',characterId='',context={}}={}){
   let content=result?.choices?.[0]?.message?.content??result?.response;
   if(typeof content!=='string'||content.length>3000)throw Error('Invalid model output');
   content=content.trim().replace(/^```(?:json)?\s*/iu,'').replace(/\s*```$/u,'');
   let parsed;
   try{parsed=JSON.parse(content)}catch{throw Error('Invalid model JSON')}
+  if(unsafeForestForaging(parsed,context))throw Error('Invalid model unsafe-foraging');
   const silent=ACTION_WRITING_IDS.has(characterId);
   const mark=silent?validateForestGestureMark(parsed?.mark):null;
   if(silent&&(!validateForestGestureText(parsed?.text)||mark===undefined))
@@ -126,7 +129,8 @@ export function forestGenerationInput(prompt){
         '各項目の根拠区分・監修状態・適用範囲と本文中の留保を守る。二次資料は原作本文ではない。'+
         '編集解釈・ゲーム演出・暫定採用は演技の手掛かりであり、原作の確定事実として語らない。'+
         '今日のsceneはevidence=reviewedなら読了済み原作の承認済み事実を含み、evidence=imaginedなら森の即興の出来事。'+
-        '原作の事実から新たな物語上の出来事を捏造しない。思考の問いや教訓を話す必要はない。'+
+        '原作の記憶は過去の物語であり、今日この森で起きた事実に置き換えない。森での想像や提案は区別する。'+
+        '知らない木の実・きのこ・植物の食用性を断定せず、味見や摂取を選択肢にしない。安全な食事や食欲は表現してよい。'+
         'readerReflectionがある場合は本の感想を受け止め、別作品の人物なら第三者の立場で反応する。'+
         '原作に登場した・直接目撃したと偽らず、本人の気持ちを勝手に決めつけない。'+
         '保護者による要約を子どもの直接の発言として扱わず、感想の追記を要求しない。'+
@@ -134,7 +138,8 @@ export function forestGenerationInput(prompt){
         '必ずJSONオブジェクトだけを返す。mode=choicesならtextを省略し、choicesを2件、各16字以内。'+
         'mode=openingならcontext.sourceKind（meet/story/reflection/relay/ambient/review-reaction）とtaskを優先し、'+
         '台帳のnpcLineをコピーせず、本人の新しい第一声textとchoicesを2件作る。'+
-        '通常の発話NPCのmode=replyならNPC本人のひと言textを65字以内で返す。'+
+        'mode=replyは新しい第一声ではなく直前の選択への応答。相手の問いや場面説明を復唱するだけで済ませず、短い答えや次の行動を返す。'+
+        '通常の発話NPCのtextは65字以内。選択肢は子ども側の次の言葉や行動にする。'+
         (ACTION_WRITING_IDS.has(prompt.npc.id)?
           'このNPCは非発話モード。人物像はnpc.voiceの非公開台帳由来の設定を優先し、ここで人物像を推測しない。'+
           'textは全角丸括弧（ ）で囲んだ無言の行動描写だけ。文字は必要なときだけmarkで表現する。'+
@@ -177,7 +182,7 @@ export async function handleRequest(request,env,{verifyToken=verifyOwnerIdToken}
   try{
     const result=await env.AI.run(MODEL,forestGenerationInput(body.prompt));
     return json({...readCompletion(result,{closing:body.prompt.closing===true,
-      mode:body.prompt.mode||'reply',characterId:body.prompt.npc.id}),
+      mode:body.prompt.mode||'reply',characterId:body.prompt.npc.id,context:body.prompt.context}),
       profileRevision:body.prompt.npc.profileRevision},200,origin);
   }catch(error){
     const message=String(error?.message||'');

@@ -101,7 +101,7 @@ export function createForestDailyContextSession({storage=null,
     write(storage,storageKey,{...state,topics});
   }
   return {
-    visit(characterId,{books=[],catalog=[],cues=[],sourceKind='',sourceMemoryId=''}={}){
+    visit(characterId,{books=[],catalog=[],cues=[],sourceKind='',sourceMemoryId='',commit=true}={}){
       const state=current(),candidates=['meet','reflection'].includes(sourceKind)?[]:
         eligibleForestDailyTopics({characterId,books,catalog,cues,now:now()});
       const usable=new Map(candidates.map(topic=>[topic.key,topic]));
@@ -144,7 +144,7 @@ export function createForestDailyContextSession({storage=null,
           state.recent[characterId].slice(-MAX_RECENT+1):[];
         state.recent[characterId]=[...list,{key:scene.id,day:state.day}];
       }
-      save(state);
+      if(commit)save(state);
       return {scene,visitsToday,metNpcCount:Object.keys(state.visits).length,
         previousNpc:last?.npc||'',
         relatedEncounter:connected?{

@@ -104,6 +104,14 @@ export function chooseForestReflectionSpotlight({characterId,books=[],reflection
   return selected;
 }
 
+/** Re-read the current source on continuation; a cached quote is not authority. */
+export function isCurrentForestReflection(evidence,{books=[],reflections=[]}={}){
+  return books.some(book=>book.id===evidence?.sourceBookId&&book.status==='read')&&
+    reflections.some(review=>review.bookId===evidence.sourceBookId&&
+      hash(review.bookId+':'+review.id)===evidence.key&&
+      review.attribution===evidence.attribution&&clean(review.quote,180)===evidence.quote);
+}
+
 export function createForestReflectionSpotlightSession({storage=null,
   storageKey='forest-reflection-reactions-v1',now=()=>Date.now()}={}){
   function choose({characterId,books=[],reflections=[],catalog=[],cues=[]}={}){

@@ -1,0 +1,80 @@
+# 本の森：本番経路の統合会話検証
+
+`node scripts/check-forest-conversation.mjs` は、本番と同じ
+`createForestDialogueDirector` → `createForestLiveDialogueDirector` →
+`promptFor` → `forestGenerationInput` → `readCompletion` →
+`validateLiveForestOutput` → `onDisplayed` を実行する。
+選択するのは実際に最終表示されたボタンであり、続きのプロンプトを別実装で組み立てない。
+`onDisplayed` は本番UIが文章を描画した直後に呼ぶものと同じフック。
+時計、ストレージ、データ読取、モデル通信だけを差し替える。
+
+## 実行と境界
+
+```sh
+# 合成資料・模擬モデル出力。API通信なし。技術的な状態遷移を確認する。
+node scripts/check-forest-conversation.mjs
+
+# 同じ条件を別checkoutの実装で実行する。mainなどの動く参照ではなくSHAで固定する。
+node scripts/check-forest-conversation.mjs --source /path/to/baseline-checkout
+
+# 認証済み経路で取得し、リポジトリ外に準備した非公開の読取スナップショット。
+node scripts/check-forest-conversation.mjs --input /path/outside/repo/scenario.json
+
+# 同じ経路で実Gemma。既存の検証用アカウントの環境変数を使用する。
+# CLOUDFLARE_AI_TEST_TOKEN / CLOUDFLARE_AI_TEST_ACCOUNT_ID
+node scripts/check-forest-conversation.mjs --model --input /path/outside/repo/scenario.json
+```
+
+入力は `books`、`catalog`、`characterProfiles`、`reflections`、`clock`、
+任意の `cues` / `storage` / `visits`。人物設定は本番パーサーで変換したv2形式。
+`visits` は `[{characterId, choices:[0,0]}]` のように提示選択肢の位置、または正確なラベルを指定する。
+選べないラベルは失敗する。会話が先に終了した場合はそこで止まる。
+1シナリオ40回、1訪問3回まで。暗黙の再試行やFirestore・Sheetsへの書込はない。
+
+既定の標準出力は件数、公開NPC ID、版、指紋、検証段階だけ。
+`--trace-output /outside/repository/trace.json` を明示した場合のみ、
+入力、モデルの生出力、検証後出力、最終フレーム、履歴を保存する。
+**このファイルには人物設定・実感想が含まれ得る。公開リポジトリ内への保存を拒否する。**
+Git履歴・PR・CIのログにも転記しない。
+
+本棚ミラーを現在値として使う場合は2時間以内の `snapshotAt` が必要。
+過去の読取スナップショットの再現は `provenance:'historical-readonly-mirror'` とその取得時刻の
+`clock` を明示する。これは過去条件の検証であり、現在のFirestoreの確認ではない。
+`qualityAccepted:false` は常に残す。形式・状態遷移の成功から人物らしさを自動認定しない。
+
+## 責務と今回確認した修正
+
+| 対象 | 確認した問題・責務 | 対応 |
+|---|---|---|
+| 話題選定 | 使用済み記憶の減点50が永久に残り、通常点90が雑談70を下回る | 表示した直近訪問による減点に変更。会話を挟むと薄れ、同じ本を永久に禁止しない |
+| 訪問履歴 | 生成開始だけで初対面・記憶の使用が消費される | 通常AIの訪問・使用確定を最初の表示へ移す。日次文脈も表示前はプレビューする |
+| 感想の返答 | `reviewSpotlight` の第一声指示が `mode=reply` より優先される | 直前の選択への応答・終了を優先する |
+| 原作記憶 | 返答の事実取得が日次選定とのID一致に依存していた | 開始時に確認した事実を会話中保持。各返答前に既読・資料の資格を再確認 |
+| 感想撤回 | 本の既読だけを再確認し、感想本文の現存は再確認していなかった | 返答前に現存する引用・帰属を再読取。アプリの読取Promiseは実行中のみ共有 |
+| 失敗後の操作 | 生成返答から台本へ戻った際、提示選択肢の追跡を再設定しない | フォールバック選択肢も追跡し、縮退は有限の往復で終了。別れを選んだら終了 |
+| 未知植物の摂取 | JSONが正しくても危険な選択肢が通る | 共通モデル契約とWorker・ブラウザ共通の高確度パターン検証を追加 |
+
+通常雑談の `catalog:[]` は維持する。基底ディレクターが初対面・物語・雑談・引継ぎを選び、
+感想は雑談枠を置換する。日次モジュールが雑談に別の原作記憶を重ねると、この優先順位が崩れる。
+訪問回数・別NPC・選択履歴は引き続き日次文脈から渡す。物語枠では確認済み事実を直接渡す。
+
+安全検証は高確度の文字パターンであり、全ての意味的危険や原作逸脱を判定するものではない。
+未知植物を提示した文脈・モデル自身の文と、返答候補を組み合わせて検証する。
+通常のパン等の食事や、摂取を断る表現の対照ケースを保持する。
+
+## 受入状況
+
+`forest-integrated-conversation.test.mjs` は初対面→選択→返答→終了、
+再訪、複数NPC、既読記憶、感想の帰属・撤回、ねこの任意の非筆記、
+通信/モデル不正/上限/タイムアウト、安全性を同じ本番経路で確認する。
+人物らしさ・自然さ・原作整合性の受入には、実モデルの一連の会話を別途読む必要がある。
+
+比較元 `58e06dd` と変更後を同じ合成条件で実行可能。
+模擬モデル出力での改善は構造的な検証であり、Gemmaの品質改善を実証したとは扱わない。
+認証済みの現行Firestore、実Gemma、Worker配信、Hosting配信、Android実機受入は別段階。
+
+双子は既存の名前保持・固定会話・2話者UIのまま残る。
+通常NPCで実Gemma受入が完了するまで、双子の出力契約移行を先行させない。
+完成台本は障害時の縮退と双子に実際の依存があり、削除しない。
+未使用だった旧思考の種モジュール・同期処理・空の互換フィールド、
+未参照のレジストリ内人物要約は撤去した。非公開Sheetsの旧タブは削除していない。

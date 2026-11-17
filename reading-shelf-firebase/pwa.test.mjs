@@ -108,7 +108,7 @@ test('no removed DOM ID can silently cause a null property assignment',()=>{
 test('PWA cannot combine stale JS with current HTML after deployment',()=>{
   const html=text('index.html'),sw=text('sw.js');
   const config=JSON.parse(text('firebase.json'));
-  assert.match(html,/app\.mjs\?build=20261117-forest-profile-contract-v19/);
+  assert.match(html,/app\.mjs\?build=20261117-forest-context-probe-v20/);
   assert.match(sw,/const ARTWORK_PATHS=new Set\(ARTWORK\)/);
   assert.ok(!sw.includes('PUBLIC_ASSETS'));
   for(const path of ['/app.mjs','/index.html','/domain.mjs','/book-community.mjs','/recommendations.mjs']){
@@ -169,7 +169,7 @@ test('single-step sorting options have distinct clear Japanese descriptions',()=
 });
 test('PWA build integrates activity previews and preserves forest module versions',()=>{
   const html=text('index.html'),app=text('app.mjs'),recs=text('recommendations.mjs');
-  const build='20261117-forest-profile-contract-v19',activityBuild='20261111-activity-preview-v1',
+  const build='20261117-forest-context-probe-v20',activityBuild='20261111-activity-preview-v1',
     forestBuild='20261110-forest-ai-v6',voiceBuild='20261111-forest-voice-v1',
     personaBuild='20261116-forest-cat-persona-v17',dialogueBuild='20261117-forest-profile-contract-v19',voiceV8Build='20261111-forest-voice-v8',
     dailyV10Build='20261112-forest-stories-v10',zukkokeBuild='20261114-zukkoke-v1',

@@ -139,7 +139,7 @@ export const FOREST_VOICE_CHARACTERS=Object.freeze([
 ]);
 
 // Version the browser/Worker input contract separately from roster membership.
-export const FOREST_DIALOGUE_PROTOCOL='scene-dialogue-v17';
+export const FOREST_DIALOGUE_PROTOCOL='scene-dialogue-v19-profile2';
 
 export function forestMemoryBelongsToCharacter(memory,characterId){
   const names=FOREST_ACTOR_NAMES[characterId]||[];

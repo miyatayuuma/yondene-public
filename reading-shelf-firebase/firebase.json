@@ -8,6 +8,7 @@
       "**/.*",
       "**/node_modules/**",
       "**/*.test.mjs",
+      "forest-profile-fixture.mjs",
       "**/*.sh",
       "**/*.md",
       "package.json",

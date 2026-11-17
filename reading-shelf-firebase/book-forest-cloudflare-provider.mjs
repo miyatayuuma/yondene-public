@@ -32,6 +32,7 @@ export function createForestCloudflareGenerator({workerUrl,getIdToken,
     }
     let value;
     try{value=await response.json()}catch{throw Error('Invalid Forest AI JSON')}
+    if(value?.profileRevision!==prompt.npc?.profileRevision)throw Error('Forest AI profile revision mismatch');
     if(!value||!Array.isArray(value.choices)||JSON.stringify(value).length>3000)
       throw Error('Invalid Forest AI response');
     return value;

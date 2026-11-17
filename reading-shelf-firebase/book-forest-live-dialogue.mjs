@@ -1,6 +1,5 @@
-import {FOREST_CHARACTER_IDS,FOREST_FALLBACK_VOICES,FOREST_SELF_NAMES,
-  FOREST_GOODBYES,FOREST_WRONG_FIRST_PERSON,FOREST_ACTION_WRITING_IDS,
-  FOREST_DIALOGUE_PROTOCOL} from './forest-character-registry.mjs';
+import {FOREST_CHARACTER_IDS,FOREST_SELF_NAMES,FOREST_GOODBYES,FOREST_WRONG_FIRST_PERSON,
+  FOREST_ACTION_WRITING_IDS,FOREST_DIALOGUE_PROTOCOL} from './forest-character-registry.mjs';
 import {validateForestGestureMark,validateForestGestureText} from './book-forest-gesture.mjs';
 // Character-first AI dialogue: local scripts choose topics and provide safe fallbacks.
 // The generator is injected: this module never holds a key or makes a network call.
@@ -9,14 +8,13 @@ import {createForestReflectionSpotlightSession} from './book-forest-reflection-s
 import {unlockedStoryMemories} from './book-forest-story-memory.mjs';
 import {forestCharacterVoiceGuide,validForestCharacterProfiles} from './book-forest-character-profiles.mjs';
 const CHARACTERS=new Set(FOREST_CHARACTER_IDS.filter(id=>id!=='twins'));
-const VOICES=FOREST_FALLBACK_VOICES;
 const SELF_NAMES=FOREST_SELF_NAMES;
 const GOODBYE=FOREST_GOODBYES;
 const ACTION_WRITING_IDS=new Set(FOREST_ACTION_WRITING_IDS);
 const safeEnd=(id,comma=false)=>ACTION_WRITING_IDS.has(id)?
   '（ねこはしっぽをゆっくりふった。）':GOODBYE[id]||(comma?'また、森で会おうね。':'また森で会おうね。');
 const WRONG_FIRST_PERSON=FOREST_WRONG_FIRST_PERSON;
-const PROMPT_VERSION='forest-scene-generation-v18';
+const PROMPT_VERSION='forest-scene-generation-v19-profile2';
 const clean=value=>typeof value==='string'?value.trim().replace(/\s+/gu,' '):'';
 function readJson(storage,key,fallback){
   try{return JSON.parse(storage?.getItem?.(key)||'null')||fallback}catch{return fallback}
@@ -86,6 +84,8 @@ function promptScene(scene,sourceKind){
 export function promptFor({characterId,mode,chosenLabel='',history=[],closing=false,topic=null,
   characterProfile=null,sourceKind='',dailyContext=null,recentLines=[],reviewSpotlight=null,situation=null}){
   const guide=forestCharacterVoiceGuide(characterProfile);
+  const npc={id:characterId,voice:guide,profileSchemaVersion:2,
+    profileRevision:guide?characterProfile.revision:'',profileVersion:guide?characterProfile.version:''};
   // Personhood is always loaded from the same private Sheets as other NPCs.
   // Only the response format differs; this code has no cat personality text.
   const nonverbal=ACTION_WRITING_IDS.has(characterId);
@@ -108,7 +108,7 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
       mode==='reply'?'相手が選んだ行動を受けて、人物設定に合う次の行動を表す':
       sourceKind==='meet'?'初対面の相手に、人物設定に合う無言の初めの反応をする':
       'この状況と人物設定に合う、具体的で自然な行動を一つ示す',
-    npc:{id:characterId,voice:guide},
+    npc,
     context,
     constraints:[
       '最優先はnpc.voiceの人物像・関係性・動機・ふるまい。設定の説明や一般的な教訓で代用しない',
@@ -140,7 +140,7 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
       sourceKind==='ambient'&&situation?.focus==='character'?
         '人物設定の関心・普段の行動から、本人らしい雑談や冗談と返答候補2つを作る':
       firstLineTask[sourceKind]||firstLineTask.ambient,
-    npc:{id:characterId,voice:guide||VOICES[characterId]},
+    npc,
     context,
     constraints:[
       '会話は日本語。小学校低学年が読める短い言葉と簡単な漢字にする',
@@ -181,7 +181,9 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
   function record(item){
     const existing=readJson(storage,logKey,[]);
     const entries=Array.isArray(existing)?existing.slice(-299):[];
-    entries.push({at:now(),protocolRevision:FOREST_DIALOGUE_PROTOCOL,...item});
+    entries.push({at:now(),protocolRevision:FOREST_DIALOGUE_PROTOCOL,
+      ...(activeCharacterProfile?{profileRevision:activeCharacterProfile.revision,
+        profileVersion:activeCharacterProfile.version,profileSchemaVersion:2}:{}),...item});
     try{storage?.setItem?.(logKey,JSON.stringify(entries))}catch{}
   }
   function reserve(){

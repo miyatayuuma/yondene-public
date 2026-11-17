@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createForestLiveDialogueDirector,validateLiveForestOutput} from './book-forest-live-dialogue.mjs';
 import {parseForestCharacterProfiles} from './book-forest-character-profiles.mjs';
+import {profileFixture,legacyFixture} from './forest-profile-fixture.mjs';
 
 function memoryStorage(){
   const entries=new Map();
@@ -9,16 +10,10 @@ function memoryStorage(){
     removeItem:key=>entries.delete(key),entries};
 }
 // Synthetic private-sheet fixture; never copy actual household profile rows.
-const mockCatProfiles=(summary='ねこと王さまの相棒・テスト設定A')=>
-  parseForestCharacterProfiles([
-    ['NPC ID','人物像の要約','大切にすること','望み・動機','関係性','普段の行動','状況への反応','原作確認'],
-    ['cat',summary,'王さまとの友情','生活を整える','王さま','家事・買い物を助ける','落ち着いて工夫する','確認済']
-  ],[
-    ['NPC／会話ID','一人称','相手の呼び方','基本口調・テンポ','語尾（使用条件）',
-      '口癖と使用頻度','言い回しの特徴','感情による変化','避ける表現・NG','監修状態'],
-    ['cat','','','人語を話さず行動で伝える','','','用件のある文字を書く',
-      '手伝うときはさりげなく','声で話さない','検証中']
-  ]);
+const mockCatProfiles=(summary='架空の相棒・テスト設定A')=>[profileFixture({id:'cat',summary,
+    values:'王さまとの友情',motivation:'生活を整える',relationships:'王さま',
+    behavior:'家事・買い物を助ける',reactions:'落ち着いて工夫する',firstPerson:'',
+    cadence:'人語を話さず行動で伝える',expression:'用件のある文字を書く',avoid:'声で話さない'})];
 
 const identity={characterId:'kiki',displayName:'キキ'};
 const base=()=>({
@@ -53,7 +48,7 @@ test('generates contextual reply choices, then a character reply only after a ch
   const log=JSON.parse(storage.getItem('forest-ai-local-v1:log'));
   assert.deepEqual(log.map(x=>x.event),['generated-opening','selected-offered-choice','generated-reply']);
   assert.equal(log[0].text,first.text,'export can reconstruct the initial line');
-  assert.equal(log[0].promptVersion,'forest-scene-generation-v18');
+  assert.equal(log[0].promptVersion,'forest-scene-generation-v19-profile2');
   assert.equal(log[1].label,'風の音を聞く');
   director.end();
 });
@@ -177,11 +172,11 @@ test('bad LLM output is rejected, preserving approved fallback and avoiding fabr
 
 test('private persona governs each live opening and reply; the shared theme is optional background',async()=>{
   const prompts=[];
-  const profile={id:'jiji',summary:'親しい相棒',values:'仲間',motivation:'一緒に旅する',
+  const profile=profileFixture({id:'jiji',summary:'親しい相棒',values:'仲間',motivation:'一緒に旅する',
     relationships:'キキ',behavior:'道を見張る',reactions:'軽い冗談で支える',
     firstPerson:'ぼく',address:'キキ',cadence:'短い観察の言葉',endings:'固定語尾なし',
     habits:'決まり文句は繰り返さない',expression:'目の前の物で比喩する',
-    emotion:'驚くと短く言う',avoid:'カウンセラーのような励ましを連発しない',review:'検証中'};
+    emotion:'驚くと短く言う',avoid:'カウンセラーのような励ましを連発しない',review:'検証中'});
   const input={...base(),start:async()=>({text:'そっちの道は大丈夫かな。',
     sourceKind:'meet',choices:[{id:'other',label:'もっと聞く'}]})};
   const director=createForestLiveDialogueDirector({base:input,storage:memoryStorage(),
@@ -201,8 +196,8 @@ test('private persona governs each live opening and reply; the shared theme is o
     }});
   let result=await director.start({characterId:'jiji'});
   assert.equal(result.text,'ぼくは先に見ておくよ。');
-  assert.match(prompts[0].npc.voice,/一人称:ぼく/);
-  assert.match(prompts[0].npc.voice,/関係性:キキ/);
+  assert.match(prompts[0].npc.voice,/一人称 \[.*\]:ぼく/);
+  assert.match(prompts[0].npc.voice,/関係性 \[.*\]:キキ/);
   assert.equal('approvedExamples' in prompts[0].npc,false,'finished examples must stay in fallback only');
   assert.equal(prompts[0].mode,'opening');
   assert.equal(prompts[0].context.sourceKind,'meet');
@@ -616,7 +611,7 @@ test('cat uses a private Sheets persona for nonverbal AI action and writing, nev
   assert.equal(prompts.length,1,'silent cat also receives a generated first encounter');
   assert.ok(prompts[0].npc.voice.includes('人語を話さず'));
   assert.ok(prompts[0].constraints.some(line=>line.includes('mark')));
-  assert.match(prompts[0].npc.voice,/ねこと王さまの相棒・テスト設定A/);
+  assert.match(prompts[0].npc.voice,/架空の相棒・テスト設定A/);
   assert.match(prompts[0].npc.voice,/家事・買い物/);
   assert.ok(prompts[0].constraints.some(line=>line.includes('具体的な意味')));
   assert.doesNotMatch(prompts[0].constraints.join('|'),/王さまとの友情|家事・買い物/, 'persona must come from Sheets only');

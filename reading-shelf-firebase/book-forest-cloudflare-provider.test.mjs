@@ -96,3 +96,10 @@ test('Cloudflare provider preserves safe Worker diagnostic categories without ex
     getIdToken:key,fetchImpl:async()=>({ok:true,json:async()=>{throw SyntaxError('private content')}})});
   await assert.rejects(()=>malformed({}),/Invalid Forest AI JSON/u);
 });
+
+test('a mismatched profile receipt is never accepted as generation from current Sheets',async()=>{
+  const generator=createForestCloudflareGenerator({workerUrl:'https://fixture.workers.dev',
+    getIdToken:async()=>'fixture-authentication-token',fetchImpl:async()=>new Response(JSON.stringify({
+      text:'架空の結果',choices:['みる','またね'],profileRevision:'profile2-ffffffffffffffff'}))});
+  await assert.rejects(generator({npc:{profileRevision:'profile2-0123456789abcdef'}}),/profile revision mismatch/);
+});

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {loadPrivateForestDialogue,parseForestDialogueRows,parseTwinNameRows,parseTwinSceneRows} from './book-forest-private-dialogue.mjs';
 import {saveCachedForestDialogue,loadCachedForestDialogue,clearCachedForestDialogue} from './book-forest-dialogue-cache.mjs';
 import {parseForestCharacterProfiles} from './book-forest-character-profiles.mjs';
+import {profileFixture,legacyFixture} from './forest-profile-fixture.mjs';
 
 const headers=['schemaVersion','cueId','npcId','kind','bookId','memoryId','fromNpc','text','choicesJson','approval'];
 const values=[headers,[1,'test-meet','king','meet','','','','こんにちは','', 'approved'],
@@ -38,7 +39,7 @@ const packageData={catalog:[{schemaVersion:1,id:'mem-1',bookId:'test-book',bookT
   evidenceStatus:'approved',confidence:'high',sourceUrl:'https://example.org/book'}],
   cues:parseForestDialogueRows(values),twinNames:parseTwinNameRows(twinNames),
   twinScenes:parseTwinSceneRows(twinTalk),thoughtSeeds:[],
-  characterProfiles:parseForestCharacterProfiles(characters,speech)};
+  loadedAt:Date.now(),characterProfiles:parseForestCharacterProfiles(legacyFixture(characters,speech))};
 
 test('only approved, valid authored dialogue lines load from the private sheet',()=>{
   assert.deepEqual(packageData.cues.map(x=>x.id),['test-meet','test-review']);
@@ -54,7 +55,7 @@ test('Drive lookup and Google Sheets batchGet are owner-authorized, bounded, and
     const data=calls.length===1?{files:[{name:'よんでね｜本の森 キャラクター設定・セリフ台帳',
       mimeType:'application/vnd.google-apps.spreadsheet',id:'x'.repeat(40)}]}:
       {valueRanges:[{values:fact},{values},{values:twinNames},{values:twinTalk},
-        {values:characters},{values:speech}]};
+        {values:legacyFixture(characters,speech)},{values:[['資料ID','根拠の種別','確認状態']]}]};
     return {ok:true,text:async()=>JSON.stringify(data)};
   };
   const result=await loadPrivateForestDialogue('test-token',{fetchImpl});
@@ -106,7 +107,7 @@ test('zero authored cues and absent twin scenes still load reviewed personalitie
       name:'よんでね｜本の森 キャラクター設定・セリフ台帳',
       mimeType:'application/vnd.google-apps.spreadsheet',id:'f'.repeat(40)}]}:
       {valueRanges:[{values:[]},{values:[headers]},{values:[]},{values:[]},
-        {values:characters},{values:speech}]})})});
+        {values:legacyFixture(characters,speech)},{values:[['資料ID','根拠の種別','確認状態']]}]})})});
   assert.deepEqual(loaded.cues,[]);
   assert.equal(loaded.characterProfiles[0].id,'jiji');
   const entries=new Map();
@@ -120,4 +121,32 @@ test('zero authored cues and absent twin scenes still load reviewed personalitie
     packageData:loaded,cacheStorage});
   const recovered=await loadCachedForestDialogue({uid:'fixture-owner',familyId:'fixture-family',cacheStorage});
   assert.deepEqual(recovered,loaded);
+});
+
+test('stale or future-dated packages cannot silently keep an old persona alive',async()=>{
+  const {freshForestDialogue,FOREST_DIALOGUE_MAX_AGE_MS}=await import('./book-forest-dialogue-cache.mjs');
+  const now=Date.now();
+  assert.equal(freshForestDialogue({loadedAt:now},now),true);
+  assert.equal(freshForestDialogue({loadedAt:now-FOREST_DIALOGUE_MAX_AGE_MS},now),false);
+  assert.equal(freshForestDialogue({loadedAt:now+1},now),false);
+  assert.equal(freshForestDialogue({}),false);
+  await assert.rejects(saveCachedForestDialogue({uid:'u',familyId:'f',
+    packageData:{...packageData,loadedAt:now-FOREST_DIALOGUE_MAX_AGE_MS},
+    cacheStorage:{open:async()=>({})}}),/再読込/);
+});
+
+test('a fresh authenticated reload replaces cached input and changes generated profile receipt without redeployment',async()=>{
+  let summary='架空の設定A';
+  const fetchImpl=async url=>({ok:true,text:async()=>JSON.stringify(String(url).includes('/drive/v3/files')?
+    {files:[{name:'よんでね｜本の森 キャラクター設定・セリフ台帳',mimeType:'application/vnd.google-apps.spreadsheet',id:'f'.repeat(30)}]}:
+    {valueRanges:[{values:[]},{values:[]},{values:[]},{values:[]},
+      {values:legacyFixture(characters.map((row,i)=>i===1?[...row.slice(0,3),summary,...row.slice(4)]:row),speech)},
+      {values:[['資料ID','根拠の種別','確認状態']]}]})});
+  const a=await loadPrivateForestDialogue('test-token',{fetchImpl});
+  summary='架空の設定B';
+  const b=await loadPrivateForestDialogue('test-token',{fetchImpl});
+  assert.notEqual(a.characterProfiles[0].revision,b.characterProfiles[0].revision);
+  const {promptFor}=await import('./book-forest-live-dialogue.mjs');
+  const prompt=promptFor({characterId:'jiji',characterProfile:b.characterProfiles[0]});
+  assert.match(prompt.npc.voice,/架空の設定B/);assert.doesNotMatch(prompt.npc.voice,/架空の設定A/);
 });

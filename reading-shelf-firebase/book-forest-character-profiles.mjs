@@ -1,86 +1,131 @@
-import {FOREST_CHARACTER_IDS,FOREST_CHARACTER_ROW_LIMIT,FOREST_ACTION_WRITING_IDS,
+import {FOREST_CHARACTER_IDS,FOREST_ACTION_WRITING_IDS,
   FOREST_AI_GENERATION_IDS} from './forest-character-registry.mjs';
-// The authoritative character profiles live in the owner's PRIVATE spreadsheet.
-// Public code contains only column contracts and validation, never real rows.
+// Only contracts and synthetic tests belong here. Actual claims live in private Sheets.
 const CHARACTER_IDS=new Set(FOREST_CHARACTER_IDS);
 const ACTION_WRITING_IDS=new Set(FOREST_ACTION_WRITING_IDS);
 const AI_IDS=new Set(FOREST_AI_GENERATION_IDS);
-const CHARACTER_COLUMNS={id:'NPC ID',summary:'人物像の要約',values:'大切にすること',
-  motivation:'望み・動機',relationships:'関係性',behavior:'普段の行動',
-  reactions:'状況への反応',verification:'原作確認'};
-const SPEECH_COLUMNS={id:'NPC／会話ID',firstPerson:'一人称',address:'相手の呼び方',
-  cadence:'基本口調・テンポ',endings:'語尾（使用条件）',habits:'口癖と使用頻度',
-  expression:'言い回しの特徴',emotion:'感情による変化',avoid:'避ける表現・NG',
-  review:'監修状態'};
+export const FOREST_PROFILE_SCHEMA=2;
+export const FOREST_PROFILE_ROWS=2000;
+export const FOREST_PROFILE_HEADERS=['NPC ID','項目','内容','根拠区分','根拠資料ID',
+  '適用範囲','監修状態','設定版'];
+export const FOREST_PROFILE_FIELDS={summary:'人物像',values:'価値観',motivation:'動機',
+  relationships:'関係性',behavior:'行動',reactions:'反応',firstPerson:'一人称',
+  address:'呼称',cadence:'口調',endings:'語尾',habits:'癖の頻度',
+  expression:'言い回し',emotion:'感情変化',avoid:'禁止・注意'};
+const BASES=new Set(['原作本文','公式資料','二次資料','編集解釈','ゲーム演出']);
+const REVIEWS=new Set(['確認済','暫定採用']);
+const METADATA=new Set(['表示名','作品・版','監修メモ']);
 const NORMALIZE=value=>String(value??'').replace(/[\u0000-\u001f\u007f]/gu,' ').trim().replace(/\s+/gu,' ');
+const FIELD_KEYS=Object.keys(FOREST_PROFILE_FIELDS);
+const KEY_BY_LABEL=Object.fromEntries(Object.entries(FOREST_PROFILE_FIELDS).map(([k,v])=>[v,k]));
+// Content fingerprint is diagnostic, not an authorization or integrity signature.
+// Two independent 32-bit hashes include every claim, annotation and revision.
+function fingerprint(value){
+  let a=2166136261,b=5381;
+  for(const c of JSON.stringify(value)){const n=c.codePointAt(0);
+    a=Math.imul(a^n,16777619);b=Math.imul(b,33)^n;}
+  return 'profile2-'+(a>>>0).toString(16).padStart(8,'0')+(b>>>0).toString(16).padStart(8,'0');
+}
+function profileError(id,reason){throw Error('人物設定 '+id+': '+reason)}
 
-function readRows(values,columns){
-  if(!Array.isArray(values)||!Array.isArray(values[0]))return new Map();
-  const headers=values[0].map(NORMALIZE);
-  if(Object.values(columns).some(header=>!headers.includes(header)))return new Map();
-  const result=new Map();
-  for(const row of values.slice(1,FOREST_CHARACTER_ROW_LIMIT+1)){
-    if(!Array.isArray(row))continue;
-    const read=key=>NORMALIZE(row[headers.indexOf(columns[key])]).slice(0,260);
-    const id=read('id');
-    if(!CHARACTER_IDS.has(id)||result.has(id))continue;
-    result.set(id,Object.fromEntries(Object.keys(columns).map(key=>[key,read(key)])));
+/** One row per semantic field, with its own evidence, scope and adoption status.
+ * No legacy wide-sheet reader, no implicit confidence upgrade, no text slicing.
+ * Oversize / duplicates / dangling source IDs are explicit editing errors.
+ */
+export function parseForestCharacterProfiles(rows,sources=[]){
+  if(!Array.isArray(rows)||!Array.isArray(rows[0]))return [];
+  const headers=rows[0].map(NORMALIZE);
+  if(FOREST_PROFILE_HEADERS.some(h=>!headers.includes(h)))throw Error('人物設定のヘッダーが正しくありません');
+  if(rows.length>FOREST_PROFILE_ROWS+1)throw Error('人物設定の行数上限を超えています');
+  const sourceIds=new Set(sources.map(s=>s.id));
+  const people=new Map();
+  for(const row of rows.slice(1)){
+    if(!Array.isArray(row)||row.every(v=>!NORMALIZE(v)))continue;
+    const [id,field,text,basis,refs,scope,review,version]=FOREST_PROFILE_HEADERS.map(h=>NORMALIZE(row[headers.indexOf(h)]));
+    // Additional sprite actors may share a registered dialogue identity.
+    if(!CHARACTER_IDS.has(id))continue;
+    if(METADATA.has(field))continue; // human editing metadata stays in the ledger
+    const key=KEY_BY_LABEL[field];
+    if(!key)profileError(id,'不明な項目');
+    if(!text||text.length>1200||!scope||scope.length>200||!version||version.length>80)
+      profileError(id,'内容・適用範囲・設定版を確認してください（自動切捨てはしません）');
+    if(!BASES.has(basis)||!REVIEWS.has(review))profileError(id,'根拠区分・監修状態を確認してください');
+    if(review==='確認済'&&['編集解釈','ゲーム演出'].includes(basis))
+      profileError(id,'解釈・演出は原作確認済にできません');
+    const sourceRefs=[...new Set(refs.split(/[,、\s]+/u).filter(Boolean))];
+    if(sourceRefs.some(ref=>!sourceIds.has(ref))||
+      (review==='確認済'&&sourceRefs.some(ref=>sources.find(s=>s.id===ref)?.status!=='確認済'))||
+      (['原作本文','公式資料','二次資料'].includes(basis)&&!sourceRefs.length))
+      profileError(id,'根拠資料IDを確認してください');
+    if(!people.has(id))people.set(id,{id,schemaVersion:FOREST_PROFILE_SCHEMA,version,claims:[]});
+    const p=people.get(id);
+    if(p.version!==version||p.claims.some(c=>c.key===key))profileError(id,'項目重複または設定版の不一致');
+    p.claims.push({key,text,basis,sourceRefs,scope,review});
   }
-  return result;
+  return [...people.values()].map(p=>{
+    p.claims.sort((a,b)=>FIELD_KEYS.indexOf(a.key)-FIELD_KEYS.indexOf(b.key));
+    for(const c of p.claims)p[c.key]=c.text;
+    for(const k of FIELD_KEYS)if(p[k]===undefined)p[k]='';
+    const used=new Set(p.claims.flatMap(c=>c.sourceRefs));
+    p.sources=sources.filter(s=>used.has(s.id)).map(({id,kind,status})=>({id,kind,status}));
+    p.review=p.claims.some(c=>c.review==='暫定採用')?'暫定事項あり':'確認済';
+    p.revision=fingerprint([p.id,p.version,p.claims,p.sources]);
+    if(!validForestCharacterProfiles([p]).length)profileError(p.id,'必須項目不足または生成入力の上限超過');
+    return p;
+  });
 }
 
-/** Join owner-reviewed identities and provisional speech guidance by NPC ID. */
-export function parseForestCharacterProfiles(characters,speech){
-  const people=readRows(characters,CHARACTER_COLUMNS),speakers=readRows(speech,SPEECH_COLUMNS);
-  const result=[];
-  for(const [id,person] of people){
-    const voice=speakers.get(id);
-    if(person.verification!=='確認済'||!voice||!person.summary||!voice.cadence||
-      (!voice.firstPerson&&!ACTION_WRITING_IDS.has(id))||!voice.avoid)continue;
-    result.push({id,
-      summary:person.summary,values:person.values,motivation:person.motivation,
-      relationships:person.relationships,behavior:person.behavior,reactions:person.reactions,
-      firstPerson:voice.firstPerson,address:voice.address,cadence:voice.cadence,
-      endings:voice.endings,habits:voice.habits,expression:voice.expression,
-      emotion:voice.emotion,avoid:voice.avoid,review:voice.review});
-  }
-  return result;
+export function parseForestProfileSources(rows){
+  if(!Array.isArray(rows)||!Array.isArray(rows[0]))return [];
+  const headers=rows[0].map(NORMALIZE),required=['資料ID','根拠の種別','確認状態'];
+  if(required.some(h=>!headers.includes(h)))throw Error('根拠資料のヘッダーが正しくありません');
+  const ids=new Set();
+  return rows.slice(1).filter(r=>Array.isArray(r)&&NORMALIZE(r[0])).map(row=>{
+    const [id,kind,status]=required.map(h=>NORMALIZE(row[headers.indexOf(h)]));
+    if(ids.has(id)||!id||!kind||!status)throw Error('根拠資料IDの重複または資料情報の不足');
+    ids.add(id);return {id,kind,status};
+  });
+}
+
+function guideText(p){
+  return ['人物設定版:'+p.version+' / '+p.revision,
+    '優先順:価値観・動機・関係性・行動を核に反応する。話し方はその表現。',
+    '根拠規約:原作本文・公式資料・二次資料を区別。編集解釈・ゲーム演出・暫定採用は原作確定ではない。各適用範囲と本文の留保を守り、未確認事項を断定しない。',
+    ...p.claims.map(c=>FOREST_PROFILE_FIELDS[c.key]+' ['+c.basis+' / '+c.review+' / '+c.scope+
+      (c.sourceRefs.length?' / 資料:'+c.sourceRefs.join(','):'')+']:'+c.text),
+    ...(p.sources.length?['資料の種別・照合状態:'+p.sources.map(s=>s.id+'='+s.kind+'('+s.status+')').join(';')]:[])
+  ].join('\n');
 }
 
 export function validForestCharacterProfiles(profiles){
   if(!Array.isArray(profiles)||profiles.length>CHARACTER_IDS.size)return [];
   const seen=new Set();
-  return profiles.filter(profile=>{
-    if(!profile||!CHARACTER_IDS.has(profile.id)||seen.has(profile.id)||
-      typeof profile.summary!=='string'||!profile.summary||profile.summary.length>260||
-      typeof profile.cadence!=='string'||!profile.cadence||profile.cadence.length>260||
-      typeof profile.firstPerson!=='string'||
-      (!profile.firstPerson&&!ACTION_WRITING_IDS.has(profile.id))||profile.firstPerson.length>260||
-      typeof profile.avoid!=='string'||!profile.avoid||profile.avoid.length>260)return false;
-    const keys=['values','motivation','relationships','behavior','reactions','address',
-      'endings','habits','expression','emotion','review'];
-    if(keys.some(key=>typeof profile[key]!=='string'||profile[key].length>260))return false;
-    seen.add(profile.id);return true;
+  return profiles.filter(p=>{
+    if(!p||!CHARACTER_IDS.has(p.id)||seen.has(p.id)||p.schemaVersion!==FOREST_PROFILE_SCHEMA||
+      typeof p.version!=='string'||!p.version||p.version.length>80||
+      !Array.isArray(p.claims)||p.claims.length>FIELD_KEYS.length||!Array.isArray(p.sources)||
+      p.sources.length>80||!p.summary||!p.cadence||!p.avoid||
+      (!p.firstPerson&&!ACTION_WRITING_IDS.has(p.id)))return false;
+    const keys=new Set();
+    for(const c of p.claims){
+      if(!c||!FIELD_KEYS.includes(c.key)||keys.has(c.key)||typeof c.text!=='string'||
+        !c.text||c.text.length>1200||p[c.key]!==c.text||!BASES.has(c.basis)||!REVIEWS.has(c.review)||
+        !c.scope||c.scope.length>200||!Array.isArray(c.sourceRefs)||
+        c.sourceRefs.some(ref=>!p.sources.some(s=>s.id===ref))||
+        (['原作本文','公式資料','二次資料'].includes(c.basis)&&!c.sourceRefs.length)||
+        (c.review==='確認済'&&c.sourceRefs.some(ref=>p.sources.find(s=>s.id===ref)?.status!=='確認済'))||
+        (c.review==='確認済'&&['編集解釈','ゲーム演出'].includes(c.basis)))return false;
+      keys.add(c.key);
+    }
+    if(FIELD_KEYS.some(k=>typeof p[k]!=='string'||(p[k]&&!keys.has(k)))||
+      p.sources.some(s=>typeof s.id!=='string'||typeof s.kind!=='string'||typeof s.status!=='string')||
+      p.revision!==fingerprint([p.id,p.version,p.claims,p.sources])||guideText(p).length>6000)return false;
+    seen.add(p.id);return true;
   });
 }
 
-/** Concise behavioral instructions, not unchecked examples or quoted story lines. */
 export function forestCharacterVoiceGuide(profile){
-  if(!validForestCharacterProfiles([profile]).length)return '';
-  // Source-confidence notes explain the sheet, not the character's speech.
-  const firstPerson=ACTION_WRITING_IDS.has(profile.id)?'':
-    profile.firstPerson.split(/[（(]/u)[0].trim();
-  const parts=[
-    ['人物像',profile.summary,125],['大切にすること',profile.values,95],
-    ['望み',profile.motivation,75],['関係性',profile.relationships,85],
-    ['行動',profile.behavior,90],['状況への反応',profile.reactions,100],
-    ['一人称',firstPerson,65],['呼び方',profile.address,50],
-    ['口調',profile.cadence,130],['語尾の条件',profile.endings,105],
-    ['癖の頻度',profile.habits,100],['言い回し',profile.expression,110],
-    ['感情の変化',profile.emotion,85],['禁止・注意',profile.avoid,145]
-  ];
-  return parts.filter(([,value])=>value).map(([name,value,limit])=>
-    `${name}:${value.slice(0,limit)}`).join('\n');
+  return validForestCharacterProfiles([profile]).length?guideText(profile):'';
 }
 
 /** Public IDs and reason codes only: never profile text, image IDs or credentials. */

@@ -23,13 +23,11 @@ imports = """
 import {FOREST_AI_SPEAKER_IDS} from '../reading-shelf-firebase/forest-character-registry.mjs';
 import {createForestDialogueDirector} from '../reading-shelf-firebase/book-forest-dialogue-director.mjs';
 import {createForestLiveDialogueDirector} from '../reading-shelf-firebase/book-forest-live-dialogue.mjs';
-const profile={id:'kiki',summary:'架空の観察好きな人物',firstPerson:'わたし',cadence:'短く話す',
-  avoid:'説教しない',values:'',motivation:'',relationships:'',behavior:'',reactions:'',
-  address:'',endings:'',habits:'',expression:'',emotion:'',review:''};
+import {profileFixture} from '../reading-shelf-firebase/forest-profile-fixture.mjs';
 window.testPrompts=[];
 const dialogue=createForestLiveDialogueDirector({
   base:createForestDialogueDirector({storage:localStorage}),storage:localStorage,
-  startDelayMs:0,requireCharacterProfile:true,getCharacterProfiles:()=>FOREST_AI_SPEAKER_IDS.map(id=>({...profile,id})),
+  startDelayMs:0,requireCharacterProfile:true,getCharacterProfiles:()=>FOREST_AI_SPEAKER_IDS.map(id=>profileFixture({id,firstPerson:'わたし'})),
   generate:async prompt=>{
     testPrompts.push(prompt);
     if(new URLSearchParams(location.search).has('fail'))throw Error('fixture unavailable');

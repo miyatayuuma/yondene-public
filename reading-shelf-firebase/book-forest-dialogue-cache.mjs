@@ -3,20 +3,25 @@ import {unlockedStoryMemories} from './book-forest-story-memory.mjs';
 import {validateTwinNamePairs,validateTwinScenes} from './book-forest-twins.mjs';
 import {validForestCharacterProfiles} from './book-forest-character-profiles.mjs';
 
-const PREFIX='private-book-forest-dialogue-v6-';
+const PREFIX='private-book-forest-dialogue-v7-';
 const LEGACY_PREFIXES=['private-book-forest-dialogue-v1-','private-book-forest-dialogue-v2-',
   'private-book-forest-dialogue-v3-','private-book-forest-dialogue-v4-',
-  'private-book-forest-dialogue-v5-'];
+  'private-book-forest-dialogue-v5-','private-book-forest-dialogue-v6-'];
+export const FOREST_DIALOGUE_MAX_AGE_MS=60*60*1000;
+export function freshForestDialogue(data,now=Date.now()){
+  return Number.isFinite(data?.loadedAt)&&data.loadedAt<=now&&now-data.loadedAt<FOREST_DIALOGUE_MAX_AGE_MS;
+}
 const IDS=/^[A-Za-z0-9_-]{1,160}$/u;
 const pathname='/__book_forest_private_dialogue__/package';
 const scopedName=(uid,familyId)=>{
   if(!IDS.test(uid)||!IDS.test(familyId))throw Error('森の会話データの所有者が不明です');
-  return PREFIX+uid+'-'+familyId;
+  return PREFIX+uid+'~'+familyId;
 };
 const url=()=>new URL(pathname,globalThis.location?.origin||'https://local.test').href;
 
 export async function saveCachedForestDialogue({uid,familyId,packageData,cacheStorage=globalThis.caches}={}){
   if(!cacheStorage?.open)return false;
+  if(!freshForestDialogue(packageData))throw Error('会話資料の再読込が必要です');
   if(!Array.isArray(packageData?.cues))throw Error('会話資料の形式が正しくありません');
   if(!Array.isArray(packageData?.catalog)||packageData.catalog.length>140)
     throw Error('物語記憶の件数が正しくありません');
@@ -28,7 +33,7 @@ export async function saveCachedForestDialogue({uid,familyId,packageData,cacheSt
   if(!Array.isArray(packageData?.twinNames)||!Array.isArray(packageData?.twinScenes))
     throw Error('ふたご会話の形式が正しくありません');
   const body=JSON.stringify(packageData);
-  if(body.length>200000)throw Error('会話台本が大きすぎます');
+  if(body.length>480000)throw Error('会話台本が大きすぎます');
   const name=scopedName(uid,familyId);
   const cache=await cacheStorage.open(name);
   await cache.put(url(),new Response(body,{headers:{'Content-Type':'application/json'}}));
@@ -43,8 +48,9 @@ export async function loadCachedForestDialogue({uid,familyId,cacheStorage=global
   if(!response)return null;
   try{
     const text=await response.text();
-    if(text.length>200000)throw Error('oversized');
+    if(text.length>480000)throw Error('oversized');
     const data=JSON.parse(text);
+    if(!freshForestDialogue(data))throw Error('expired');
     if(!Array.isArray(data.catalog)||data.catalog.length>140||!Array.isArray(data.cues))
       throw Error('invalid');
     if(!Array.isArray(data.thoughtSeeds)||data.thoughtSeeds.length>180)throw Error('invalid seeds');
@@ -56,7 +62,7 @@ export async function loadCachedForestDialogue({uid,familyId,cacheStorage=global
     // Fact-level authorization still happens with the current Firestore shelf
     // snapshot in the director. Never persist reading state or review quotes.
     return {catalog:data.catalog,cues:validateForestDialogueCues(data.cues),twinNames,twinScenes,
-      thoughtSeeds:data.thoughtSeeds,characterProfiles:validForestCharacterProfiles(data.characterProfiles)};
+      loadedAt:data.loadedAt,thoughtSeeds:data.thoughtSeeds,characterProfiles:validForestCharacterProfiles(data.characterProfiles)};
   }catch{
     await cacheStorage.delete(name);return null;
   }

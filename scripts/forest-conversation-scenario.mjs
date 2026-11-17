@@ -2,7 +2,7 @@
 // clock, storage, source readers and network transport are replaced. Full traces
 // may contain PRIVATE inputs: callers must not log or publish them by default.
 import {createForestDialogueDirector} from '../reading-shelf-firebase/book-forest-dialogue-director.mjs';
-import {createForestLiveDialogueDirector,FOREST_PROMPT_VERSION}
+import {createForestLiveDialogueDirector,validateLiveForestOutput,FOREST_PROMPT_VERSION}
   from '../reading-shelf-firebase/book-forest-live-dialogue.mjs';
 import {FOREST_DIALOGUE_PROTOCOL,FOREST_ROSTER_REVISION}
   from '../reading-shelf-firebase/forest-character-registry.mjs';
@@ -24,9 +24,9 @@ export async function runForestConversationScenario({visits=[],transport,
   storage=scenarioStorage(),now=()=>Date.now(),getBooks=()=>[],getCatalog=()=>[],
   getCues=()=>[],getReflections=async()=>[],getRecentReflections=async()=>[],
   getCharacterProfiles=()=>[],getTwinNames=()=>[],getTwinScenes=()=>[],
-  dailyLimit=300,requestTimeoutMs=11000,
+  dailyLimit=300,requestTimeoutMs=11000,runtime={},
   implementation={createForestDialogueDirector,createForestLiveDialogueDirector,
-    forestGenerationInput,readCompletion},onStep=()=>{}}={}){
+    forestGenerationInput,readCompletion,validateLiveForestOutput},onStep=()=>{}}={}){
   if(typeof transport!=='function')throw Error('A model transport is required');
   const trace=[],frames=[];
   const versions={protocolRevision:FOREST_DIALOGUE_PROTOCOL,registryRevision:FOREST_ROSTER_REVISION,
@@ -37,7 +37,7 @@ export async function runForestConversationScenario({visits=[],transport,
   const live=implementation.createForestLiveDialogueDirector({...common,base,
     getRecentReflections,getCharacterProfiles,requireCharacterProfile:true,
     storageKey:'scenario:live',now,startDelayMs:0,sessionLimit:3,maxReplies:2,
-    dailyLimit,requestTimeoutMs,modelId:'@cf/google/gemma-4-26b-a4b-it',
+    dailyLimit,requestTimeoutMs,...runtime,modelId:'@cf/google/gemma-4-26b-a4b-it',
     generate:async(prompt,{signal}={})=>{
       const input=implementation.forestGenerationInput(prompt);
       const entry={prompt,input,inputFingerprint:forestInputFingerprint(input),
@@ -50,10 +50,17 @@ export async function runForestConversationScenario({visits=[],transport,
         entry.raw=await transport(input,{prompt,signal,index:trace.length-1});
         entry.validated=implementation.readCompletion(entry.raw,{characterId:prompt.npc.id,
           mode:prompt.mode,closing:prompt.closing,context:prompt.context});
-        entry.validation='accepted';return entry.validated;
+        entry.workerValidation='accepted';
+        entry.validation=implementation.validateLiveForestOutput(entry.validated,{characterId:prompt.npc.id,
+          requireLine:prompt.mode!=='choices',closing:prompt.closing,context:prompt.context})?'accepted':'rejected';
+        if(entry.validation==='rejected')entry.failure='output-validation';
+        return entry.validated;
       }catch(error){entry.validation='rejected';
         // Do not retain provider exception bodies or credentials in traces.
-        entry.failure='model-or-transport';throw error;}
+        entry.failure=/timeout/iu.test(String(error?.message||''))?'timeout':
+          /Invalid model JSON/u.test(String(error?.message||''))?'model-json':
+          /Invalid model|Invalid silent|Invalid closing/u.test(String(error?.message||''))?'output-validation':'model-or-transport';
+        throw error;}
     }});
   async function display(result,identity,visit,turn,visible=true){
     frames.push({visit,turn,characterId:identity.characterId,result,displayed:visible});

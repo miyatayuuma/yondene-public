@@ -124,7 +124,27 @@ test('foraging guard distinguishes unidentified plants, refusals and ordinary kn
     assert.throws(()=>readCompletion({response:JSON.stringify({text:'見つけたよ。',choices:[line,'見ている']})},
       {characterId:'king',mode:'opening',context}),/unsafe-foraging/);
   }
-  for(const line of ['食べないで観察しよう','食べていいかわからない','持ってきたパンを食べよう'])
+  for(const line of ['食べないで観察しよう','食べていいかわからない','むやみに食べるのは危ないよ','持ってきたパンを食べよう'])
     assert.equal(unsafeForestForaging({text:line,choices:['見ている','先へ進む']},context),false,line);
   assert.equal(unsafeForestForaging({text:'焼いたパンがおいしいよ。',choices:['食べよう','とっておく']}),false);
+});
+
+
+test('unidentified forest fruit is guarded even when the model omits the word unknown',()=>{
+  const context={situation:{place:'本の森',presentNpcIds:['mochan']}};
+  const opening={text:'そこの木、なんだかおいしそうな実がなっているね。',
+    choices:['本当だ、おいしそう！','食べられるのかな？']};
+  assert.equal(unsafeForestForaging(opening,context),true);
+  assert.equal(unsafeForestForaging({text:'これ、食べていいのかな？',choices:['食べてみようよ！','ゆっくり見よう。']},
+    {...context,recentTurns:[{npc:opening.text}]}),true);
+  assert.equal(unsafeForestForaging({text:'森で持ってきたパンを食べよう。',choices:['いっしょに食べる','とっておく']},context),false);
+});
+
+
+test('a model-format success rejected by the real browser validator is not a pipeline PASS',async()=>{
+  const run=await runForestConversationScenario({...defaults,visits:[{characterId:'kiki'}],
+    transport:async()=>({response:JSON.stringify({text:'キキはここにいるよ。',choices:['見ている','手をふる']})})});
+  assert.equal(run.trace[0].workerValidation,'accepted');
+  assert.equal(run.trace[0].validation,'rejected');
+  assert.doesNotMatch(run.frames[0].result.text,/キキは/);
 });

@@ -4,7 +4,7 @@ import {validateForestGestureMark,validateForestGestureText} from '../../../read
 // よんでね 本の森: a small, owner-only proxy for the free Workers AI allowance.
 // No bookshelf data, Firebase private credentials, or Cloudflare API keys here.
 const MODEL='@cf/google/gemma-4-26b-a4b-it';
-export const FOREST_WORKER_VERSION='forest-dialogue-v20-profile2';
+export const FOREST_WORKER_VERSION='forest-dialogue-v21-profile2';
 const VERSION=FOREST_WORKER_VERSION;
 const JWKS_URL='https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com';
 const ORIGINS=new Set(['https://kodomo-reading-shelf-87f11.web.app',
@@ -128,6 +128,7 @@ export function forestGenerationInput(prompt){
         '人物像は送信されたnpc.voiceの非公開台帳由来の設定を最優先し、設定を説明するだけの文にしない。'+
         '各項目の根拠区分・監修状態・適用範囲と本文中の留保を守る。二次資料は原作本文ではない。'+
         '編集解釈・ゲーム演出・暫定採用は演技の手掛かりであり、原作の確定事実として語らない。'+
+        'situationのplaceが今いる場所、presentNpcIdsが同席を確認できる人物。relatedNpcIdsは関係性で、今そばにいる証拠ではない。'+
         '今日のsceneはevidence=reviewedなら読了済み原作の承認済み事実を含み、evidence=imaginedなら森の即興の出来事。'+
         '原作の記憶は過去の物語であり、今日この森で起きた事実に置き換えない。森での想像や提案は区別する。'+
         '知らない木の実・きのこ・植物の食用性を断定せず、味見や摂取を選択肢にしない。安全な食事や食欲は表現してよい。'+
@@ -146,7 +147,7 @@ export function forestGenerationInput(prompt){
           'mark={surface:noteまたはgroundまたはleaf,word:ひらがなと小学1年生までの漢字・読点句点・！？からなる1〜48文字}。'+
           '書かない場合はmark:null。人語の発声・心の声は禁止。markの文字種はサーバーでも検証する。':
           '')+
-        'closing=trueなら新たな質問をせず、choicesは空配列とする。'},
+        'closing=trueでも直前の問いや頼みに先に答え、約束した内容をまた今度へ先送りしない。新たな質問をせずchoicesは空配列とする。'},
         {role:'user',content:JSON.stringify(prompt)}],
       max_completion_tokens:320,temperature:.75,
       chat_template_kwargs:{enable_thinking:false}};

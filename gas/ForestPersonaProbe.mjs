@@ -16,10 +16,11 @@ import {parseForestBookshelfMirror}
 import {forestMemoryBelongsToCharacter}
   from '../reading-shelf-firebase/forest-character-registry.mjs';
 import {promptFor} from '../reading-shelf-firebase/book-forest-live-dialogue.mjs';
+import {runForestConversationScenario,scenarioStorage} from '../scripts/forest-conversation-scenario.mjs';
 import {forestGenerationInput,readCompletion} from '../cloudflare/forest-ai/src/index.mjs';
 
 const MODEL='@cf/google/gemma-4-26b-a4b-it';
-const MODES=new Set(['synthetic','mirror-reflection','mirror-daily','mirror-story','continuation']);
+const MODES=new Set(['synthetic','mirror-reflection','mirror-daily','mirror-story','continuation','integrated-synthetic','integrated-mirror']);
 const safeText=v=>/^\s*[=+@-]/u.test(String(v))?"'"+String(v):String(v);
 const norm=x=>String(x??'').trim();
 const SOURCE_PROVEN='READ_ONLY_MIRROR';
@@ -152,11 +153,42 @@ function getPrevious(rows,id){
     turn:Number(row[26])||0};
 }
 
+// Retain the exact three generated lines per NPC used by production's
+// repetition check. Prior complete traces stay in prior result rows, avoiding
+// the Sheets cell limit without changing the next generated input.
+export function compactProbeStorage(storage){
+  const result={...storage},key='scenario:live:log';
+  const entries=JSON.parse(result[key]||'[]'),counts={};
+  result[key]=JSON.stringify(entries.slice().reverse().filter(e=>{
+    if(!['generated-opening','generated-reply'].includes(e.event)||typeof e.text!=='string')return false;
+    counts[e.characterId]=(counts[e.characterId]||0)+1;
+    return counts[e.characterId]<=3;
+  }).reverse().filter(e=>typeof e.text==='string').map(({event,characterId,text})=>({event,characterId,text})));
+  return result;
+}
+
+/** GAS replaces only browser timeout/cancellation primitives. UrlFetch is
+ * synchronous: discard responses taking >11s in the transport, matching the
+ * browser's deadline; no claim that GAS can abort an in-flight network call.
+ */
+export async function probeConversation(personRows,sourceRows,characterId,{snapshot={books:[],reflections:[]},
+  catalog=[],cues=[],storage,choices=[0,0],transport,now=()=>Date.now()}={}){
+  const profiles=parseForestCharacterProfiles(personRows,parseForestProfileSources(sourceRows));
+  if(!profiles.some(p=>p.id===characterId))throw Error('MISSING_PROFILE');
+  return runForestConversationScenario({visits:[{characterId,choices}],transport,
+    now,storage:scenarioStorage(storage||{}),getBooks:()=>snapshot.books,
+    getCatalog:()=>catalog,getCues:()=>cues,getCharacterProfiles:()=>profiles,
+    getRecentReflections:async()=>snapshot.reflections||[],
+    getReflections:async bookId=>(snapshot.reflections||[]).filter(r=>r.bookId===bookId),
+    runtime:{createAbortController:()=>({signal:{aborted:false},abort(){this.signal.aborted=true}}),
+      scheduleTimeout:()=>null,cancelTimeout:()=>{}}});
+}
+
 /** Run a bounded queue once. Private input JSON may include reader quotes;
  * never export/log it or add it to public code. Only the private results Sheet
  * persists the exact prompt for reproducible testing.
  */
-export function processQueue(){
+export async function processQueue(){
   const lock=LockService.getScriptLock();if(!lock.tryLock(1000))return;
   try{
     const ss=SpreadsheetApp.getActiveSpreadsheet();
@@ -194,18 +226,64 @@ export function processQueue(){
         mark('ERROR','INVALID_INPUT');continue;
       }
       if(existing.has(id)){mark('APPLIED','ALREADY_RECORDED');continue;}
+      const integrated=mode.startsWith('integrated-');
+      if(integrated&&(3-done<3||60-attempts<3))break;
       mark('RUNNING','');SpreadsheetApp.flush();done++;
       let prepared;
       try{
         // Never silently replace an unavailable bookshelf mirror with invented text.
-        if(mode!=='synthetic'&&!mirror)mirror=readMirror(ss,props);
+        if(!['synthetic','integrated-synthetic'].includes(mode)&&!mirror)mirror=readMirror(ss,props);
+        if(integrated){
+          let prior=null;
+          if(previousId){
+            const matches=results.filter(row=>row[0]===previousId&&['PASS','FAIL'].includes(row[17])&&row[18]===mode);
+            if(matches.length!==1)throw Error('PREVIOUS_RESULT_MISSING');
+            try{prior=JSON.parse(matches[0][15]).conversation.storage}catch{throw Error('PREVIOUS_INPUT_INVALID')}
+            if(!prior)throw Error('PREVIOUS_INPUT_INVALID');
+          }
+          const selectedChoices=choice?JSON.parse(choice):[0,0];
+          if(!Array.isArray(selectedChoices)||selectedChoices.length>2||
+            selectedChoices.some(c=>!Number.isInteger(c)||c<0||c>1))throw Error('INVALID_CHOICE');
+          const snapshot=mode==='integrated-mirror'?mirror:{books:[],reflections:[]};
+          const conversation=await probeConversation(originalPeople,originalSources,npc,{
+            snapshot,catalog,cues,storage:prior,choices:selectedChoices,
+            transport:async input=>{
+              if(attempts>=60)throw Error('Local quota reached');
+              props.setProperty(key,String(++attempts));
+              const started=Date.now();
+              const response=UrlFetchApp.fetch('https://api.cloudflare.com/client/v4/accounts/'+account.trim()+'/ai/run/'+MODEL,{
+                method:'post',contentType:'application/json',headers:{Authorization:'Bearer '+token.trim()},
+                payload:JSON.stringify({...input,stream:false}),muteHttpExceptions:true,followRedirects:false});
+              if(Date.now()-started>11000)throw Error('timeout');
+              if(response.getResponseCode()<200||response.getResponseCode()>=300)throw Error('Worker transport unavailable');
+              const envelope=JSON.parse(response.getContentText());
+              if(envelope.success===false)throw Error('Provider unavailable');
+              return envelope.result;
+            }});
+          done+=2;
+          const valid=conversation.trace.length>0&&conversation.trace.every(t=>t.validation==='accepted');
+          const compact={...conversation,storage:compactProbeStorage(conversation.storage),
+            trace:conversation.trace.map(({prompt,...rest})=>rest)};
+          const saved=JSON.stringify({conversation:compact});
+          if(saved.length>48000)throw Error('TRACE_TOO_LARGE');
+          out.appendRow([safeText(id),npc,npc,safeText(scene),safeText(utterance),
+            safeText(JSON.stringify(conversation.frames.map(f=>f.result))),MODEL,
+            conversation.trace[0]?.prompt.npc.profileVersion||'', '',
+            conversation.summary.promptVersion,new Date(),'','','','品質評価未実施',
+            safeText(saved),new Date(),valid?'PASS':'FAIL',mode,mirror?.snapshotAt?new Date(mirror.snapshotAt):'',
+            '', '',mode==='integrated-synthetic'?'SYNTHETIC':'READ_ONLY_MIRROR',
+            safeText(previousId||''),safeText(caseId||''),safeText(issue||''),
+            conversation.frames.length-1,'']);
+          existing.add(id);mark(valid?'APPLIED':'ERROR',valid?'':'OUTPUT_VALIDATION');
+          continue;
+        }
         const previous=mode==='continuation'?getPrevious(results,previousId):null;
         prepared=probeInput(originalPeople,originalSources,npc,scene,utterance,{
           mode,mirror:mode==='synthetic'?null:mirror,catalog,cues,
           bookId,previous,previousId,choice,now:Date.now()});
       }catch(error){
         const code=String(error?.message||'');
-        mark('ERROR',/^(?:MIRROR_[A-Z_]+|BOOK_NOT_READ|READ_REVOKED|REFLECTION_REVOKED|NO_ELIGIBLE_REFLECTION|NO_VERIFIED_STORY|INVALID_CHOICE|PREVIOUS_[A-Z_]+|REFLECTION_IDENTITY|INVALID_CONTINUATION|MAX_REPLIES)$/u.test(code)?
+        mark('ERROR',/^(?:MIRROR_[A-Z_]+|BOOK_NOT_READ|READ_REVOKED|REFLECTION_REVOKED|NO_ELIGIBLE_REFLECTION|NO_VERIFIED_STORY|INVALID_CHOICE|PREVIOUS_[A-Z_]+|REFLECTION_IDENTITY|INVALID_CONTINUATION|MAX_REPLIES|TRACE_TOO_LARGE)$/u.test(code)?
           code:'PROFILE_CONTRACT');
         continue;
       }
@@ -236,7 +314,7 @@ export function processQueue(){
       out.appendRow([safeText(id),safeText(npc),safeText(npc),safeText(scene),safeText(utterance),
         safeText(typeof raw==='string'?raw:JSON.stringify(raw??null)),MODEL,
         prepared.profile.version+' / '+prepared.profile.revision,prepared.profile.review,
-        'profile2-worker-v19',new Date(),'','','','品質評価未実施',
+        'profile2-worker-v20',new Date(),'','','','品質評価未実施',
         safeText(JSON.stringify(prepared.input)),new Date(),valid?'PASS':'FAIL',
         mode,meta.syncAt?new Date(meta.syncAt):'',safeText(meta.bookId||''),
         meta.attribution||'',mode==='synthetic'?'SYNTHETIC':SOURCE_PROVEN,

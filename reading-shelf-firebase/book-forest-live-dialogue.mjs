@@ -16,7 +16,7 @@ const ACTION_WRITING_IDS=new Set(FOREST_ACTION_WRITING_IDS);
 const safeEnd=(id,comma=false)=>ACTION_WRITING_IDS.has(id)?
   '（ねこはしっぽをゆっくりふった。）':GOODBYE[id]||(comma?'また、森で会おうね。':'また森で会おうね。');
 const WRONG_FIRST_PERSON=FOREST_WRONG_FIRST_PERSON;
-export const FOREST_PROMPT_VERSION='forest-scene-generation-v20-profile2';
+export const FOREST_PROMPT_VERSION='forest-scene-generation-v21-profile2';
 const PROMPT_VERSION=FOREST_PROMPT_VERSION;
 const clean=value=>typeof value==='string'?value.trim().replace(/\s+/gu,' '):'';
 function readJson(storage,key,fallback){
@@ -113,7 +113,7 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
     task:closing?'この場のやり取りを自然に終える。余韻や静かな間でもよい':
       mode==='reply'?'相手が選んだことと直前の行動を踏まえ、同じ合図の繰り返しではない次の反応をする':
       reviewSpotlight?'readerReflectionの具体的な内容を受け止め、その着眼点に人物設定らしく無言で反応する。別作品なら第三者として接する':
-      sourceKind==='story'?'確認済みの既読の出来事を踏まえ、人物設定に合う自然な反応をする。原作にない事実を作らない':
+      sourceKind==='story'?'確認済みの既読の出来事は過去の記憶として受け止め、今の森で再演せず、人物設定に合う自然な反応をする':
       sourceKind==='relay'?'前の人物からの話題に本人らしく反応する。直接聞いたふりをしない':
       sourceKind==='meet'?'初対面の相手に、人物設定に合う無言の初めの反応をする':
       'この場面の意味と人物設定に合う自然な反応をする',
@@ -139,14 +139,14 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
   };
   const firstLineTask={
     meet:'この相手とは初対面。以前話したふりをせず、キャラ自身の関心から自然な第一声と返答候補2つを作る',
-    story:'このキャラが関わる既読作品の確認済みの場面を踏まえ、本人らしい第一声と返答候補2つを作る',
+    story:'このキャラが関わる確認済みの物語を過去の記憶として振り返り、本人らしい第一声と返答候補2つを作る。今の森で原作の場面が進行中であるように再演しない',
     reflection:'台帳が示す読書感想を取り上げ、原文と保護者の要約を区別しながら本人らしく反応する',
     relay:'前のキャラからの話題の引き継ぎ。会話を直接聞いたふりをせず、自然な第一声と返答候補2つを作る',
     ambient:'キャラ固有の関心や森の身近な出来事から、毎回異なる第一声と返答候補2つを作る'
   };
   return {
     mode,closing,
-    task:closing?'直前に選ばれた言葉や行動を受け、このやり取りを自然に終える':
+    task:closing?'選択された問いや頼みへの具体的な答えを先に返し、それから自然に終える。約束した内容を先送りしない':
       mode==='reply'?'直前の会話と選ばれた言葉や行動を受け、次の反応を返す。問いの復唱だけで済ませない':
       reviewSpotlight?'本の感想にNPC本人らしく反応し、返答候補2つを作る。別作品なら第三者の立場を守る':
       sourceKind==='ambient'&&situation?.focus==='character'?
@@ -180,7 +180,9 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
   maxReplies=2,startDelayMs=280,modelId='unknown',getBooks=()=>[],getCatalog=()=>[],
   getCues=()=>[],
   getCharacterProfiles=()=>[],getRecentReflections=async()=>[],
-  requireCharacterProfile=false,requestTimeoutMs=11000}={}){
+  requireCharacterProfile=false,requestTimeoutMs=11000,
+  createAbortController=()=>new AbortController(),
+  scheduleTimeout=globalThis.setTimeout,cancelTimeout=globalThis.clearTimeout}={}){
   if(!base||typeof base.start!=='function'||typeof base.select!=='function'||
     typeof generate!=='function')throw Error('base and generate are required');
   let pending=null,pendingScripted=null,history=[],sessionCount=0,repliesThisSession=0,fallbackTurns=0,serial=0,closed=false,epoch=0,
@@ -224,12 +226,12 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
       characterProfile:activeCharacterProfile,sourceKind,
       dailyContext:reviewSpotlight||sourceKind==='review-reaction'?null:activeDaily,situation:activeSituation,
       recentLines,reviewSpotlight});
-    const controller=new AbortController(),startedAt=now();
+    const controller=createAbortController(),startedAt=now();
     inflight={controller,characterId,mode,startedAt};
     let timeout,timedOut=false;
     try{
       const raw=await Promise.race([Promise.resolve().then(()=>generate(context,{signal:controller.signal})),
-        new Promise((_,reject)=>{timeout=setTimeout(()=>{
+        new Promise((_,reject)=>{timeout=scheduleTimeout(()=>{
           timedOut=true;controller.abort();reject(Error('timeout'));
         },Math.max(1,Math.min(11000,Number(requestTimeoutMs)||11000)))})]);
       const result=validateLiveForestOutput(raw,{characterId,
@@ -251,7 +253,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
         reason:timedOut?'timeout':generationErrorKind(error),modelId,
         promptVersion:PROMPT_VERSION,elapsedMs:Math.max(0,now()-startedAt)});
       return null;
-    }finally{clearTimeout(timeout);if(inflight?.controller===controller)inflight=null}
+    }finally{cancelTimeout(timeout);if(inflight?.controller===controller)inflight=null}
   }
   function decorate(characterId,text,labels,meta={}){
     const relay=meta.relayChoice;
@@ -361,11 +363,9 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
       dailyTopicKind:spotlight?'reflection':sourceKind==='ambient'?source?.kind||'ambient':sourceKind,
       sourceKind,
       modelId,promptVersion:PROMPT_VERSION,elapsedMs:result.elapsedMs});
-    const fallbackChoiceId=original.choices?.find(choice=>choice.id==='another-topic')?.id||
-      original.choices?.find(choice=>typeof choice?.id==='string')?.id||'';
     const relayChoice=spotlight?null:original.choices?.find(choice=>choice.relayTo&&
       typeof choice.id==='string'&&typeof choice.label==='string')||null;
-    return decorate(characterId,spoken,result.labels,{fallbackChoiceId,
+    return decorate(characterId,spoken,result.labels,{
       ...(result.mark?{mark:result.mark}:{}),sourceKind,
       sourceMemoryId:spotlight?'':original.sourceMemoryId||'',
       relayChoice,
@@ -420,7 +420,8 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
       if(!generated){
         record({event:'script-fallback',characterId,reason:'relay-generation-unavailable',
           sourceKind:current.sourceKind,promptVersion:PROMPT_VERSION});
-        return scripted(authored,characterId);
+        return authored?.text?scripted(authored,characterId):
+          {text:safeEnd(characterId),choices:[],conversationComplete:true};
       }
       record({event:'generated-reply',characterId,
         ...(current.sourceKind==='reflection'?{}:{text:generated.text}),
@@ -438,24 +439,12 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
       current.sourceKind,current.reviewEvidence||null);
     if(closed||generation!==epoch)return null;
     if(!generated){
-      if(closing){
-        record({event:'script-fallback',characterId,reason:'generation-unavailable',
-          sourceKind:current.sourceKind,promptVersion:PROMPT_VERSION});
-        return {text:safeEnd(characterId),choices:[],conversationComplete:true};
-      }
-      // Resume an authored continuation instead of ending every character's
-      // conversation with the same abrupt AI-error sentence.
-      try{
-        const fallback=current.fallbackChoiceId?await base.select({characterId,
-          choiceId:current.fallbackChoiceId}):null;
-        if(closed||generation!==epoch)return null;
-        if(fallback?.text){
-          record({event:'script-fallback',characterId,reason:'generation-unavailable',
-            sourceKind:current.sourceKind,promptVersion:PROMPT_VERSION});
-          return scripted(fallback,characterId);
-        }
-      }catch{}
-      return {text:safeEnd(characterId,true),choices:[],conversationComplete:true};
+      // These are newly generated CHILD choices. They do not identify an
+      // authored continuation: switching to another script would discard the
+      // child's intent and can introduce an unrelated story as if it happened.
+      record({event:'script-fallback',characterId,reason:'generation-unavailable',
+        sourceKind:current.sourceKind,promptVersion:PROMPT_VERSION});
+      return {text:safeEnd(characterId),choices:[],conversationComplete:true};
     }
     history.push({npc:generated.text});history=history.slice(-4);
     repliesThisSession++;
@@ -468,7 +457,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
       elapsedMs:generated.elapsedMs,turn:repliesThisSession});
     if(closing){pending=null;return {text:generated.text,choices:[],...(generated.mark?{mark:generated.mark}:{}),conversationComplete:true}}
     return decorate(characterId,generated.text,generated.labels,{
-      ...(generated.mark?{mark:generated.mark}:{}),fallbackChoiceId:current.fallbackChoiceId,sourceKind:current.sourceKind,
+      ...(generated.mark?{mark:generated.mark}:{}),sourceKind:current.sourceKind,
       sourceMemoryId:current.sourceMemoryId,
       dailySourceMemoryId:current.dailySourceMemoryId,
       reviewSpotlightKey:current.reviewSpotlightKey,

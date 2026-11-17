@@ -48,7 +48,7 @@ test('generates contextual reply choices, then a character reply only after a ch
   const log=JSON.parse(storage.getItem('forest-ai-local-v1:log'));
   assert.deepEqual(log.map(x=>x.event),['generated-opening','selected-offered-choice','generated-reply']);
   assert.equal(log[0].text,first.text,'export can reconstruct the initial line');
-  assert.equal(log[0].promptVersion,'forest-scene-generation-v20-profile2');
+  assert.equal(log[0].promptVersion,'forest-scene-generation-v21-profile2');
   assert.equal(log[1].label,'風の音を聞く');
   director.end();
 });
@@ -384,7 +384,7 @@ test('repeat story visits generate first lines without repeating authored text',
   assert.equal(calls.length,3,'generation can continue while the daily request budget remains');
 });
 
-test('AI reply failure resumes the authored continuation when possible',async()=>{
+test('AI reply failure ends without replacing the generated child choice with an unrelated script',async()=>{
   let selected=0;
   const authored={...base(),select:async()=>{selected++;return {text:'あの葉っぱ、見てごらん。',
     sourceKind:'ambient',choices:[{id:'another-topic',label:'ほかの話も聞く'}]}}};
@@ -393,8 +393,9 @@ test('AI reply failure resumes the authored continuation when possible',async()=
       {text:'ぼくは王さまです。',choices:['そうだね','いいね']}});
   const first=await director.start(identity);
   const next=await director.select({...identity,choiceId:first.choices[0].id});
-  assert.equal(next.text,'あの葉っぱ、見てごらん。');
-  assert.equal(selected,1);
+  assert.equal(next.conversationComplete,true);
+  assert.deepEqual(next.choices,[]);
+  assert.equal(selected,0);
 });
 
 
@@ -464,7 +465,8 @@ test('all authored stages become newly generated openings while retaining their 
     assert.equal(calls.at(-1)?.context.readerReflection,undefined,
       'a fresh unrelated review must not displace this scene');
     assert.ok(calls.at(-1).task.includes(kind==='meet'?'初対面':
-      kind==='story'?'既読作品':kind==='relay'?'引き継ぎ':'読書感想'));
+      kind==='story'?'確認済み':kind==='relay'?'引き継ぎ':'読書感想'));
+    if(kind==='story')assert.match(calls.at(-1).task,/過去の記憶/);
     director.onDisplayed(result,{characterId:'kiki'});director.end();
   }
   assert.equal(calls.length,4);

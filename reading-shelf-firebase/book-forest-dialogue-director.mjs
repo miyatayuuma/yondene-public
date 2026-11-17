@@ -155,7 +155,8 @@ export function createForestDialogueDirector({getBooks=()=>[],getCatalog=()=>[],
             '（ねこは前足で地面をちょんとたたいた。）':'（森の風に、そっと耳をすませている。）'),
           choices:[{id:'another-topic',label:'ほかの話も聞く'},...(relay?[relay]:[])]};
         options.push({cue,memory,index:options.length,score,
-          situation:{firstEncounter:visit===0,visitNumber:visit+1,
+          situation:{place:'本の森',presentNpcIds:[characterId],
+            firstEncounter:visit===0,visitNumber:visit+1,
             focus:kind==='ambient'?(visit%2?'character':'forest'):kind,
             ...(kind==='relay'?{fromNpc:state.pendingRelay.from}:{}),
             relatedNpcIds:FOREST_RELATIONS[characterId]||[]}});
@@ -317,6 +318,9 @@ export function createForestDialogueDirector({getBooks=()=>[],getCatalog=()=>[],
       if(choice.relayTo&&choice.relayTo!==characterId){
         state.pendingRelay={from:characterId,to:choice.relayTo,
           memoryId:option.memory?.id||null};persist();
+        active.choices=[];
+        // A hand-off is a control transition, not another displayed topic.
+        return {text:normalizeText(choice.text),choices:[],conversationComplete:true};
       }
       const response=normalizeText(choice.text);
       if(response){active.choices=[];return {text:response,choices:[]}}

@@ -66,13 +66,14 @@ const visits=data.visits||[...ids.map(characterId=>({characterId,choices:[]})),
 const result=await runForestConversationScenario({visits,transport,storage:scenarioStorage(data.storage),
   now:()=>data.clock,getBooks:()=>data.books,getCatalog:()=>data.catalog||[],getCues:()=>data.cues||[],
   getCharacterProfiles:()=>data.characterProfiles,getRecentReflections:async()=>data.reflections||[],
+  getReflections:async bookId=>(data.reflections||[]).filter(r=>r.bookId===bookId),
   implementation:{...base,...live,...worker,versions}});
 const storyReplies=result.trace.filter(t=>t.prompt.mode==='reply'&&t.prompt.context.sourceKind==='story');
 const reviewReplies=result.trace.filter(t=>t.prompt.mode==='reply'&&t.prompt.context.readerReflection);
 const summary={...result.summary,versions,source:data.provenance||'private-readonly',
   transport:useModel?'real-gemma':'synthetic-model-output',qualityAccepted:false,
   structural:{storyReplies:storyReplies.length,groundedStoryReplies:storyReplies.filter(t=>t.prompt.context.topic?.fact).length,
-    reviewReplies:reviewReplies.length,continuationReviewTasks:reviewReplies.filter(t=>/直前の会話|直前に選ばれた/u.test(t.prompt.task)).length,
+    reviewReplies:reviewReplies.length,continuationReviewTasks:reviewReplies.filter(t=>/直前の会話|直前に選ばれた|選択された問い/u.test(t.prompt.task)).length,
     storyOpenings:result.trace.filter(t=>t.prompt.mode==='opening'&&t.prompt.context.sourceKind==='story').length}};
 if(option('--trace-output')){
   const output=resolve(option('--trace-output')),parent=realpathSync(dirname(output));

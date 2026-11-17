@@ -88,8 +88,13 @@ export function probeInput(personRows,sourceRows,id,scene,utterance,options={}){
       if(!review)throw Error('NO_ELIGIBLE_REFLECTION');
       sourceKind='review-reaction';
       meta.bookId=review.sourceBookId;
+      const reflectionKey=(book,id)=>{
+        let n=2166136261;
+        for(const ch of book+':'+id)n=Math.imul(n^ch.codePointAt(0),16777619);
+        return (n>>>0).toString(36);
+      };
       meta.reflectionId=snapshot.reflections.find(r=>r.bookId===review.sourceBookId&&
-        r.createdAt===review.createdAt&&r.quote.slice(0,180)===review.quote)?.id||'';
+        reflectionKey(r.bookId,r.id)===review.key)?.id||'';
       meta.attribution=review.attribution;
       if(!meta.reflectionId)throw Error('REFLECTION_IDENTITY');
     }else if(mode==='mirror-story'){

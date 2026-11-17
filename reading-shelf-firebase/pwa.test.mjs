@@ -108,7 +108,7 @@ test('no removed DOM ID can silently cause a null property assignment',()=>{
 test('PWA cannot combine stale JS with current HTML after deployment',()=>{
   const html=text('index.html'),sw=text('sw.js');
   const config=JSON.parse(text('firebase.json'));
-  assert.match(html,/app\.mjs\?build=20261117-forest-context-probe-v20/);
+  assert.match(html,/app\.mjs\?build=20261117-forest-silent-reactions-v21/);
   assert.match(sw,/const ARTWORK_PATHS=new Set\(ARTWORK\)/);
   assert.ok(!sw.includes('PUBLIC_ASSETS'));
   for(const path of ['/app.mjs','/index.html','/domain.mjs','/book-community.mjs','/recommendations.mjs']){
@@ -171,7 +171,7 @@ test('PWA build integrates activity previews and preserves forest module version
   const html=text('index.html'),app=text('app.mjs'),recs=text('recommendations.mjs');
   const build='20261117-forest-silent-reactions-v21',activityBuild='20261111-activity-preview-v1',
     forestBuild='20261110-forest-ai-v6',voiceBuild='20261111-forest-voice-v1',
-    personaBuild='20261116-forest-cat-persona-v17',dialogueBuild='20261117-forest-silent-reactions-v21',voiceV8Build='20261111-forest-voice-v8',
+    personaBuild='20261116-forest-cat-persona-v17',dialogueBuild='20261117-forest-profile-contract-v19',silentDialogueBuild='20261117-forest-silent-reactions-v21',voiceV8Build='20261111-forest-voice-v8',
     dailyV10Build='20261112-forest-stories-v10',zukkokeBuild='20261114-zukkoke-v1',
     unchanged='20261019-shelf-v28',readingBuild='20261025-reading-legacy-v1';
   assert.match(html,new RegExp('data-app-build="'+build+'"'));
@@ -194,7 +194,7 @@ test('PWA build integrates activity previews and preserves forest module version
       'persona-enabled import: '+module);
   }
   assert.ok(app.includes("'./book-forest-dialogue-director.mjs?build=20261116-forest-cat-persona-v17'"));
-  assert.ok(app.includes("'./book-forest-live-dialogue.mjs?build="+dialogueBuild+"'"));
+  assert.ok(app.includes("'./book-forest-live-dialogue.mjs?build="+silentDialogueBuild+"'"));
   assert.ok(app.includes("'./forest-character-registry.mjs?build="+dialogueBuild+"'"));
   assert.ok(app.includes("'./book-forest-cloudflare-provider.mjs?build="+dialogueBuild+"'"));
   assert.ok(app.includes('verifyForestCloudflareRoster'));

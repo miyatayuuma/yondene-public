@@ -41,7 +41,7 @@ test('generates contextual reply choices, then a character reply only after a ch
   assert.equal(prompts.length,1,'one call on an active encounter, never background loops');
   assert.equal(first.text,'この風、少し遠くまで行きたくなるね。','ambient opening changes');
   assert.deepEqual(first.choices.map(x=>x.label),['風の音を聞く','どこに行く？']);
-  assert.equal('npcLine' in prompts[0].context,false,'legacy script must not enter prompt');
+  assert.equal(prompts[0].context.npcLine,'','legacy script must not enter prompt');
   assert.equal(prompts[0].mode,'opening');
   assert.ok(prompts[0].context.today.scene.focus);
   const second=await director.select({...identity,choiceId:first.choices[0].id});
@@ -311,7 +311,7 @@ test('sourced story drives generated opening without unrelated daily seed',async
   assert.equal(first.text,'わたしも楽しみだな。');
   assert.equal(prompts[0].mode,'opening');
   assert.equal(prompts[0].context.sourceKind,'story');
-  assert.equal('npcLine' in prompts[0].context,false);
+  assert.equal(prompts[0].context.npcLine,'');
   assert.equal(prompts[0].context.topic.fact,'花を植えた');
   assert.equal(prompts[0].context.topic.question,undefined);
   assert.equal(prompts[0].context.topic.philosophy,undefined);
@@ -586,7 +586,7 @@ test('a long approved reflection cue is a prompt reference, not an output to rej
   const result=await director.start(identity);
   assert.equal(result.text,'へえ、そんなことが気になったんだ。');
   assert.equal(captured[0].context.sourceKind,'reflection');
-  assert.equal('npcLine' in captured[0].context,false);
+  assert.equal(captured[0].context.npcLine,'');
   assert.equal(local.getItem('forest-ai-local-v1:log').includes(longCue),false);
 });
 

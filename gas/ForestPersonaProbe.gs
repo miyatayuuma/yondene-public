@@ -20,6 +20,7 @@ var ForestPersonaProbe = (() => {
   // gas/ForestPersonaProbe.mjs
   var ForestPersonaProbe_exports = {};
   __export(ForestPersonaProbe_exports, {
+    probeConversation: () => probeConversation,
     probeInput: () => probeInput,
     processQueue: () => processQueue
   });
@@ -229,6 +230,7 @@ var ForestPersonaProbe = (() => {
     ...roster.filter((item) => item.mode === "ai" && item.voice && !item.voiceId).map((item) => ({ id: item.id, name: item.voiceLabel || item.name })),
     ...roster.filter((item) => item.mode === "twins" && item.voice).map((item) => ({ id: item.voiceId || item.id, name: item.voiceLabel || item.name }))
   ]);
+  var FOREST_DIALOGUE_PROTOCOL = "scene-dialogue-v20-profile2";
   function forestMemoryBelongsToCharacter(memory, characterId) {
     const names = FOREST_ACTOR_NAMES[characterId] || [];
     return String(memory?.characters || "").split(/[\s,，、|;；]+/u).some((name) => names.includes(name));
@@ -415,14 +417,186 @@ var ForestPersonaProbe = (() => {
     });
   }
 
+  // reading-shelf-firebase/book-forest-twins.mjs
+  var ID = /^[A-Za-z0-9_-]{1,100}$/u;
+  var NAME = /^[^「」『』<>\r\n{}]{1,12}$/u;
+  var MAX_LINES = 160;
+  var acceptableText = (value) => typeof value === "string" && value.trim().length > 0 && value.length <= 180 && !/[「」<>]/u.test(value) && !/\{(?!firstName\}|secondName\})[^}]*\}/u.test(value);
+  var allowedName = (value) => typeof value === "string" && NAME.test(value.trim());
+  function validateTwinNamePairs(pairs) {
+    if (!Array.isArray(pairs)) return [];
+    const ids = /* @__PURE__ */ new Set();
+    return pairs.slice(0, 20).filter((pair) => {
+      if (pair?.schemaVersion !== 1 || pair.approval !== "approved" || !ID.test(pair.id) || !allowedName(pair.firstName) || !allowedName(pair.secondName) || pair.firstName === pair.secondName || ids.has(pair.id)) return false;
+      ids.add(pair.id);
+      return true;
+    });
+  }
+  function validLine(line) {
+    if (line?.schemaVersion !== 1 || line.approval !== "approved" || !ID.test(line.sceneId) || !Number.isInteger(line.sequence) || line.sequence < 1 || line.sequence > 10 || ![0, 1, 2].includes(line.speakerSlot) || !acceptableText(line.text)) return false;
+    if ((line.bookId || line.memoryId) && (!ID.test(line.bookId) || !ID.test(line.memoryId))) return false;
+    if (line.choices !== void 0 && (!Array.isArray(line.choices) || line.choices.length > 2 || line.choices.some((choice) => !ID.test(choice?.id) || !acceptableText(choice?.label) || choice.label.length > 24 || ![1, 2].includes(choice?.speakerSlot) || !acceptableText(choice?.text)))) return false;
+    return true;
+  }
+  function validateTwinScenes(lines) {
+    if (!Array.isArray(lines)) return [];
+    const source = lines.flatMap((item) => Array.isArray(item?.lines) ? item.lines : [item]);
+    const groups = /* @__PURE__ */ new Map();
+    for (const line of source.slice(0, MAX_LINES)) {
+      if (!ID.test(line?.sceneId)) continue;
+      if (!groups.has(line.sceneId)) groups.set(line.sceneId, []);
+      groups.get(line.sceneId).push(line);
+    }
+    const scenes = [];
+    for (const [id, rows] of groups) {
+      rows.sort((a, b) => a.sequence - b.sequence);
+      if (rows.length < 3 || rows.length > 10 || rows.some((line, i) => !validLine(line) || line.sequence !== i + 1 || i !== 0 && line.speakerSlot === 0 || (line.bookId || "") !== (rows[0].bookId || "") || (line.memoryId || "") !== (rows[0].memoryId || ""))) continue;
+      if (id === "intro" && rows[0].speakerSlot !== 0) continue;
+      if (id !== "intro" && rows.some((line) => line.speakerSlot === 0)) continue;
+      scenes.push({
+        id,
+        bookId: rows[0].bookId || null,
+        memoryId: rows[0].memoryId || null,
+        lines: rows
+      });
+    }
+    return scenes;
+  }
+  function createTwinConversationDirector({
+    getBooks = () => [],
+    getCatalog = () => [],
+    getNamePairs = () => [],
+    getScenes = () => [],
+    getPinnedPairId = () => null,
+    setPinnedPairId = () => {
+    }
+  } = {}) {
+    let active = null;
+    async function allowedScenes() {
+      const books = await getBooks(), catalog = await getCatalog();
+      const memories = new Map(unlockedStoryMemories(books, catalog).map((item) => [item.id, item]));
+      return validateTwinScenes(await getScenes()).filter((scene) => !scene.memoryId || memories.get(scene.memoryId)?.bookId === scene.bookId);
+    }
+    function nameFor(slot) {
+      return slot === 0 ? "\u3075\u305F\u3054" : slot === 1 ? active.names.firstName : active.names.secondName;
+    }
+    function render(line) {
+      const text = line.text.replaceAll("{firstName}", active.names.firstName).replaceAll("{secondName}", active.names.secondName);
+      const choices = (line.choices || []).map((choice) => ({ id: choice.id, label: choice.label }));
+      active.pendingChoices = line.choices || [];
+      const hasNext = active.offset < active.scene.lines.length;
+      return {
+        mode: "twins",
+        speakerName: nameFor(line.speakerSlot),
+        speakerSlot: line.speakerSlot,
+        text,
+        choices,
+        ...nextSpeaker(),
+        conversationComplete: !hasNext,
+        autoNext: hasNext,
+        autoDelayMs: choices.length ? 11500 : Math.min(7700, Math.max(3400, 2500 + text.length * 90))
+      };
+    }
+    function chooseEncounterScene(scenes, encounter) {
+      const all = scenes.filter((scene) => scene.id !== "intro");
+      const ambient = all.filter((scene) => !scene.memoryId), story = all.filter((scene) => scene.memoryId);
+      const preferStory = encounter % 3 === 2;
+      let pool = preferStory && story.length ? story : ambient.length ? ambient : story;
+      if (!pool.length) return null;
+      return pool[(encounter - 1) % pool.length];
+    }
+    function nextSpeaker() {
+      const next = active.scene.lines[active.offset];
+      return next ? { nextSpeakerName: nameFor(next.speakerSlot), nextSpeakerSlot: next.speakerSlot } : {};
+    }
+    function advanceLocal() {
+      if (!active) return null;
+      if (active.offset >= active.scene.lines.length) {
+        active = null;
+        return null;
+      }
+      return render(active.scene.lines[active.offset++]);
+    }
+    return {
+      async start({ encounter = 0 } = {}) {
+        const names = validateTwinNamePairs(await getNamePairs());
+        const scenes = await allowedScenes();
+        const introduction = scenes.find((scene2) => scene2.id === "intro");
+        if (!names.length || !introduction || scenes.length < 2) {
+          active = null;
+          return null;
+        }
+        const scene = encounter === 0 ? introduction : chooseEncounterScene(scenes, encounter);
+        if (!scene) {
+          active = null;
+          return null;
+        }
+        let pinned = null;
+        try {
+          pinned = getPinnedPairId();
+        } catch {
+        }
+        const pair = names.find((item) => item.id === pinned) || names[0];
+        if (pair.id !== pinned) {
+          try {
+            setPinnedPairId(pair.id);
+          } catch {
+          }
+        }
+        active = { names: pair, scenes, scene, offset: 0, pendingChoices: [] };
+        return advanceLocal();
+      },
+      async advance() {
+        if (!active) return null;
+        active.scenes = await allowedScenes();
+        if (active.scene.memoryId) {
+          const stillAllowed = active.scenes.some((scene) => scene.id === active.scene.id);
+          if (!stillAllowed) {
+            active = null;
+            return null;
+          }
+        }
+        return advanceLocal();
+      },
+      select({ choiceId } = {}) {
+        if (!active) return null;
+        const choice = active.pendingChoices.find((item) => item.id === choiceId);
+        if (!choice) return null;
+        active.pendingChoices = [];
+        const text = choice.text.replaceAll("{firstName}", active.names.firstName).replaceAll("{secondName}", active.names.secondName);
+        const hasNext = active.offset < active.scene.lines.length;
+        return {
+          mode: "twins",
+          speakerName: nameFor(choice.speakerSlot),
+          speakerSlot: choice.speakerSlot,
+          text,
+          ...nextSpeaker(),
+          choices: [],
+          conversationComplete: !hasNext,
+          autoNext: hasNext,
+          autoDelayMs: Math.min(6600, 3200 + text.length * 80)
+        };
+      },
+      end() {
+        active = null;
+      },
+      getActiveNames() {
+        return active ? { ...active.names } : null;
+      }
+    };
+  }
+
   // reading-shelf-firebase/book-forest-dialogue-director.mjs
   var CHARACTERS = new Set(FOREST_CHARACTER_IDS);
   var KINDS = /* @__PURE__ */ new Set(["meet", "ambient", "story", "reflection", "relay"]);
   var MAX_CUES = 600;
+  var MAX_SEEN = 100;
   var MAX_TEXT = 230;
   var SELF_NAMES = FOREST_SELF_NAMES;
   var validId = (value) => typeof value === "string" && /^[a-zA-Z0-9_-]{1,100}$/.test(value);
   var normalizeText = (value) => typeof value === "string" ? value.trim().replace(/\s+/gu, " ") : "";
+  var numbers = (value, min, max) => Number.isSafeInteger(value) && value >= min && value <= max ? value : min;
+  var unique = (list) => [...new Set(list)];
   function validCue(cue) {
     if (!cue || cue.schemaVersion !== 1 || cue.approval !== "approved" || !validId(cue.id) || !CHARACTERS.has(cue.characterId) || !KINDS.has(cue.kind) || !normalizeText(cue.text) || cue.text.length > MAX_TEXT) return false;
     if (["story", "reflection"].includes(cue.kind) && cue.bookId !== void 0 && !validId(cue.bookId)) return false;
@@ -446,6 +620,358 @@ var ForestPersonaProbe = (() => {
       seen.add(cue.id);
       return true;
     });
+  }
+  function emptyState() {
+    return {
+      version: 1,
+      visits: {},
+      lastKinds: {},
+      seen: [],
+      seenMemories: [],
+      seenReviews: [],
+      recentEncounters: [],
+      knownRead: [],
+      freshRead: [],
+      readInitialized: false,
+      pendingRelay: null,
+      twinPairId: null
+    };
+  }
+  function parseState(raw) {
+    try {
+      const value = JSON.parse(raw);
+      if (value?.version !== 1) return emptyState();
+      const visits = {};
+      for (const [id, count] of Object.entries(value.visits || {})) {
+        if (CHARACTERS.has(id)) visits[id] = numbers(count, 0, 1e5);
+      }
+      const lastKinds = {};
+      for (const [id, kind] of Object.entries(value.lastKinds || {})) {
+        if (CHARACTERS.has(id) && KINDS.has(kind)) lastKinds[id] = kind;
+      }
+      const ids = (field) => unique((Array.isArray(value[field]) ? value[field] : []).filter(validId)).slice(-MAX_SEEN);
+      const relay = value.pendingRelay;
+      return {
+        version: 1,
+        visits,
+        lastKinds,
+        seen: ids("seen"),
+        seenMemories: ids("seenMemories"),
+        seenReviews: ids("seenReviews"),
+        knownRead: ids("knownRead"),
+        freshRead: ids("freshRead"),
+        recentEncounters: (Array.isArray(value.recentEncounters) ? value.recentEncounters : []).filter((e) => CHARACTERS.has(e?.npc) && KINDS.has(e.kind) && (!e.memoryId || validId(e.memoryId))).slice(-24),
+        readInitialized: value.readInitialized === true,
+        twinPairId: validId(value.twinPairId) ? value.twinPairId : null,
+        pendingRelay: CHARACTERS.has(relay?.to) && CHARACTERS.has(relay?.from) ? {
+          from: relay.from,
+          to: relay.to,
+          memoryId: validId(relay.memoryId) ? relay.memoryId : null
+        } : null
+      };
+    } catch {
+      return emptyState();
+    }
+  }
+  function remember(items, id) {
+    if (validId(id)) {
+      const index = items.indexOf(id);
+      if (index !== -1) items.splice(index, 1);
+      items.push(id);
+      if (items.length > MAX_SEEN) items.shift();
+    }
+  }
+  function safeReview(entry) {
+    if (!validId(entry?.id) || !["verbatim", "parent-summary"].includes(entry?.attribution)) return null;
+    const quote = normalizeText(entry.quote || entry.text);
+    if (!quote || quote.length > 3e3) return null;
+    return { id: entry.id, attribution: entry.attribution, quote };
+  }
+  function reviewExcerpt(review, narration = false) {
+    const short = review.quote.slice(0, 45).replace(/[「」]/gu, "");
+    if (narration) return `\u300C${short}${review.quote.length > 45 ? "\u2026" : ""}\u300D\uFF08${review.attribution === "verbatim" ? "\u672C\u4EBA\u306E\u8A00\u8449" : "\u4FDD\u8B77\u8005\u306E\u8A18\u9332"}\uFF09`;
+    const label = review.attribution === "verbatim" ? "\u304D\u307F\u306E\u3053\u3068\u3070" : "\u304A\u3046\u3061\u306E\u4EBA\u304C\u6B8B\u3057\u305F\u8A18\u9332";
+    return `${label}\u306B\u300C${short}${review.quote.length > 45 ? "\u2026" : ""}\u300D\u3068\u3042\u3063\u305F\u306D\u3002`;
+  }
+  function createForestDialogueDirector({
+    getBooks = () => [],
+    getCatalog = () => [],
+    getCues = () => [],
+    getReflections = async () => [],
+    getTwinNames = () => [],
+    getTwinScenes = () => [],
+    storage = null,
+    storageKey = "forest-dialogue-local-v1",
+    maxSpoilerLevel = 2
+  } = {}) {
+    let state = parseState(storage?.getItem?.(storageKey) || null), active = null;
+    const twins = createTwinConversationDirector({
+      getBooks,
+      getCatalog,
+      getNamePairs: getTwinNames,
+      getScenes: getTwinScenes,
+      getPinnedPairId: () => state.twinPairId,
+      setPinnedPairId: (id) => {
+        if (validId(id) && state.twinPairId !== id) {
+          state.twinPairId = id;
+          persist();
+        }
+      }
+    });
+    function persist() {
+      try {
+        storage?.setItem?.(storageKey, JSON.stringify(state));
+      } catch {
+      }
+    }
+    function memoryPenalty(memoryId, characterId) {
+      const recent = state.recentEncounters.slice().reverse();
+      const own = recent.filter((e) => e.npc === characterId);
+      const distance = own.findIndex((e) => e.memoryId === memoryId);
+      return (distance < 0 ? 0 : Math.max(0, 50 - distance * 12)) + (recent.slice(0, 2).some((e) => e.npc !== characterId && e.memoryId === memoryId) ? 12 : 0);
+    }
+    async function candidates(characterId, generation = false) {
+      const books = await getBooks(), catalog = await getCatalog();
+      const readable = new Set((Array.isArray(books) ? books : []).filter((book) => book?.status === "read" && validId(book.id)).map((book) => book.id));
+      if (!state.readInitialized) {
+        state.knownRead = [...readable].slice(-MAX_SEEN);
+        state.readInitialized = true;
+      } else {
+        const previous = new Set(state.knownRead);
+        for (const bookId of readable) {
+          if (!previous.has(bookId)) remember(state.freshRead, bookId);
+        }
+        state.knownRead = [...readable].slice(-MAX_SEEN);
+        state.freshRead = state.freshRead.filter((bookId) => readable.has(bookId));
+      }
+      persist();
+      const memories = unlockedStoryMemories(books, catalog, { maxSpoilerLevel });
+      const memoryById = new Map(memories.map((item) => [item.id, item]));
+      const approved = validateForestDialogueCues(await getCues());
+      const relevant = approved.filter((cue) => cue.characterId === characterId);
+      if (generation && FOREST_AI_GENERATION_IDS.includes(characterId)) {
+        const visit = state.visits[characterId] || 0, last = state.lastKinds[characterId];
+        const options2 = [];
+        const add = (kind, score, memory = null) => {
+          const fallback = approved.find((cue2) => cue2.characterId === characterId && cue2.kind === kind && (kind === "story" ? cue2.memoryId === memory?.id : !cue2.bookId && !cue2.memoryId) && (kind !== "relay" || cue2.fromCharacterId === state.pendingRelay?.from) && !cue2.text.includes("{reflection}") && !cue2.text.includes("{memory}"));
+          const related = (FOREST_RELATIONS[characterId] || []).find((id) => id !== characterId);
+          const relay = related && kind !== "meet" && kind !== "relay" ? {
+            id: "scene-relay",
+            label: "\u53CB\u3060\u3061\u306B\u3082\u4F1A\u3046",
+            relayTo: related
+          } : null;
+          const cue = {
+            id: "scene-" + characterId + "-" + kind,
+            characterId,
+            kind,
+            text: fallback?.text || (characterId === "cat" ? "\uFF08\u306D\u3053\u306F\u524D\u8DB3\u3067\u5730\u9762\u3092\u3061\u3087\u3093\u3068\u305F\u305F\u3044\u305F\u3002\uFF09" : "\uFF08\u68EE\u306E\u98A8\u306B\u3001\u305D\u3063\u3068\u8033\u3092\u3059\u307E\u305B\u3066\u3044\u308B\u3002\uFF09"),
+            choices: [{ id: "another-topic", label: "\u307B\u304B\u306E\u8A71\u3082\u805E\u304F" }, ...relay ? [relay] : []]
+          };
+          options2.push({
+            cue,
+            memory,
+            index: options2.length,
+            score,
+            situation: {
+              firstEncounter: visit === 0,
+              visitNumber: visit + 1,
+              focus: kind === "ambient" ? visit % 2 ? "character" : "forest" : kind,
+              ...kind === "relay" ? { fromNpc: state.pendingRelay.from } : {},
+              relatedNpcIds: FOREST_RELATIONS[characterId] || []
+            }
+          });
+        };
+        if (!visit) add("meet", 200);
+        if (state.pendingRelay?.to === characterId) {
+          const memory = memoryById.get(state.pendingRelay.memoryId);
+          add("relay", 180, memory && forestMemoryBelongsToCharacter(memory, characterId) ? memory : null);
+        }
+        add("ambient", 70);
+        for (const memory of memories.filter((item) => forestMemoryBelongsToCharacter(item, characterId))) {
+          add("story", 90 + (state.freshRead.includes(memory.bookId) ? 30 : 0) - memoryPenalty(memory.id, characterId) - (last === "story" ? 55 : 0), memory);
+        }
+        return options2.sort((a, b) => b.score - a.score || a.index - b.index);
+      }
+      const relayTargets = /* @__PURE__ */ new Map();
+      for (const voice of approved.filter((cue) => cue.kind === "story" && memoryById.has(cue.memoryId))) {
+        if (!relayTargets.has(voice.memoryId)) relayTargets.set(voice.memoryId, /* @__PURE__ */ new Set());
+        relayTargets.get(voice.memoryId).add(voice.characterId);
+      }
+      const voicedMemories = new Map(relevant.filter((cue) => cue.kind === "story").map((cue) => [cue.memoryId, cue]));
+      const reviewBooks = unique(relevant.filter((cue) => cue.kind === "reflection" && cue.bookId && readable.has(cue.bookId)).map((cue) => cue.bookId)).slice(0, 5);
+      const reviews = /* @__PURE__ */ new Map();
+      await Promise.all(reviewBooks.map(async (bookId) => {
+        try {
+          reviews.set(bookId, (await getReflections(bookId)).map(safeReview).filter(Boolean).slice(0, 5));
+        } catch {
+          reviews.set(bookId, []);
+        }
+      }));
+      const options = [], lastKind = state.lastKinds[characterId];
+      for (const [index, cue] of relevant.entries()) {
+        if (cue.kind === "meet" && (state.visits[characterId] || 0) > 0) continue;
+        if (cue.kind === "relay" && !(state.pendingRelay?.to === characterId && state.pendingRelay?.from === cue.fromCharacterId)) continue;
+        if (cue.kind === "relay") {
+          const related = memoryById.get(state.pendingRelay?.memoryId) || null;
+          if (related && !voicedMemories.has(related.id)) {
+            state.pendingRelay = null;
+            persist();
+            continue;
+          }
+          options.push({
+            cue,
+            memory: related,
+            voiceCue: related ? voicedMemories.get(related.id) : null,
+            relayTargets,
+            index,
+            score: 150 + (related ? 4 : 0)
+          });
+          continue;
+        }
+        if (cue.kind === "story") {
+          const matches = [memoryById.get(cue.memoryId)].filter((memory) => memory && (!cue.bookId || cue.bookId === memory.bookId));
+          for (const memory of matches) {
+            const relevance = String(memory.characters || "").split(/[\s,，、|]+/u).includes(characterId) ? 6 : 0;
+            options.push({ cue, memory, relayTargets, index, score: 66 + relevance + (state.seenMemories.includes(memory.id) ? -35 : 22) + (state.seen.includes(cue.id) ? -12 : 0) + (lastKind === "story" ? -45 : lastKind === "ambient" ? 18 : 0) + (state.freshRead.includes(memory.bookId) ? 42 : 0) });
+          }
+          continue;
+        }
+        if (cue.kind === "reflection") {
+          for (const review of reviews.get(cue.bookId) || []) {
+            options.push({ cue, review, index, score: 82 + (state.seenReviews.includes(review.id) ? -65 : 60) + (state.seen.includes(cue.id) ? -12 : 0) + (lastKind === "reflection" ? -120 : 0) });
+          }
+          continue;
+        }
+        const base = { meet: 160, ambient: 40 }[cue.kind];
+        options.push({ cue, index, score: base + (state.seen.includes(cue.id) ? -12 : 20) + (cue.kind === "ambient" && lastKind === "ambient" ? -12 : 0) });
+      }
+      return options.sort((a, b) => b.score - a.score || a.index - b.index || String(a.memory?.id || a.review?.id || "").localeCompare(String(b.memory?.id || b.review?.id || "")));
+    }
+    function render(option) {
+      const { cue, memory, review, voiceCue, relayTargets, situation } = option;
+      let text = normalizeText(cue.text);
+      if (cue.kind === "story" && !memory) return null;
+      if (cue.kind === "relay") {
+        if (memory && text.includes("{memory}") && !voiceCue) return null;
+        text = text.replaceAll("{memory}", normalizeText(voiceCue?.text));
+      }
+      if (review) text = text.replaceAll("{reflection}", reviewExcerpt(review, cue.characterId === "cat"));
+      if (/\{(?:memory|reflection)\}/u.test(text)) return null;
+      const choices = (cue.choices || []).filter((choice) => situation || !choice.relayTo || !memory || relayTargets?.get(memory.id)?.has(choice.relayTo)).map((choice) => ({
+        id: choice.id,
+        label: choice.label,
+        ...choice.relayTo ? { relayTo: choice.relayTo } : {}
+      }));
+      if (!choices.length) choices.push({ id: "another-topic", label: "\u307B\u304B\u306E\u8A71\u3082\u805E\u304F" });
+      return {
+        text,
+        choices,
+        sourceKind: cue.kind,
+        ...situation ? { situation } : {},
+        ...memory?.id ? { sourceMemoryId: memory.id } : {}
+      };
+    }
+    function selectOption(option, characterId) {
+      const response = render(option);
+      if (!response) return null;
+      active = { characterId, option, choices: response.choices, committed: false };
+      if (!option.situation) commitActive();
+      return response;
+    }
+    function commitActive() {
+      if (!active || active.committed) return;
+      active.committed = true;
+      const { option, characterId } = active;
+      remember(state.seen, option.cue.id);
+      state.lastKinds[characterId] = option.cue.kind;
+      if (option.memory) remember(state.seenMemories, option.memory.id);
+      if (option.cue.kind === "story" && option.memory) {
+        state.freshRead = state.freshRead.filter((id) => id !== option.memory.bookId);
+      }
+      if (option.review) remember(state.seenReviews, option.review.id);
+      if (option.cue.kind === "relay") state.pendingRelay = null;
+      state.recentEncounters.push({
+        npc: characterId,
+        kind: option.cue.kind,
+        ...option.memory ? { memoryId: option.memory.id } : {}
+      });
+      state.recentEncounters = state.recentEncounters.slice(-24);
+      if (option.situation) state.visits[characterId] = numbers((state.visits[characterId] || 0) + 1, 0, 1e5);
+      persist();
+    }
+    async function nextTopic(characterId, excludeKey = "", preferredMemoryId = "", generation = false) {
+      const options = await candidates(characterId, generation);
+      const preferred = preferredMemoryId && (!generation || state.visits[characterId]) && options.find((option) => option.cue.kind === "story" && option.memory?.id === preferredMemoryId && render(option));
+      const picked = preferred || options.find((option) => `${option.cue.id}:${option.memory?.id || option.review?.id || ""}` !== excludeKey && render(option)) || options.find((option) => render(option));
+      if (picked) return selectOption(picked, characterId);
+      active = null;
+      return { text: characterId === "cat" ? "\uFF08\u306D\u3053\u306F\u3057\u3063\u307D\u3092\u3086\u3063\u304F\u308A\u632F\u3063\u3066\u3001\u68EE\u306E\u5965\u3092\u898B\u3064\u3081\u3066\u3044\u308B\u3002\uFF09" : "\u3044\u307E\u306F\u3001\u68EE\u3092\u3044\u3063\u3057\u3087\u306B\u6B69\u3044\u3066\u307F\u3088\u3046\u3002", choices: [] };
+    }
+    return {
+      async start({ characterId, preferredMemoryId = "", generation = false } = {}) {
+        if (!CHARACTERS.has(characterId)) return { text: "\u307E\u305F\u3001\u68EE\u3067\u4F1A\u304A\u3046\u306D\u3002", choices: [] };
+        active = null;
+        if (characterId === "twins") {
+          const result2 = await twins.start({ encounter: state.visits.twins || 0 });
+          if (result2) {
+            state.visits.twins = numbers((state.visits.twins || 0) + 1, 0, 1e5);
+            persist();
+            return result2;
+          }
+        }
+        const result = await nextTopic(characterId, "", preferredMemoryId, generation);
+        if (!generation) {
+          state.visits[characterId] = numbers((state.visits[characterId] || 0) + 1, 0, 1e5);
+          persist();
+        }
+        return result;
+      },
+      onDisplayed(result, { characterId } = {}) {
+        if (active?.characterId === characterId && result?.situation) commitActive();
+      },
+      async select({ characterId, choiceId } = {}) {
+        if (characterId === "twins" && twins.getActiveNames()) return twins.select({ choiceId });
+        if (!active || active.characterId !== characterId || !active.choices.some((choice2) => choice2.id === choiceId)) return null;
+        const { option } = active;
+        if (choiceId === "another-topic") {
+          const key = `${option.cue.id}:${option.memory?.id || option.review?.id || ""}`;
+          return nextTopic(characterId, key);
+        }
+        const choice = option.cue.choices?.find((item) => item.id === choiceId);
+        if (!choice) return null;
+        if (choice.relayTo && choice.relayTo !== characterId) {
+          state.pendingRelay = {
+            from: characterId,
+            to: choice.relayTo,
+            memoryId: option.memory?.id || null
+          };
+          persist();
+        }
+        const response = normalizeText(choice.text);
+        if (response) {
+          active.choices = [];
+          return { text: response, choices: [] };
+        }
+        return nextTopic(characterId, `${option.cue.id}:${option.memory?.id || option.review?.id || ""}`);
+      },
+      async advance({ characterId } = {}) {
+        return characterId === "twins" ? twins.advance() : null;
+      },
+      end() {
+        active = null;
+        twins.end();
+      },
+      // Expose only a count summary for developer tests, never raw reviews.
+      getProgress() {
+        return {
+          visits: { ...state.visits },
+          seenTopics: state.seen.length,
+          seenMemories: state.seenMemories.length,
+          seenReflections: state.seenReviews.length,
+          nextNpc: state.pendingRelay?.to || null
+        };
+      }
+    };
   }
 
   // reading-shelf-firebase/book-forest-private-dialogue.mjs
@@ -496,11 +1022,41 @@ var ForestPersonaProbe = (() => {
   // reading-shelf-firebase/book-forest-reflection-spotlight.mjs
   var GENERATORS = new Set(FOREST_AI_GENERATION_IDS);
   var MAX_FRESH_DAYS = 14;
+  var KEY = /^[a-z0-9]{1,12}$/u;
   var clean = (value, max) => String(value ?? "").trim().replace(/\s+/gu, " ").slice(0, max);
+  var dayJapan = (now) => new Date(now + 9 * 36e5).toISOString().slice(0, 10);
   function hash(value) {
     let n = 2166136261;
     for (const char of String(value)) n = Math.imul(n ^ char.codePointAt(0), 16777619);
     return (n >>> 0).toString(36);
+  }
+  function validKeys(value, limit = 250) {
+    return [...new Set((Array.isArray(value) ? value : []).filter((x) => typeof x === "string" && KEY.test(x)))].slice(-limit);
+  }
+  function load(storage, key, now) {
+    let raw;
+    try {
+      raw = JSON.parse(storage?.getItem?.(key) || "null");
+    } catch {
+    }
+    const acknowledged = raw?.version === 2 ? validKeys(raw.acknowledged) : raw?.version === 1 && raw.seen && typeof raw.seen === "object" ? validKeys(Object.values(raw.seen).flatMap((x) => Array.isArray(x) ? x : [])) : [];
+    const day = dayJapan(now);
+    const active = raw?.version === 2 && raw.day === day;
+    return {
+      version: 2,
+      day,
+      acknowledged,
+      visits: active && Number.isSafeInteger(raw.visits) ? Math.max(0, raw.visits) : 0,
+      lastReactionVisit: active && Number.isSafeInteger(raw.lastReactionVisit) ? Math.max(0, raw.lastReactionVisit) : 0,
+      reactors: active ? Array.isArray(raw.reactors) ? raw.reactors.filter((x) => GENERATORS.has(x)) : [] : [],
+      books: active ? validKeys(raw.books, 20) : []
+    };
+  }
+  function save(storage, key, state) {
+    try {
+      storage?.setItem?.(key, JSON.stringify(state));
+    } catch {
+    }
   }
   function stamp(value) {
     const n = Number(value);
@@ -563,6 +1119,41 @@ var ForestPersonaProbe = (() => {
     const { score, createdAt, ...selected } = candidates[0];
     return selected;
   }
+  function isCurrentForestReflection(evidence, { books = [], reflections = [] } = {}) {
+    return books.some((book) => book.id === evidence?.sourceBookId && book.status === "read") && reflections.some((review) => review.bookId === evidence.sourceBookId && hash(review.bookId + ":" + review.id) === evidence.key && review.attribution === evidence.attribution && clean(review.quote, 180) === evidence.quote);
+  }
+  function createForestReflectionSpotlightSession({
+    storage = null,
+    storageKey = "forest-reflection-reactions-v1",
+    now = () => Date.now()
+  } = {}) {
+    function choose({ characterId, books = [], reflections = [], catalog = [], cues = [] } = {}) {
+      return chooseForestReflectionSpotlight({
+        characterId,
+        books,
+        reflections,
+        catalog,
+        cues,
+        state: load(storage, storageKey, now()),
+        now: now()
+      });
+    }
+    function visited() {
+      const state = load(storage, storageKey, now());
+      state.visits++;
+      save(storage, storageKey, state);
+    }
+    function displayed(characterId, spotlight) {
+      if (!GENERATORS.has(characterId) || !KEY.test(spotlight?.key || "") || !KEY.test(spotlight?.bookKey || "")) return;
+      const state = load(storage, storageKey, now());
+      state.acknowledged = validKeys([...state.acknowledged, spotlight.key]);
+      state.books = validKeys([...state.books, spotlight.bookKey], 20);
+      state.reactors = [.../* @__PURE__ */ new Set([...state.reactors, characterId])];
+      state.lastReactionVisit = state.visits;
+      save(storage, storageKey, state);
+    }
+    return { choose, visited, displayed };
+  }
 
   // reading-shelf-firebase/book-forest-daily-context.mjs
   var DAY_MS = 864e5;
@@ -570,7 +1161,7 @@ var ForestPersonaProbe = (() => {
   var MAX_RECENT = 8;
   var ACTOR_NAMES = FOREST_ACTOR_NAMES;
   var RELATIONS = FOREST_RELATIONS;
-  var dayJapan = (timestamp) => new Date(timestamp + 9 * 36e5).toISOString().slice(0, 10);
+  var dayJapan2 = (timestamp) => new Date(timestamp + 9 * 36e5).toISOString().slice(0, 10);
   var dayNumber = (day) => Math.floor(Date.parse(day + "T00:00:00Z") / DAY_MS);
   var clean2 = (value, max = 32) => String(value ?? "").trim().replace(/\s+/gu, " ").slice(0, max);
   function hash2(value) {
@@ -600,7 +1191,7 @@ var ForestPersonaProbe = (() => {
   }
   function eligibleForestDailyTopics({ characterId, books = [], catalog = [], cues = [], now = Date.now() } = {}) {
     if (!ACTOR_NAMES[characterId] || characterId === "twins") return [];
-    const day = dayJapan(now), memories = unlockedStoryMemories(books, catalog);
+    const day = dayJapan2(now), memories = unlockedStoryMemories(books, catalog);
     const authored = new Set((Array.isArray(cues) ? cues : []).filter((cue) => cue?.approval === "approved" && cue.kind === "story" && cue.characterId === characterId && typeof cue.memoryId === "string").map((cue) => cue.memoryId));
     const bookById = new Map((Array.isArray(books) ? books : []).map((book) => [book.id, book]));
     const result = [];
@@ -671,10 +1262,10 @@ var ForestPersonaProbe = (() => {
     now = () => Date.now()
   } = {}) {
     function current() {
-      const day = dayJapan(now()), previous = read(storage, storageKey);
+      const day = dayJapan2(now()), previous = read(storage, storageKey);
       return previous.version === 2 && previous.day === day && Array.isArray(previous.events) ? previous : empty(day, previous);
     }
-    function save(state) {
+    function save2(state) {
       const topics = Object.fromEntries(Object.entries(state.topics || {}).map(([npc, scene]) => {
         const { memoryId, ...safe } = scene;
         return [npc, safe];
@@ -718,7 +1309,7 @@ var ForestPersonaProbe = (() => {
           const list = Array.isArray(state.recent[characterId]) ? state.recent[characterId].slice(-MAX_RECENT + 1) : [];
           state.recent[characterId] = [...list, { key: scene.id, day: state.day }];
         }
-        if (commit) save(state);
+        if (commit) save2(state);
         return {
           scene,
           visitsToday,
@@ -744,7 +1335,7 @@ var ForestPersonaProbe = (() => {
             stage: scene.stage || 1
           };
         } else delete state.arcs[characterId];
-        save(state);
+        save2(state);
       },
       getState() {
         return current();
@@ -932,8 +1523,73 @@ var ForestPersonaProbe = (() => {
 
   // reading-shelf-firebase/book-forest-live-dialogue.mjs
   var CHARACTERS2 = new Set(FOREST_CHARACTER_IDS.filter((id) => id !== "twins"));
+  var SELF_NAMES2 = FOREST_SELF_NAMES;
+  var GOODBYE = FOREST_GOODBYES;
   var ACTION_WRITING_IDS2 = new Set(FOREST_ACTION_WRITING_IDS);
+  var safeEnd = (id, comma = false) => ACTION_WRITING_IDS2.has(id) ? "\uFF08\u306D\u3053\u306F\u3057\u3063\u307D\u3092\u3086\u3063\u304F\u308A\u3075\u3063\u305F\u3002\uFF09" : GOODBYE[id] || (comma ? "\u307E\u305F\u3001\u68EE\u3067\u4F1A\u304A\u3046\u306D\u3002" : "\u307E\u305F\u68EE\u3067\u4F1A\u304A\u3046\u306D\u3002");
+  var WRONG_FIRST_PERSON = FOREST_WRONG_FIRST_PERSON;
+  var FOREST_PROMPT_VERSION = "forest-scene-generation-v20-profile2";
+  var PROMPT_VERSION = FOREST_PROMPT_VERSION;
   var clean3 = (value) => typeof value === "string" ? value.trim().replace(/\s+/gu, " ") : "";
+  function readJson(storage, key, fallback) {
+    try {
+      return JSON.parse(storage?.getItem?.(key) || "null") || fallback;
+    } catch {
+      return fallback;
+    }
+  }
+  function generationErrorKind(error) {
+    const message = String(error?.message || "");
+    if (/Forest AI diagnostic model-json/u.test(message)) return "model-json";
+    if (/Forest AI diagnostic output-validation/u.test(message)) return "output-validation";
+    if (/Invalid Forest AI JSON/u.test(message)) return "response-json";
+    const status = /Forest AI unavailable \((\d{3})\)/u.exec(message)?.[1];
+    if (status === "401" || status === "403") return "authentication";
+    if (status) return "worker-http-" + status;
+    if (/quota reached|neurons.*exceeded|daily free allocation|exhausted/iu.test(message))
+      return "quota";
+    if (/timeout/iu.test(message)) return "timeout";
+    if (/Firebase login|Unauthorized|token/iu.test(message)) return "authentication";
+    if (/Invalid Forest AI response|Invalid model/iu.test(message)) return "invalid-response";
+    if (/NetworkError|Failed to fetch|fetch failed|network request failed/iu.test(message))
+      return "network";
+    if (/cancelled|aborted/iu.test(message)) return "cancelled";
+    return "request-error";
+  }
+  function validLine2(characterId, text) {
+    const line = clean3(text);
+    if (line.length < 2 || line.length > 90 || /[{}<>]/u.test(line)) return false;
+    if (ACTION_WRITING_IDS2.has(characterId)) return validateForestGestureText(line);
+    const name = SELF_NAMES2[characterId];
+    if (name && new RegExp("(?:^|[\u3002\uFF01\uFF1F\u3001\u300C\u300E\\s])" + name + "[\u306F\u304C]").test(line)) return false;
+    if ((WRONG_FIRST_PERSON[characterId] || []).some((word) => new RegExp("(?:^|[\u3002\uFF01\uFF1F\u3001\u300C\u300E\\s])" + word + "(?:\u306F|\u3082|\u304C|\u306E|\u3001|\u3063\u3066|\u306A\u3089)").test(line))) return false;
+    if (characterId === "jiji" && /(?:^|[。！？、])\s*そうね[。、]|みんな、元気を出して進みましょう/u.test(line)) return false;
+    if (characterId === "skipper" && /(?:さあ[、！! ]*みんな|大冒険の始まりだ)/u.test(line)) return false;
+    return true;
+  }
+  function validateLiveForestOutput(raw, { characterId, requireLine = false, closing = false, context = {} } = {}) {
+    let data = raw;
+    if (typeof raw === "string") try {
+      data = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+    if (!data || typeof data !== "object" || !CHARACTERS2.has(characterId)) return null;
+    const text = clean3(data.text);
+    if (unsafeForestForaging(data, context)) return null;
+    if (requireLine && !validLine2(characterId, text)) return null;
+    const gesture = ACTION_WRITING_IDS2.has(characterId);
+    const mark = gesture ? validateForestGestureMark(data.mark) : null;
+    if (gesture && mark === void 0) return null;
+    if (closing) return { text, labels: [], ...mark ? { mark } : {} };
+    const candidates = Array.isArray(data.choices) ? data.choices.slice(0, 3) : [];
+    const labels = [...new Set(candidates.map((choice) => clean3(typeof choice === "string" ? choice : choice?.label)).filter((label) => label.length >= 2 && label.length <= 24 && !/[\r\n{}<>「」]/u.test(label)))].slice(0, 2);
+    if (labels.length < 2) {
+      if (!requireLine) return null;
+      return { text, labels: gesture ? ["\u3082\u3046\u3059\u3053\u3057\u307F\u308B", "\u307E\u305F\u306D"] : ["\u3082\u3046\u5C11\u3057\u805E\u304F", "\u307E\u305F\u306D"], ...mark ? { mark } : {} };
+    }
+    return { text: requireLine ? text : null, labels, ...mark ? { mark } : {} };
+  }
   function promptScene(scene, sourceKind) {
     if (!scene) return {};
     if (sourceKind !== "ambient") return { tone: scene.tone || "" };
@@ -1052,8 +1708,527 @@ var ForestPersonaProbe = (() => {
       } }
     };
   }
+  function createForestLiveDialogueDirector({
+    base,
+    generate,
+    storage = null,
+    storageKey = "forest-ai-local-v1",
+    now = () => Date.now(),
+    dailyLimit = 300,
+    sessionLimit = 3,
+    maxReplies = 2,
+    startDelayMs = 280,
+    modelId = "unknown",
+    getBooks = () => [],
+    getCatalog = () => [],
+    getCues = () => [],
+    getCharacterProfiles = () => [],
+    getRecentReflections = async () => [],
+    requireCharacterProfile = false,
+    requestTimeoutMs = 11e3,
+    createAbortController = () => new AbortController(),
+    scheduleTimeout = globalThis.setTimeout,
+    cancelTimeout = globalThis.clearTimeout
+  } = {}) {
+    if (!base || typeof base.start !== "function" || typeof base.select !== "function" || typeof generate !== "function") throw Error("base and generate are required");
+    let pending = null, pendingScripted = null, history = [], sessionCount = 0, repliesThisSession = 0, fallbackTurns = 0, serial = 0, closed = false, epoch = 0, inflight = null, activeCharacterProfile = null, activeDaily = null, activeDailyInput = null, activeOriginal = null, activeTopic = null, displayedTopicKey = "", encounterDisplayed = false, activeSituation = null;
+    const daily = createForestDailyContextSession({ storage, storageKey: storageKey + ":daily", now });
+    const reviewSession = createForestReflectionSpotlightSession({
+      storage,
+      storageKey: storageKey + ":review-reactions",
+      now
+    });
+    const budgetKey = storageKey + ":budget", logKey = storageKey + ":log";
+    function record(item) {
+      const existing = readJson(storage, logKey, []);
+      const entries = Array.isArray(existing) ? existing.slice(-299) : [];
+      entries.push({
+        at: now(),
+        protocolRevision: FOREST_DIALOGUE_PROTOCOL,
+        ...activeCharacterProfile ? {
+          profileRevision: activeCharacterProfile.revision,
+          profileVersion: activeCharacterProfile.version,
+          profileSchemaVersion: 2
+        } : {},
+        ...item
+      });
+      try {
+        storage?.setItem?.(logKey, JSON.stringify(entries));
+      } catch {
+      }
+    }
+    function reserve() {
+      if (typeof storage?.getItem !== "function" || typeof storage?.setItem !== "function") return false;
+      if (sessionCount >= sessionLimit) return false;
+      const day = new Date(now()).toISOString().slice(0, 10);
+      const previous = readJson(storage, budgetKey, {});
+      const used = previous?.day === day ? Number(previous.count) || 0 : 0;
+      if (used >= dailyLimit || previous.day === day && previous.exhausted === true) return false;
+      try {
+        storage?.setItem?.(budgetKey, JSON.stringify({ day, count: used + 1 }));
+      } catch {
+        return false;
+      }
+      sessionCount++;
+      return true;
+    }
+    async function request(characterId, mode, npcLine, chosenLabel = "", closing = false, topic = null, sourceKind = "", reviewSpotlight = null) {
+      if (!reserve()) return null;
+      const previousLogs = readJson(storage, logKey, []);
+      const recentLines = (Array.isArray(previousLogs) ? previousLogs : []).filter((entry) => entry?.characterId === characterId && ["generated-opening", "generated-reply"].includes(entry.event) && typeof entry.text === "string").slice(-3).map((entry) => clean3(entry.text).slice(0, 90));
+      const context = promptFor({
+        characterId,
+        mode,
+        chosenLabel,
+        history,
+        closing,
+        topic,
+        characterProfile: activeCharacterProfile,
+        sourceKind,
+        dailyContext: reviewSpotlight || sourceKind === "review-reaction" ? null : activeDaily,
+        situation: activeSituation,
+        recentLines,
+        reviewSpotlight
+      });
+      const controller = createAbortController(), startedAt = now();
+      inflight = { controller, characterId, mode, startedAt };
+      let timeout, timedOut = false;
+      try {
+        const raw = await Promise.race([
+          Promise.resolve().then(() => generate(context, { signal: controller.signal })),
+          new Promise((_, reject) => {
+            timeout = scheduleTimeout(() => {
+              timedOut = true;
+              controller.abort();
+              reject(Error("timeout"));
+            }, Math.max(1, Math.min(11e3, Number(requestTimeoutMs) || 11e3)));
+          })
+        ]);
+        const result = validateLiveForestOutput(raw, {
+          characterId,
+          requireLine: mode !== "choices",
+          closing,
+          context: context.context
+        });
+        if (controller.signal.aborted) return null;
+        if (!result) record({
+          event: "invalid-generation",
+          characterId,
+          mode,
+          reason: "invalid-response",
+          modelId,
+          promptVersion: PROMPT_VERSION
+        });
+        return result ? { ...result, elapsedMs: Math.max(0, now() - startedAt) } : null;
+      } catch (error) {
+        if (/quota reached|neurons.*exceeded|daily free allocation/iu.test(String(error?.message || ""))) {
+          const day = new Date(now()).toISOString().slice(0, 10);
+          const previous = readJson(storage, budgetKey, {});
+          try {
+            storage?.setItem?.(budgetKey, JSON.stringify({
+              day,
+              count: previous.day === day ? Number(previous.count) || 1 : 1,
+              exhausted: true
+            }));
+          } catch {
+          }
+        }
+        if (timedOut || !controller.signal.aborted) record({
+          event: "generation-failed",
+          characterId,
+          mode,
+          reason: timedOut ? "timeout" : generationErrorKind(error),
+          modelId,
+          promptVersion: PROMPT_VERSION,
+          elapsedMs: Math.max(0, now() - startedAt)
+        });
+        return null;
+      } finally {
+        cancelTimeout(timeout);
+        if (inflight?.controller === controller) inflight = null;
+      }
+    }
+    function decorate(characterId, text, labels, meta = {}) {
+      const relay = meta.relayChoice;
+      const choices = labels.slice(0, relay ? 1 : 2).map((label, i) => ({ id: `ai-${++serial}-${i}`, label }));
+      if (relay) choices.push({ id: relay.id, label: relay.label, relayTo: relay.relayTo });
+      pending = { characterId, text, choices, ...meta };
+      return { text, choices, ...meta.mark ? { mark: meta.mark } : {} };
+    }
+    function scripted(result, characterId) {
+      pendingScripted = result?.choices?.length ? { characterId, choices: result.choices } : null;
+      return result && !result.autoNext && !result.choices?.length ? { ...result, conversationComplete: true } : result;
+    }
+    async function start(identity) {
+      const generation = ++epoch;
+      closed = false;
+      pending = null;
+      pendingScripted = null;
+      history = [];
+      sessionCount = 0;
+      repliesThisSession = 0;
+      fallbackTurns = 0;
+      displayedTopicKey = "";
+      encounterDisplayed = false;
+      activeCharacterProfile = null;
+      activeDaily = null;
+      activeDailyInput = null;
+      activeOriginal = null;
+      activeTopic = null;
+      activeSituation = null;
+      let spotlight = null;
+      const characterId = identity?.characterId;
+      if (CHARACTERS2.has(characterId)) {
+        try {
+          activeCharacterProfile = validForestCharacterProfiles(await getCharacterProfiles()).find((profile) => profile.id === characterId) || null;
+        } catch {
+          activeCharacterProfile = null;
+        }
+      }
+      const original = await base.start({ ...identity, generation: true });
+      activeOriginal = original;
+      activeSituation = original?.situation || null;
+      if (closed || generation !== epoch) return null;
+      const canReact = original && CHARACTERS2.has(characterId) && original.sourceKind === "ambient" && (!requireCharacterProfile || activeCharacterProfile);
+      let books = [], catalog = [], cues = [];
+      try {
+        [books, catalog, cues] = await Promise.all([
+          getBooks(),
+          getCatalog(),
+          getCues()
+        ]);
+        if (closed || generation !== epoch) return null;
+      } catch {
+        books = [];
+        catalog = [];
+        cues = [];
+      }
+      if (canReact) {
+        try {
+          const reflections = await getRecentReflections();
+          if (closed || generation !== epoch) return null;
+          spotlight = reviewSession.choose({ characterId, books, catalog, cues, reflections });
+        } catch {
+          spotlight = null;
+        }
+      }
+      if (original && identity?.characterId) {
+        try {
+          activeDailyInput = {
+            books,
+            catalog: original.situation && original.sourceKind === "ambient" ? [] : catalog,
+            cues,
+            sourceKind: spotlight ? "reflection" : original.sourceKind,
+            sourceMemoryId: original.sourceMemoryId
+          };
+          activeDaily = daily.visit(characterId, { ...activeDailyInput, commit: false });
+        } catch {
+          activeDailyInput = {};
+          activeDaily = daily.visit(characterId, { commit: false });
+        }
+      }
+      if (!original || !CHARACTERS2.has(characterId) || !clean3(original.text) || clean3(original.text).length > 350)
+        return scripted(original, characterId);
+      if ((requireCharacterProfile || ACTION_WRITING_IDS2.has(characterId)) && !activeCharacterProfile) {
+        record({
+          event: "script-fallback",
+          characterId,
+          reason: "missing-character-profile",
+          sourceKind: original.sourceKind || "unknown",
+          promptVersion: PROMPT_VERSION
+        });
+        return scripted(original, characterId);
+      }
+      if (startDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, startDelayMs));
+      if (closed || generation !== epoch) return null;
+      const source = activeDaily?.scene;
+      const sourceKind = spotlight ? "review-reaction" : original.sourceKind || "ambient";
+      const sourceMemory = original.sourceMemoryId ? unlockedStoryMemories(books, catalog).find((item) => item.id === original.sourceMemoryId) : null;
+      const topic = !spotlight && sourceMemory ? {
+        fact: clean3(sourceMemory.text).slice(0, 240),
+        bookTitle: clean3(books.find((book) => book.id === sourceMemory.bookId)?.title).slice(0, 80)
+      } : null;
+      if (original.sourceMemoryId && !sourceMemory) return scripted({ text: safeEnd(characterId), choices: [] }, characterId);
+      activeTopic = topic;
+      const mode = "opening";
+      const result = await request(
+        characterId,
+        mode,
+        spotlight ? "\u6700\u8FD1\u306E\u672C\u306E\u611F\u60F3\u3092\u805E\u3044\u305F\u3002" : original.text,
+        "",
+        false,
+        topic,
+        sourceKind,
+        spotlight
+      );
+      if (closed || generation !== epoch) return null;
+      if (!result) {
+        record({
+          event: "script-fallback",
+          characterId,
+          reason: "generation-unavailable",
+          sourceKind,
+          promptVersion: PROMPT_VERSION
+        });
+        return scripted(original, characterId);
+      }
+      const spoken = result.text;
+      history.push({ npc: clean3(spoken).slice(0, 150) });
+      record({
+        event: "generated-opening",
+        characterId,
+        // Generated review lines may quote the child's words: never persist them
+        // in the diagnostic history. The live conversation itself stays in memory.
+        ...spotlight || sourceKind === "reflection" ? {} : { text: spoken, choices: result.labels },
+        dailyTopicKind: spotlight ? "reflection" : sourceKind === "ambient" ? source?.kind || "ambient" : sourceKind,
+        sourceKind,
+        modelId,
+        promptVersion: PROMPT_VERSION,
+        elapsedMs: result.elapsedMs
+      });
+      const fallbackChoiceId = original.choices?.find((choice) => choice.id === "another-topic")?.id || original.choices?.find((choice) => typeof choice?.id === "string")?.id || "";
+      const relayChoice = spotlight ? null : original.choices?.find((choice) => choice.relayTo && typeof choice.id === "string" && typeof choice.label === "string") || null;
+      return decorate(characterId, spoken, result.labels, {
+        fallbackChoiceId,
+        ...result.mark ? { mark: result.mark } : {},
+        sourceKind,
+        sourceMemoryId: spotlight ? "" : original.sourceMemoryId || "",
+        relayChoice,
+        ...spotlight ? {
+          reviewSpotlightKey: spotlight.key,
+          reviewSpotlightBookKey: spotlight.bookKey,
+          reviewEvidence: spotlight
+        } : {},
+        ...!spotlight && sourceKind === "ambient" && source?.evidence === "reviewed" ? { dailySourceMemoryId: source.memoryId } : {}
+      });
+    }
+    async function select({ characterId, choiceId } = {}) {
+      const generation = epoch;
+      const current = pending;
+      if (!current || current.characterId !== characterId || !current.choices.some((choice) => choice.id === choiceId)) {
+        const selected = pendingScripted?.characterId === characterId ? pendingScripted.choices.find((choice) => choice.id === choiceId) : null;
+        if (selected && characterId !== "twins" && ++fallbackTurns >= maxReplies) {
+          pendingScripted = null;
+          return { text: safeEnd(characterId), choices: [], conversationComplete: true };
+        }
+        const original = await base.select({ characterId, choiceId });
+        if (selected && original) daily.selected(characterId, selected.label);
+        return original ? scripted(original, characterId) : { text: safeEnd(characterId), choices: [], conversationComplete: true };
+      }
+      pending = null;
+      const label = current.choices.find((choice) => choice.id === choiceId).label;
+      if (current.reviewEvidence) {
+        try {
+          const [books, reflections] = await Promise.all([getBooks(), getRecentReflections()]);
+          if (!isCurrentForestReflection(current.reviewEvidence, { books, reflections }))
+            return { text: safeEnd(characterId), choices: [], conversationComplete: true };
+        } catch {
+          return { text: safeEnd(characterId), choices: [], conversationComplete: true };
+        }
+      }
+      if (current.sourceMemoryId || current.dailySourceMemoryId) {
+        try {
+          const authorized = unlockedStoryMemories(await getBooks(), await getCatalog());
+          if (!authorized.some((memory) => memory.id === (current.sourceMemoryId || current.dailySourceMemoryId)))
+            return {
+              text: safeEnd(characterId),
+              choices: [],
+              conversationComplete: true
+            };
+        } catch {
+          return { text: safeEnd(characterId), choices: [], conversationComplete: true };
+        }
+      }
+      if (current.sourceKind !== "review-reaction") daily.selected(characterId, label);
+      const scriptedRelay = current.relayChoice?.id === choiceId;
+      if (scriptedRelay) {
+        const authored = await base.select({ characterId, choiceId });
+        if (closed || generation !== epoch) return null;
+        history.push({ playerChoice: label });
+        history = history.slice(-4);
+        const generated2 = await request(
+          characterId,
+          "reply",
+          current.text,
+          label,
+          true,
+          activeTopic,
+          current.sourceKind
+        );
+        if (closed || generation !== epoch) return null;
+        if (!generated2) {
+          record({
+            event: "script-fallback",
+            characterId,
+            reason: "relay-generation-unavailable",
+            sourceKind: current.sourceKind,
+            promptVersion: PROMPT_VERSION
+          });
+          return scripted(authored, characterId);
+        }
+        record({
+          event: "generated-reply",
+          characterId,
+          ...current.sourceKind === "reflection" ? {} : { text: generated2.text },
+          closing: true,
+          mode: "relay",
+          modelId,
+          promptVersion: PROMPT_VERSION,
+          elapsedMs: generated2.elapsedMs,
+          turn: 1
+        });
+        return { text: generated2.text, choices: [], ...generated2.mark ? { mark: generated2.mark } : {}, conversationComplete: true };
+      }
+      history.push({ playerChoice: label });
+      history = history.slice(-4);
+      record({
+        event: "selected-offered-choice",
+        characterId,
+        ...["review-reaction", "reflection"].includes(current.sourceKind) ? {} : { label }
+      });
+      const closing = repliesThisSession + 1 >= maxReplies || /^(?:またね|ばいばい|バイバイ|帰る|かえる|おしまい|また今度)[。！!]*$/u.test(label);
+      const topic = activeTopic;
+      const generated = await request(
+        characterId,
+        "reply",
+        current.text,
+        label,
+        closing,
+        topic,
+        current.sourceKind,
+        current.reviewEvidence || null
+      );
+      if (closed || generation !== epoch) return null;
+      if (!generated) {
+        if (closing) {
+          record({
+            event: "script-fallback",
+            characterId,
+            reason: "generation-unavailable",
+            sourceKind: current.sourceKind,
+            promptVersion: PROMPT_VERSION
+          });
+          return { text: safeEnd(characterId), choices: [], conversationComplete: true };
+        }
+        try {
+          const fallback = current.fallbackChoiceId ? await base.select({
+            characterId,
+            choiceId: current.fallbackChoiceId
+          }) : null;
+          if (closed || generation !== epoch) return null;
+          if (fallback?.text) {
+            record({
+              event: "script-fallback",
+              characterId,
+              reason: "generation-unavailable",
+              sourceKind: current.sourceKind,
+              promptVersion: PROMPT_VERSION
+            });
+            return scripted(fallback, characterId);
+          }
+        } catch {
+        }
+        return { text: safeEnd(characterId, true), choices: [], conversationComplete: true };
+      }
+      history.push({ npc: generated.text });
+      history = history.slice(-4);
+      repliesThisSession++;
+      record({
+        event: "generated-reply",
+        characterId,
+        ...["review-reaction", "reflection"].includes(current.sourceKind) ? {} : { text: generated.text, choices: closing ? [] : generated.labels },
+        dailyTopicKind: current.sourceKind === "review-reaction" ? "reflection" : activeDaily?.scene?.kind || "ambient",
+        closing,
+        modelId,
+        promptVersion: PROMPT_VERSION,
+        elapsedMs: generated.elapsedMs,
+        turn: repliesThisSession
+      });
+      if (closing) {
+        pending = null;
+        return { text: generated.text, choices: [], ...generated.mark ? { mark: generated.mark } : {}, conversationComplete: true };
+      }
+      return decorate(characterId, generated.text, generated.labels, {
+        ...generated.mark ? { mark: generated.mark } : {},
+        fallbackChoiceId: current.fallbackChoiceId,
+        sourceKind: current.sourceKind,
+        sourceMemoryId: current.sourceMemoryId,
+        dailySourceMemoryId: current.dailySourceMemoryId,
+        reviewSpotlightKey: current.reviewSpotlightKey,
+        reviewSpotlightBookKey: current.reviewSpotlightBookKey,
+        reviewEvidence: current.reviewEvidence
+      });
+    }
+    return {
+      start,
+      select,
+      onDisplayed(result, identity) {
+        if (!encounterDisplayed && typeof result?.text === "string") {
+          encounterDisplayed = true;
+          base.onDisplayed?.(activeOriginal, identity);
+          if (activeDailyInput) daily.visit(identity?.characterId, activeDailyInput);
+          reviewSession.visited();
+        }
+        if (pending?.reviewSpotlightKey && pending.characterId === identity?.characterId && result?.text === pending.text) {
+          reviewSession.displayed(identity.characterId, {
+            key: pending.reviewSpotlightKey,
+            bookKey: pending.reviewSpotlightBookKey
+          });
+          pending.reviewSpotlightKey = "";
+          record({
+            event: "reflection-reaction-displayed",
+            characterId: identity.characterId,
+            promptVersion: PROMPT_VERSION
+          });
+        }
+        if (pending?.sourceKind !== "ambient") return;
+        const scene = activeDaily?.scene;
+        if (scene?.evidence !== "reviewed" || !pending || pending.characterId !== identity?.characterId || result?.text !== pending.text || displayedTopicKey === scene.id) return;
+        displayedTopicKey = scene.id;
+        record({
+          event: "daily-topic-displayed",
+          characterId: identity.characterId,
+          topicKey: scene.id,
+          kind: scene.kind,
+          promptVersion: PROMPT_VERSION
+        });
+      },
+      advance(identity) {
+        return base.advance?.(identity) || null;
+      },
+      end() {
+        epoch++;
+        closed = true;
+        pending = null;
+        pendingScripted = null;
+        history = [];
+        activeCharacterProfile = null;
+        activeDaily = null;
+        if (inflight && !inflight.controller.signal.aborted) {
+          record({
+            event: "cancel-requested",
+            characterId: inflight.characterId,
+            mode: inflight.mode,
+            modelId,
+            promptVersion: PROMPT_VERSION,
+            elapsedMs: Math.max(0, now() - inflight.startedAt)
+          });
+          inflight.controller.abort();
+        }
+        base.end?.();
+      },
+      getProgress() {
+        return {
+          ...base.getProgress?.() || {},
+          aiRequestsThisSession: sessionCount,
+          aiRepliesThisSession: repliesThisSession
+        };
+      }
+    };
+  }
 
   // cloudflare/forest-ai/src/index.mjs
+  var FOREST_WORKER_VERSION = "forest-dialogue-v20-profile2";
   var NPCS = new Set(FOREST_AI_GENERATION_IDS);
   var ACTION_WRITING_IDS3 = new Set(FOREST_ACTION_WRITING_IDS);
   function readCompletion(result, { closing = false, mode = "reply", characterId = "", context = {} } = {}) {
@@ -1103,9 +2278,161 @@ var ForestPersonaProbe = (() => {
     };
   }
 
+  // scripts/forest-conversation-scenario.mjs
+  function scenarioStorage(initial = {}) {
+    const values = new Map(Object.entries(initial));
+    return {
+      getItem: (key) => values.get(key) || null,
+      setItem: (key, v) => values.set(key, v),
+      removeItem: (key) => values.delete(key),
+      snapshot: () => Object.fromEntries(values)
+    };
+  }
+  function forestInputFingerprint(value) {
+    let a = 2166136261, b = 5381;
+    for (const c of JSON.stringify(value)) {
+      const n = c.codePointAt(0);
+      a = Math.imul(a ^ n, 16777619);
+      b = Math.imul(b, 33) ^ n;
+    }
+    return (a >>> 0).toString(16).padStart(8, "0") + (b >>> 0).toString(16).padStart(8, "0");
+  }
+  async function runForestConversationScenario({
+    visits = [],
+    transport,
+    storage = scenarioStorage(),
+    now = () => Date.now(),
+    getBooks = () => [],
+    getCatalog = () => [],
+    getCues = () => [],
+    getReflections = async () => [],
+    getRecentReflections = async () => [],
+    getCharacterProfiles = () => [],
+    getTwinNames = () => [],
+    getTwinScenes = () => [],
+    dailyLimit = 300,
+    requestTimeoutMs = 11e3,
+    runtime = {},
+    implementation = {
+      createForestDialogueDirector,
+      createForestLiveDialogueDirector,
+      forestGenerationInput,
+      readCompletion
+    },
+    onStep = () => {
+    }
+  } = {}) {
+    if (typeof transport !== "function") throw Error("A model transport is required");
+    const trace = [], frames = [];
+    const versions = {
+      protocolRevision: FOREST_DIALOGUE_PROTOCOL,
+      registryRevision: FOREST_ROSTER_REVISION,
+      promptVersion: FOREST_PROMPT_VERSION,
+      workerVersion: FOREST_WORKER_VERSION,
+      ...implementation.versions
+    };
+    const common = { getBooks, getCatalog, getCues, storage };
+    const base = implementation.createForestDialogueDirector({
+      ...common,
+      getReflections,
+      getTwinNames,
+      getTwinScenes,
+      storageKey: "scenario:base"
+    });
+    const live = implementation.createForestLiveDialogueDirector({
+      ...common,
+      base,
+      getRecentReflections,
+      getCharacterProfiles,
+      requireCharacterProfile: true,
+      storageKey: "scenario:live",
+      now,
+      startDelayMs: 0,
+      sessionLimit: 3,
+      maxReplies: 2,
+      dailyLimit,
+      requestTimeoutMs,
+      ...runtime,
+      modelId: "@cf/google/gemma-4-26b-a4b-it",
+      generate: async (prompt, { signal } = {}) => {
+        const input = implementation.forestGenerationInput(prompt);
+        const entry = {
+          prompt,
+          input,
+          inputFingerprint: forestInputFingerprint(input),
+          ...versions,
+          validation: "pending"
+        };
+        trace.push(entry);
+        try {
+          entry.raw = await transport(input, { prompt, signal, index: trace.length - 1 });
+          entry.validated = implementation.readCompletion(entry.raw, {
+            characterId: prompt.npc.id,
+            mode: prompt.mode,
+            closing: prompt.closing,
+            context: prompt.context
+          });
+          entry.validation = "accepted";
+          return entry.validated;
+        } catch (error) {
+          entry.validation = "rejected";
+          entry.failure = "model-or-transport";
+          throw error;
+        }
+      }
+    });
+    async function display(result, identity, visit, turn, visible = true) {
+      frames.push({ visit, turn, characterId: identity.characterId, result, displayed: visible });
+      if (visible && result) live.onDisplayed(result, identity);
+      await onStep({ visit, turn, result, live, storage });
+    }
+    try {
+      for (const [visit, item] of visits.entries()) {
+        const identity = { characterId: item.characterId };
+        let result = await live.start(identity);
+        await display(result, identity, visit, 0, item.display !== false);
+        for (const [turn, selection] of (item.choices || []).entries()) {
+          if (result?.conversationComplete && !result.choices?.length) break;
+          const choice = typeof selection === "number" ? result?.choices?.[selection] : result?.choices?.find((c) => c.label === selection);
+          if (!choice) throw Error("Scenario selected a choice that was not displayed");
+          result = await live.select({ ...identity, choiceId: choice.id });
+          await display(result, identity, visit, turn + 1, item.display !== false);
+        }
+        for (let n = 0; result?.autoNext && n < 10; n++) {
+          result = await live.advance(identity);
+          if (!result) break;
+          await display(result, identity, visit, n + 1, item.display !== false);
+        }
+        live.end();
+      }
+    } finally {
+      live.end();
+    }
+    return {
+      trace,
+      frames,
+      storage: storage.snapshot?.(),
+      progress: live.getProgress(),
+      summary: {
+        requests: trace.length,
+        accepted: trace.filter((t) => t.validation === "accepted").length,
+        frames: frames.length,
+        ...versions,
+        turns: trace.map((t) => ({
+          npc: t.prompt.npc.id,
+          mode: t.prompt.mode,
+          sourceKind: t.prompt.context.sourceKind,
+          profileRevision: t.prompt.npc.profileRevision,
+          inputFingerprint: t.inputFingerprint,
+          validation: t.validation
+        }))
+      }
+    };
+  }
+
   // gas/ForestPersonaProbe.mjs
   var MODEL = "@cf/google/gemma-4-26b-a4b-it";
-  var MODES = /* @__PURE__ */ new Set(["synthetic", "mirror-reflection", "mirror-daily", "mirror-story", "continuation"]);
+  var MODES = /* @__PURE__ */ new Set(["synthetic", "mirror-reflection", "mirror-daily", "mirror-story", "continuation", "integrated-synthetic", "integrated-mirror"]);
   var safeText = (v) => /^\s*[=+@-]/u.test(String(v)) ? "'" + String(v) : String(v);
   var norm = (x) => String(x ?? "").trim();
   var SOURCE_PROVEN = "READ_ONLY_MIRROR";
@@ -1283,7 +2610,38 @@ var ForestPersonaProbe = (() => {
       turn: Number(row[26]) || 0
     };
   }
-  function processQueue() {
+  async function probeConversation(personRows, sourceRows, characterId, {
+    snapshot = { books: [], reflections: [] },
+    catalog = [],
+    cues = [],
+    storage,
+    choices = [0, 0],
+    transport,
+    now = () => Date.now()
+  } = {}) {
+    const profiles = parseForestCharacterProfiles(personRows, parseForestProfileSources(sourceRows));
+    if (!profiles.some((p) => p.id === characterId)) throw Error("MISSING_PROFILE");
+    return runForestConversationScenario({
+      visits: [{ characterId, choices }],
+      transport,
+      now,
+      storage: scenarioStorage(storage || {}),
+      getBooks: () => snapshot.books,
+      getCatalog: () => catalog,
+      getCues: () => cues,
+      getCharacterProfiles: () => profiles,
+      getRecentReflections: async () => snapshot.reflections || [],
+      runtime: {
+        createAbortController: () => ({ signal: { aborted: false }, abort() {
+          this.signal.aborted = true;
+        } }),
+        scheduleTimeout: () => null,
+        cancelTimeout: () => {
+        }
+      }
+    });
+  }
+  async function processQueue() {
     const lock = LockService.getScriptLock();
     if (!lock.tryLock(1e3)) return;
     try {
@@ -1324,12 +2682,93 @@ var ForestPersonaProbe = (() => {
           mark("APPLIED", "ALREADY_RECORDED");
           continue;
         }
+        const integrated = mode.startsWith("integrated-");
+        if (integrated && (3 - done < 3 || 60 - attempts < 3)) break;
         mark("RUNNING", "");
         SpreadsheetApp.flush();
         done++;
         let prepared;
         try {
-          if (mode !== "synthetic" && !mirror) mirror = readMirror(ss, props);
+          if (!["synthetic", "integrated-synthetic"].includes(mode) && !mirror) mirror = readMirror(ss, props);
+          if (integrated) {
+            let prior = null;
+            if (previousId) {
+              const matches = results.filter((row) => row[0] === previousId && row[17] === "PASS");
+              if (matches.length !== 1) throw Error("PREVIOUS_RESULT_MISSING");
+              try {
+                prior = JSON.parse(matches[0][15]).conversation.storage;
+              } catch {
+                throw Error("PREVIOUS_INPUT_INVALID");
+              }
+              if (!prior) throw Error("PREVIOUS_INPUT_INVALID");
+            }
+            const selectedChoices = choice ? JSON.parse(choice) : [0, 0];
+            if (!Array.isArray(selectedChoices) || selectedChoices.length > 2 || selectedChoices.some((c) => !Number.isInteger(c) || c < 0 || c > 1)) throw Error("INVALID_CHOICE");
+            const snapshot = mode === "integrated-mirror" ? mirror : { books: [], reflections: [] };
+            const conversation = await probeConversation(originalPeople, originalSources, npc, {
+              snapshot,
+              catalog,
+              cues,
+              storage: prior,
+              choices: selectedChoices,
+              transport: async (input) => {
+                if (attempts >= 60) throw Error("Local quota reached");
+                props.setProperty(key, String(++attempts));
+                const started = Date.now();
+                const response = UrlFetchApp.fetch("https://api.cloudflare.com/client/v4/accounts/" + account.trim() + "/ai/run/" + MODEL, {
+                  method: "post",
+                  contentType: "application/json",
+                  headers: { Authorization: "Bearer " + token.trim() },
+                  payload: JSON.stringify({ ...input, stream: false }),
+                  muteHttpExceptions: true,
+                  followRedirects: false
+                });
+                if (Date.now() - started > 11e3) throw Error("timeout");
+                if (response.getResponseCode() < 200 || response.getResponseCode() >= 300) throw Error("Worker transport unavailable");
+                const envelope = JSON.parse(response.getContentText());
+                if (envelope.success === false) throw Error("Provider unavailable");
+                return envelope.result;
+              }
+            });
+            done += 2;
+            const valid2 = conversation.trace.length > 0 && conversation.trace.every((t) => t.validation === "accepted");
+            const compact = { ...conversation, trace: conversation.trace.map(({ prompt, ...rest }) => rest) };
+            const saved = JSON.stringify({ ...conversation.trace[0]?.input, conversation: compact });
+            if (saved.length > 48e3) throw Error("TRACE_TOO_LARGE");
+            out.appendRow([
+              safeText(id),
+              npc,
+              npc,
+              safeText(scene),
+              safeText(utterance),
+              safeText(JSON.stringify(conversation.frames.map((f) => f.result))),
+              MODEL,
+              conversation.trace[0]?.prompt.npc.profileVersion || "",
+              "",
+              conversation.summary.promptVersion,
+              /* @__PURE__ */ new Date(),
+              "",
+              "",
+              "",
+              "\u54C1\u8CEA\u8A55\u4FA1\u672A\u5B9F\u65BD",
+              safeText(saved),
+              /* @__PURE__ */ new Date(),
+              valid2 ? "PASS" : "FAIL",
+              mode,
+              mirror?.snapshotAt ? new Date(mirror.snapshotAt) : "",
+              "",
+              "",
+              mode === "integrated-synthetic" ? "SYNTHETIC" : "READ_ONLY_MIRROR",
+              safeText(previousId || ""),
+              safeText(caseId || ""),
+              safeText(issue || ""),
+              conversation.frames.length - 1,
+              ""
+            ]);
+            existing.add(id);
+            mark(valid2 ? "APPLIED" : "ERROR", valid2 ? "" : "OUTPUT_VALIDATION");
+            continue;
+          }
           const previous = mode === "continuation" ? getPrevious(results, previousId) : null;
           prepared = probeInput(originalPeople, originalSources, npc, scene, utterance, {
             mode,
@@ -1344,7 +2783,7 @@ var ForestPersonaProbe = (() => {
           });
         } catch (error) {
           const code = String(error?.message || "");
-          mark("ERROR", /^(?:MIRROR_[A-Z_]+|BOOK_NOT_READ|READ_REVOKED|REFLECTION_REVOKED|NO_ELIGIBLE_REFLECTION|NO_VERIFIED_STORY|INVALID_CHOICE|PREVIOUS_[A-Z_]+|REFLECTION_IDENTITY|INVALID_CONTINUATION|MAX_REPLIES)$/u.test(code) ? code : "PROFILE_CONTRACT");
+          mark("ERROR", /^(?:MIRROR_[A-Z_]+|BOOK_NOT_READ|READ_REVOKED|REFLECTION_REVOKED|NO_ELIGIBLE_REFLECTION|NO_VERIFIED_STORY|INVALID_CHOICE|PREVIOUS_[A-Z_]+|REFLECTION_IDENTITY|INVALID_CONTINUATION|MAX_REPLIES|TRACE_TOO_LARGE)$/u.test(code) ? code : "PROFILE_CONTRACT");
           continue;
         }
         props.setProperty(key, String(++attempts));
@@ -1411,7 +2850,7 @@ var ForestPersonaProbe = (() => {
           MODEL,
           prepared.profile.version + " / " + prepared.profile.revision,
           prepared.profile.review,
-          "profile2-worker-v19",
+          "profile2-worker-v20",
           /* @__PURE__ */ new Date(),
           "",
           "",

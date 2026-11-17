@@ -180,7 +180,9 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
   maxReplies=2,startDelayMs=280,modelId='unknown',getBooks=()=>[],getCatalog=()=>[],
   getCues=()=>[],
   getCharacterProfiles=()=>[],getRecentReflections=async()=>[],
-  requireCharacterProfile=false,requestTimeoutMs=11000}={}){
+  requireCharacterProfile=false,requestTimeoutMs=11000,
+  createAbortController=()=>new AbortController(),
+  scheduleTimeout=globalThis.setTimeout,cancelTimeout=globalThis.clearTimeout}={}){
   if(!base||typeof base.start!=='function'||typeof base.select!=='function'||
     typeof generate!=='function')throw Error('base and generate are required');
   let pending=null,pendingScripted=null,history=[],sessionCount=0,repliesThisSession=0,fallbackTurns=0,serial=0,closed=false,epoch=0,
@@ -224,12 +226,12 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
       characterProfile:activeCharacterProfile,sourceKind,
       dailyContext:reviewSpotlight||sourceKind==='review-reaction'?null:activeDaily,situation:activeSituation,
       recentLines,reviewSpotlight});
-    const controller=new AbortController(),startedAt=now();
+    const controller=createAbortController(),startedAt=now();
     inflight={controller,characterId,mode,startedAt};
     let timeout,timedOut=false;
     try{
       const raw=await Promise.race([Promise.resolve().then(()=>generate(context,{signal:controller.signal})),
-        new Promise((_,reject)=>{timeout=setTimeout(()=>{
+        new Promise((_,reject)=>{timeout=scheduleTimeout(()=>{
           timedOut=true;controller.abort();reject(Error('timeout'));
         },Math.max(1,Math.min(11000,Number(requestTimeoutMs)||11000)))})]);
       const result=validateLiveForestOutput(raw,{characterId,
@@ -251,7 +253,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
         reason:timedOut?'timeout':generationErrorKind(error),modelId,
         promptVersion:PROMPT_VERSION,elapsedMs:Math.max(0,now()-startedAt)});
       return null;
-    }finally{clearTimeout(timeout);if(inflight?.controller===controller)inflight=null}
+    }finally{cancelTimeout(timeout);if(inflight?.controller===controller)inflight=null}
   }
   function decorate(characterId,text,labels,meta={}){
     const relay=meta.relayChoice;

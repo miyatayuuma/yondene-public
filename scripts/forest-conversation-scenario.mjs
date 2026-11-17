@@ -24,7 +24,7 @@ export async function runForestConversationScenario({visits=[],transport,
   storage=scenarioStorage(),now=()=>Date.now(),getBooks=()=>[],getCatalog=()=>[],
   getCues=()=>[],getReflections=async()=>[],getRecentReflections=async()=>[],
   getCharacterProfiles=()=>[],getTwinNames=()=>[],getTwinScenes=()=>[],
-  dailyLimit=300,requestTimeoutMs=11000,
+  dailyLimit=300,requestTimeoutMs=11000,runtime={},
   implementation={createForestDialogueDirector,createForestLiveDialogueDirector,
     forestGenerationInput,readCompletion},onStep=()=>{}}={}){
   if(typeof transport!=='function')throw Error('A model transport is required');
@@ -37,7 +37,7 @@ export async function runForestConversationScenario({visits=[],transport,
   const live=implementation.createForestLiveDialogueDirector({...common,base,
     getRecentReflections,getCharacterProfiles,requireCharacterProfile:true,
     storageKey:'scenario:live',now,startDelayMs:0,sessionLimit:3,maxReplies:2,
-    dailyLimit,requestTimeoutMs,modelId:'@cf/google/gemma-4-26b-a4b-it',
+    dailyLimit,requestTimeoutMs,...runtime,modelId:'@cf/google/gemma-4-26b-a4b-it',
     generate:async(prompt,{signal}={})=>{
       const input=implementation.forestGenerationInput(prompt);
       const entry={prompt,input,inputFingerprint:forestInputFingerprint(input),

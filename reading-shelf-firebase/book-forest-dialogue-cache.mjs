@@ -3,9 +3,10 @@ import {unlockedStoryMemories} from './book-forest-story-memory.mjs';
 import {validateTwinNamePairs,validateTwinScenes} from './book-forest-twins.mjs';
 import {validForestCharacterProfiles} from './book-forest-character-profiles.mjs';
 
-const PREFIX='private-book-forest-dialogue-v5-';
+const PREFIX='private-book-forest-dialogue-v6-';
 const LEGACY_PREFIXES=['private-book-forest-dialogue-v1-','private-book-forest-dialogue-v2-',
-  'private-book-forest-dialogue-v3-','private-book-forest-dialogue-v4-'];
+  'private-book-forest-dialogue-v3-','private-book-forest-dialogue-v4-',
+  'private-book-forest-dialogue-v5-'];
 const IDS=/^[A-Za-z0-9_-]{1,160}$/u;
 const pathname='/__book_forest_private_dialogue__/package';
 const scopedName=(uid,familyId)=>{

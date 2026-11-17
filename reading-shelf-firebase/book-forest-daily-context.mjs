@@ -1,9 +1,8 @@
 import {FOREST_ACTOR_NAMES,FOREST_RELATIONS,forestMemoryBelongsToCharacter} from './forest-character-registry.mjs';
-// A character's daily interest comes from a reviewed episode or thought seed,
+// A character's daily interest comes from their own verified story memory,
 // with ordinary idle conversation when no relevant source is available.
-// Never let a shared philosophical question replace the character's personality.
+// Shared philosophical questions never override individual motivations.
 import {unlockedStoryMemories} from './book-forest-story-memory.mjs';
-import {availableForestThoughtSeeds} from './book-forest-thought-seeds.mjs';
 
 const DAY_MS=86400000, MAX_EVENTS=24, MAX_RECENT=8;
 const ACTOR_NAMES=FOREST_ACTOR_NAMES;
@@ -27,10 +26,9 @@ function recentReadBonus(book,day){
 }
 
 /** All facts are rechecked against the current read-status snapshot on every visit. */
-export function eligibleForestDailyTopics({characterId,books=[],catalog=[],seeds=[],cues=[],now=Date.now()}={}){
+export function eligibleForestDailyTopics({characterId,books=[],catalog=[],cues=[],now=Date.now()}={}){
   if(!ACTOR_NAMES[characterId]||characterId==='twins')return [];
   const day=dayJapan(now),memories=unlockedStoryMemories(books,catalog);
-  const usable=availableForestThoughtSeeds({books,catalog,seeds});
   const authored=new Set((Array.isArray(cues)?cues:[])
     .filter(cue=>cue?.approval==='approved'&&cue.kind==='story'&&
       cue.characterId===characterId&&typeof cue.memoryId==='string')
@@ -40,20 +38,12 @@ export function eligibleForestDailyTopics({characterId,books=[],catalog=[],seeds
   for(const memory of memories){
     const affinity=authored.has(memory.id)?3:forestMemoryBelongsToCharacter(memory,characterId)?2:0;
     if(!affinity)continue; // Do not make characters recount unrelated books.
-    const relatedSeeds=usable.filter(seed=>seed.memoryId===memory.id);
-    const shared={memoryId:memory.id,affinity,
-      freshBonus:recentReadBonus(bookById.get(memory.bookId),day)};
-    if(relatedSeeds.length){
-      for(const seed of relatedSeeds){
-        result.push({...shared,key:'seed-'+hash(seed.id).toString(16),seedId:seed.id,
-          kind:'seed',fact:clean(seed.fact,220),theme:clean(seed.tags,60),
-          sourceUse:seed.displayedCount*2+seed.selectedCount});
-      }
-    }else{
-      result.push({...shared,key:'memory-'+hash(memory.id).toString(16),
-        kind:'memory',fact:clean(memory.text,220),theme:clean(memory.tags,60),
-        sourceUse:0});
-    }
+    result.push({
+      key:'memory-'+hash(memory.id).toString(16),
+      memoryId:memory.id,affinity,
+      freshBonus:recentReadBonus(bookById.get(memory.bookId),day),
+      kind:'memory',fact:clean(memory.text,220),theme:clean(memory.tags,60)
+    });
   }
   return result;
 }
@@ -68,7 +58,6 @@ function sceneFrom(topic,{continuationChoice='',stage=1}={}){
   return {id:topic.key,kind:continuationChoice?'continuation':topic.kind,
     focus:topic.fact,tone:'原作の事実を説明せず、本人らしい反応・小さな行動・会話にする',
     theme:topic.theme,evidence:'reviewed',memoryId:topic.memoryId,
-    ...(topic.seedId?{seedId:topic.seedId}:{}),
     ...(continuationChoice?{previousChoice:continuationChoice,stage}:{})};
 }
 function pickTopic(characterId,day,candidates,recent,usedToday){
@@ -81,15 +70,13 @@ function pickTopic(characterId,day,candidates,recent,usedToday){
     const age=dayNumber(day)-dayNumber(entry.day);
     return age>=0&&age<=3;
   }).map(entry=>entry.key));
-  // With only one available seed, speak normally for a few days instead of
-  // repeating the same supposed revelation every morning.
+  // With only one verified memory, speak normally instead of repeating it.
   const fresh=candidates.filter(topic=>!recentKeys.has(topic.key));
   if(!fresh.length)return null;
   return fresh.map(topic=>{
     const shared=usedToday.has(topic.key)?28:0;
     return {topic,score:topic.affinity*22+topic.freshBonus+
-      (topic.kind==='seed'?10:0)+hash(day+':'+characterId+':'+topic.key)%17-
-      shared-Math.min(20,topic.sourceUse)};
+      hash(day+':'+characterId+':'+topic.key)%17-shared};
   }).sort((a,b)=>b.score-a.score||a.topic.key.localeCompare(b.topic.key))[0].topic;
 }
 function empty(day,prior={}){
@@ -108,15 +95,15 @@ export function createForestDailyContextSession({storage=null,
   }
   function save(state){
     const topics=Object.fromEntries(Object.entries(state.topics||{}).map(([npc,scene])=>{
-      const {memoryId,seedId,...safe}=scene;
+      const {memoryId,...safe}=scene;
       return [npc,safe];
     }));
     write(storage,storageKey,{...state,topics});
   }
   return {
-    visit(characterId,{books=[],catalog=[],seeds=[],cues=[],sourceKind='',sourceMemoryId=''}={}){
+    visit(characterId,{books=[],catalog=[],cues=[],sourceKind='',sourceMemoryId=''}={}){
       const state=current(),candidates=['meet','reflection'].includes(sourceKind)?[]:
-        eligibleForestDailyTopics({characterId,books,catalog,seeds,cues,now:now()});
+        eligibleForestDailyTopics({characterId,books,catalog,cues,now:now()});
       const usable=new Map(candidates.map(topic=>[topic.key,topic]));
       const earlier=state.events.slice().reverse();
       const connected=earlier.find(event=>event.npc!==characterId&&
@@ -130,8 +117,7 @@ export function createForestDailyContextSession({storage=null,
       if(authored)scene=sceneFrom(authored);
       else if(scene?.evidence==='reviewed'){
         const source=candidates.find(topic=>topic.key===scene.id);
-        scene=source?{...scene,memoryId:source.memoryId,
-          ...(source.seedId?{seedId:source.seedId}:{})}:null;
+        scene=source?{...scene,memoryId:source.memoryId}:null;
         // Read->unread revokes yesterday's or today's source.
       }
       if(!scene){

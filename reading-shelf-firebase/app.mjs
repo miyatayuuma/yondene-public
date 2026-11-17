@@ -18,20 +18,18 @@ import {FOREST_CHARACTER_REGISTRY,FOREST_ROSTER_REVISION} from './forest-charact
 import {mountBookForest,getForestAvatar,setForestAvatar} from './book-forest.mjs?build=20261116-forest-cat-persona-v17';
 import {authorizeForestDrive,loadPrivateForestSprites} from './book-forest-drive.mjs?build=20261116-forest-drive-discovery-v18';
 import {saveCachedForestSprites,loadCachedForestSprites,clearCachedForestSprites} from './book-forest-cache.mjs?build=20261114-zukkoke-v1';
-import {loadPrivateForestDialogue} from './book-forest-private-dialogue.mjs?build=20261116-forest-cat-persona-v17';
-import {saveCachedForestDialogue,loadCachedForestDialogue,clearCachedForestDialogue} from './book-forest-dialogue-cache.mjs?build=20261116-forest-cat-persona-v17';
+import {loadPrivateForestDialogue} from './book-forest-private-dialogue.mjs?build=20261117-forest-dialogue-simplify-v18';
+import {saveCachedForestDialogue,loadCachedForestDialogue,clearCachedForestDialogue} from './book-forest-dialogue-cache.mjs?build=20261117-forest-dialogue-simplify-v18';
 import {createForestDialogueDirector} from './book-forest-dialogue-director.mjs?build=20261116-forest-cat-persona-v17';
 import {diagnoseForestCharacters} from './book-forest-character-profiles.mjs?build=20261116-forest-cat-persona-v17';
-import {createForestLiveDialogueDirector} from './book-forest-live-dialogue.mjs?build=20261116-forest-cat-persona-v17';
-import {createForestThoughtSession} from './book-forest-thought-seeds.mjs?build=20261114-zukkoke-v1';
-import {authorizeForestThoughtUsageWrite,syncForestThoughtUsage} from './book-forest-thought-sync.mjs?build=20261110-forest-ai-v6';
+import {createForestLiveDialogueDirector} from './book-forest-live-dialogue.mjs?build=20261117-forest-dialogue-simplify-v18';
 import {resetForestConversationHistoryOnce} from './book-forest-conversation-reset.mjs?build=20261110-forest-ai-v6';
 import {forestConversationLog} from './book-forest-conversation-log.mjs?build=20261110-forest-ai-v6';
 import {createForestAIGenerator} from './book-forest-ai-provider.mjs?build=20261110-forest-ai-v6';
 import {createForestCloudflareGenerator,verifyForestCloudflareRoster} from './book-forest-cloudflare-provider.mjs?build=20261116-forest-cat-persona-v17';
 import {STATUSES,ACTIVE_READ_FILTER,filteredBooks,readPeriodLabel,compactReadPeriodLabel,readingModeLabel,emptyStateMessage,seriesVolumeLabel,sortSeriesBooks} from './domain.mjs?build=20261115-series-order-v1';
 
-const APP_BUILD='20261116-forest-drive-discovery-v18';
+const APP_BUILD='20261117-forest-dialogue-simplify-v18';
 const $=id=>{const element=document.getElementById(id);if(!element)throw new Error('APP_DOM_MISMATCH: missing #'+id);return element};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const safeCover=url=>/^(https:\/\/|data:image\/(jpeg|png|webp);base64,)/i.test(String(url||''))?String(url):'';
@@ -800,7 +798,7 @@ function renderFamily(){
                 sessionLimit:3,maxReplies:2,
                 getBooks:()=>books,getCatalog:()=>forestDialogueCache?.catalog||[],
                 getCues:()=>forestDialogueCache?.cues||[],
-                getSeeds:()=>forestDialogueCache?.thoughtSeeds||[],
+
                 getRecentReflections,
                 getCharacterProfiles:()=>forestDialogueCache?.characterProfiles||[],
                 requireCharacterProfile:true,
@@ -842,23 +840,6 @@ function renderFamily(){
         finally{forestRefresh.disabled=false}
       };
       forestArea.append(forestLaunch,forestRefresh);root.append(forestArea);
-      const seedSync=document.createElement('button');seedSync.type='button';
-      seedSync.className='forestRefresh';seedSync.textContent='思考の種の利用回数を記録';
-      seedSync.onclick=async()=>{
-        if(role!=='owner'||!fid||closeForest)return;
-        seedSync.disabled=true;
-        try{
-          const session=createForestThoughtSession({storage:localStorage,
-            storageKey:'yondene-forest-ai-local-v2:'+user.uid+':'+fid+':thought'});
-          const events=session.events();
-          if(!events.length){notice('思考の種の新しい利用履歴はありません。');return}
-          const token=await authorizeForestThoughtUsageWrite({user,GoogleAuthProvider,reauthenticateWithPopup});
-          const result=await syncForestThoughtUsage({token,events});
-          notice('思考の種台帳の使用履歴を確認しました。新規 '+result.uploaded+
-            ' 件、記録済み '+result.skipped+' 件。');
-        }catch(error){statusError(error)}finally{seedSync.disabled=false}
-      };
-      root.append(seedSync);
       const forestLog=document.createElement('button');forestLog.type='button';
       forestLog.className='forestRefresh';forestLog.textContent='会話ログを保存';
       forestLog.onclick=()=>{

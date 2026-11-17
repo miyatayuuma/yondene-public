@@ -17,6 +17,13 @@ export function validForestWrittenGlyphs(value){
     /[ぁ-ゖ]|[一-龯]/u.test(value);
 }
 const FORBIDDEN_SPEECH=/[「」『』]|しゃべ|おしゃべり|話し|話す|話しかけ|言っ|言う|声を出|ささや|つぶや|よびかけ|呼びかけ/iu;
+// Describing an action must not smuggle an inner monologue into the narration.
+// These checks concern *speech* and *inner voice*, not which noun starts a sentence.
+const INNER_VOICE=/心の(?:中|声)|頭の中|胸の内|内心|ひそかに(?:思|考)|と(?:思った|思う|思い|考えた|考える)/iu;
+// Bare greetings are spoken utterances, even when written inside parentheses.
+// Do not classify a short *action* as speech just because it has no explicit cat subject.
+const BARE_GREETING=/^（(?:こんにちは|こんばんは|おはよう(?:ございます)?|ありがとう(?:ございます)?|さようなら|おやすみ(?:なさい)?|どうも|はい|いいえ|おーい|ごめん(?:なさい)?)[！!？?。、]*）$/u;
+const PARENTHETICAL_ACTION=/^（[^（）\n\r]+）$/u;
 
 export function validateForestGestureMark(raw){
   if(raw===null||raw===undefined)return null;
@@ -29,6 +36,7 @@ export function validateForestGestureMark(raw){
 export function validateForestGestureText(raw){
   if(typeof raw!=='string')return false;
   const text=raw.trim();
-  return text.length>=8&&text.length<=80&&/^（ねこ[はがのも、][^（）\n\r]+）$/u.test(text)&&
-    !FORBIDDEN_SPEECH.test(text)&&!/[{}<>]/u.test(text);
+  return text.length>=8&&text.length<=80&&PARENTHETICAL_ACTION.test(text)&&
+    !FORBIDDEN_SPEECH.test(text)&&!INNER_VOICE.test(text)&&!BARE_GREETING.test(text)&&
+    !/[{}<>]/u.test(text);
 }

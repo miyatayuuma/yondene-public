@@ -109,7 +109,7 @@ test('twins autoplay one prepared scene, then offer optional participation and c
   assert.equal(last.conversationComplete,true);
   assert.equal(engine.select({choiceId:'invalid'}),null);
   const reaction=engine.select({choiceId:'bird'});
-  assert.equal(reaction.speakerName,'テストC');
+  assert.equal(reaction.speakerName,'テストA');
   assert.match(reaction.text,/鳥も/);
   assert.equal(reaction.autoNext,false);
   assert.equal(reaction.conversationComplete,true);

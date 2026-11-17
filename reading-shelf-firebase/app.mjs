@@ -30,7 +30,7 @@ import {createForestAIGenerator} from './book-forest-ai-provider.mjs?build=20261
 import {createForestCloudflareGenerator,verifyForestCloudflareRoster} from './book-forest-cloudflare-provider.mjs?build=20261117-forest-profile-contract-v19';
 import {STATUSES,ACTIVE_READ_FILTER,filteredBooks,readPeriodLabel,compactReadPeriodLabel,readingModeLabel,emptyStateMessage,seriesVolumeLabel,sortSeriesBooks} from './domain.mjs?build=20261115-series-order-v1';
 
-const APP_BUILD='20261117-forest-profile-contract-v19';
+const APP_BUILD='20261117-forest-context-probe-v20';
 const $=id=>{const element=document.getElementById(id);if(!element)throw new Error('APP_DOM_MISMATCH: missing #'+id);return element};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const safeCover=url=>/^(https:\/\/|data:image\/(jpeg|png|webp);base64,)/i.test(String(url||''))?String(url):'';

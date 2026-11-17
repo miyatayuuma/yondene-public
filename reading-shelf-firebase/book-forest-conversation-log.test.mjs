@@ -16,3 +16,26 @@ test('diagnostic export is scoped to the owner and omits unapproved storage fiel
   assert.equal(log[0].elapsedMs,700);
   assert.doesNotMatch(JSON.stringify(log),/secret|do-not-export|private-owner|other private conversation/);
 });
+
+
+test('diagnostic export preserves failure-fallback causality and protocol, never exception text',()=>{
+  const source=[
+    {at:100,event:'generation-failed',characterId:'cat',mode:'opening',
+      reason:'model-json',protocolRevision:'forest-dialogue-v2',promptVersion:'forest-v18',
+      rawError:'API token=secret',responseBody:'PRIVATE'},
+    {at:101,event:'script-fallback',characterId:'cat',reason:'generation-unavailable',
+      protocolRevision:'forest-dialogue-v2'},
+    {at:102,event:'generation-failed',characterId:'cat',reason:'secret-private-user-comment',
+      protocolRevision:'secret with whitespace'},
+    {at:103,event:'generation-failed',characterId:'cat',reason:'worker-http-502'}
+  ];
+  const store={getItem:key=>key==='yondene-forest-ai-local-v2:owner:family:log'?JSON.stringify(source):null};
+  const exported=forestConversationLog({storage:store,uid:'owner',familyId:'family'});
+  assert.deepEqual(exported.map(item=>item.event),
+    ['generation-failed','script-fallback','generation-failed','generation-failed']);
+  assert.deepEqual(exported.map(item=>item.reason),
+    ['model-json','generation-unavailable',undefined,'worker-http-502']);
+  assert.equal(exported[0].protocolRevision,'forest-dialogue-v2');
+  assert.equal(exported[2].protocolRevision,undefined);
+  assert.doesNotMatch(JSON.stringify(exported),/secret|PRIVATE|API token|responseBody|rawError/u);
+});

@@ -153,6 +153,20 @@ function getPrevious(rows,id){
     turn:Number(row[26])||0};
 }
 
+// Retain the exact three generated lines per NPC used by production's
+// repetition check. Prior complete traces stay in prior result rows, avoiding
+// the Sheets cell limit without changing the next generated input.
+export function compactProbeStorage(storage){
+  const result={...storage},key='scenario:live:log';
+  const entries=JSON.parse(result[key]||'[]'),counts={};
+  result[key]=JSON.stringify(entries.slice().reverse().filter(e=>{
+    if(!['generated-opening','generated-reply'].includes(e.event))return false;
+    counts[e.characterId]=(counts[e.characterId]||0)+1;
+    return counts[e.characterId]<=3;
+  }).reverse());
+  return result;
+}
+
 /** GAS replaces only browser timeout/cancellation primitives. UrlFetch is
  * synchronous: discard responses taking >11s in the transport, matching the
  * browser's deadline; no claim that GAS can abort an in-flight network call.
@@ -221,7 +235,7 @@ export async function processQueue(){
         if(integrated){
           let prior=null;
           if(previousId){
-            const matches=results.filter(row=>row[0]===previousId&&row[17]==='PASS');
+            const matches=results.filter(row=>row[0]===previousId&&['PASS','FAIL'].includes(row[17])&&row[18]===mode);
             if(matches.length!==1)throw Error('PREVIOUS_RESULT_MISSING');
             try{prior=JSON.parse(matches[0][15]).conversation.storage}catch{throw Error('PREVIOUS_INPUT_INVALID')}
             if(!prior)throw Error('PREVIOUS_INPUT_INVALID');
@@ -247,7 +261,8 @@ export async function processQueue(){
             }});
           done+=2;
           const valid=conversation.trace.length>0&&conversation.trace.every(t=>t.validation==='accepted');
-          const compact={...conversation,trace:conversation.trace.map(({prompt,...rest})=>rest)};
+          const compact={...conversation,storage:compactProbeStorage(conversation.storage),
+            trace:conversation.trace.map(({prompt,...rest})=>rest)};
           const saved=JSON.stringify({...conversation.trace[0]?.input,conversation:compact});
           if(saved.length>48000)throw Error('TRACE_TOO_LARGE');
           out.appendRow([safeText(id),npc,npc,safeText(scene),safeText(utterance),

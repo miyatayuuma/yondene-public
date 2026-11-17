@@ -53,7 +53,10 @@ export async function runForestConversationScenario({visits=[],transport,
         entry.validation='accepted';return entry.validated;
       }catch(error){entry.validation='rejected';
         // Do not retain provider exception bodies or credentials in traces.
-        entry.failure='model-or-transport';throw error;}
+        entry.failure=/timeout/iu.test(String(error?.message||''))?'timeout':
+          /Invalid model JSON/u.test(String(error?.message||''))?'model-json':
+          /Invalid model|Invalid silent|Invalid closing/u.test(String(error?.message||''))?'output-validation':'model-or-transport';
+        throw error;}
     }});
   async function display(result,identity,visit,turn,visible=true){
     frames.push({visit,turn,characterId:identity.characterId,result,displayed:visible});

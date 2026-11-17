@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
-import {probeInput,probeConversation} from './ForestPersonaProbe.mjs';
+import {probeInput,probeConversation,compactProbeStorage} from './ForestPersonaProbe.mjs';
 import {FOREST_PROFILE_HEADERS} from '../reading-shelf-firebase/book-forest-character-profiles.mjs';
 const people=[FOREST_PROFILE_HEADERS,...[['人物像','架空の工作好きな相棒'],['口調','短く行動で表す'],
   ['禁止・注意','声を出さない'],['動機','友だちと道具をなおす'],['関係性','架空の親友']].map(([key,value])=>
@@ -16,7 +16,11 @@ test('GAS adapter runs the production encounter and reuses its persisted state f
   assert.equal(first.trace.length,3);
   assert.equal(first.trace[0].prompt.context.sourceKind,'meet');
   assert.equal(first.frames.at(-1).result.conversationComplete,true);
-  const second=await probeConversation(people,sources,'cat',{transport,storage:first.storage});
+  const second=await probeConversation(people,sources,'cat',{transport,storage:compactProbeStorage(first.storage)});
+  const uncompressed=await probeConversation(people,sources,'cat',{transport,storage:first.storage});
+  assert.equal(second.trace[0].inputFingerprint,uncompressed.trace[0].inputFingerprint);
+  assert.equal(second.trace[0].prompt.context.situation.place,'本の森');
+  assert.deepEqual(second.trace[0].prompt.context.situation.presentNpcIds,['cat']);
   assert.equal(second.trace[0].prompt.context.sourceKind,'ambient');
   assert.equal(second.progress.visits.cat,2);
 });

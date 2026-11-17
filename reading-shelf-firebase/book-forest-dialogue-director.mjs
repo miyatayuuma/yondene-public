@@ -50,7 +50,7 @@ export function validateForestDialogueCues(cues){
 }
 
 function emptyState(){return {version:1,visits:{},lastKinds:{},seen:[],seenMemories:[],seenReviews:[],
-  knownRead:[],freshRead:[],readInitialized:false,pendingRelay:null};}
+  knownRead:[],freshRead:[],readInitialized:false,pendingRelay:null,twinPairId:null};}
 function parseState(raw){
   try{
     const value=JSON.parse(raw);
@@ -68,7 +68,7 @@ function parseState(raw){
     const relay=value.pendingRelay;
     return {version:1,visits,lastKinds,seen:ids('seen'),seenMemories:ids('seenMemories'),
       seenReviews:ids('seenReviews'),knownRead:ids('knownRead'),freshRead:ids('freshRead'),
-      readInitialized:value.readInitialized===true,pendingRelay:
+      readInitialized:value.readInitialized===true,twinPairId:validId(value.twinPairId)?value.twinPairId:null,pendingRelay:
         CHARACTERS.has(relay?.to)&&CHARACTERS.has(relay?.from)?{from:relay.from,to:relay.to,
           memoryId:validId(relay.memoryId)?relay.memoryId:null}:null};
   }catch{return emptyState()}
@@ -100,7 +100,11 @@ export function createForestDialogueDirector({getBooks=()=>[],getCatalog=()=>[],
   storage=null,storageKey='forest-dialogue-local-v1',maxSpoilerLevel=2}={}){
   let state=parseState(storage?.getItem?.(storageKey)||null),active=null;
   const twins=createTwinConversationDirector({getBooks,getCatalog,
-    getNamePairs:getTwinNames,getScenes:getTwinScenes});
+    getNamePairs:getTwinNames,getScenes:getTwinScenes,
+    getPinnedPairId:()=>state.twinPairId,
+    setPinnedPairId:id=>{if(validId(id)&&state.twinPairId!==id){
+      state.twinPairId=id;persist();
+    }}});
   function persist(){
     try{storage?.setItem?.(storageKey,JSON.stringify(state))}catch{}
   }

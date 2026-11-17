@@ -59,7 +59,8 @@ export function validateTwinScenes(lines){
 }
 
 export function createTwinConversationDirector({getBooks=()=>[],getCatalog=()=>[],
-  getNamePairs=()=>[],getScenes=()=>[]}={}){
+  getNamePairs=()=>[],getScenes=()=>[],
+  getPinnedPairId=()=>null,setPinnedPairId=()=>{} }={}){
   let active=null;
   async function allowedScenes(){
     const books=await getBooks(),catalog=await getCatalog();
@@ -107,7 +108,13 @@ export function createTwinConversationDirector({getBooks=()=>[],getCatalog=()=>[
       if(!names.length||!introduction||scenes.length<2){active=null;return null}
       const scene=encounter===0?introduction:chooseEncounterScene(scenes,encounter);
       if(!scene){active=null;return null}
-      active={names:names[encounter%names.length],scenes,scene,offset:0,pendingChoices:[]};
+      // A pair is chosen once, then retained across encounters and reloads.
+      // The stored ID is accepted only while the private sheet still approves it.
+      let pinned=null;
+      try{pinned=getPinnedPairId()}catch{}
+      const pair=names.find(item=>item.id===pinned)||names[0];
+      if(pair.id!==pinned){try{setPinnedPairId(pair.id)}catch{}}
+      active={names:pair,scenes,scene,offset:0,pendingChoices:[]};
       return advanceLocal();
     },
     async advance(){

@@ -44,8 +44,59 @@ test('twins first appear as a group and each turn has its own name without quota
   for(const result of [a,b,c])assert.doesNotMatch(result.text,/[「」]/u);
   engine.end();
   const second=await engine.start({encounter:1});
-  assert.equal(second.speakerName,'テストC','subsequent visits open a different scene, not the introduction');
-  assert.equal((await engine.advance()).speakerName,'テストD');
+  assert.equal(second.speakerName,'テストA','revisits keep the first chosen name pair');
+  assert.equal((await engine.advance()).speakerName,'テストB');
+});
+
+test('twin names survive multiple encounters, reload, reorder, and reset in the family-scoped state',async()=>{
+  const values=new Map();
+  const storage={getItem:key=>values.get(key)||null,setItem:(key,v)=>values.set(key,v)};
+  const key='owner-and-family-test-only';
+  let available=[...names];
+  const make=()=>createForestDialogueDirector({getBooks:()=>[{id:'book-1',status:'read'}],
+    getCatalog:()=>[memory],getTwinNames:()=>available,
+    getTwinScenes:()=>validateTwinScenes(sceneLines),storage,storageKey:key});
+  let director=make();
+  await director.start({characterId:'twins'});
+  assert.equal((await director.advance({characterId:'twins'})).speakerName,'テストA');
+  assert.equal((await director.advance({characterId:'twins'})).speakerName,'テストB');
+  director.end();
+  const stored=JSON.parse(values.get(key));
+  assert.equal(stored.twinPairId,'pair-a');
+  // Editing the order of approved candidates must not rename the same twins.
+  available=[names[1],names[0]];
+  director=make();
+  for(let i=0;i<6;i++){
+    const line=await director.start({characterId:'twins'});
+    assert.ok(['テストA','テストB'].includes(line.speakerName),line.speakerName);
+    director.end();
+  }
+  assert.equal(JSON.parse(values.get(key)).twinPairId,'pair-a');
+  // A deliberately reset local encounter state may choose from the new order.
+  values.delete(key);
+  director=make();
+  await director.start({characterId:'twins'});
+  assert.equal((await director.advance({characterId:'twins'})).speakerName,'テストC');
+  assert.equal((await director.advance({characterId:'twins'})).speakerName,'テストD');
+  assert.equal(JSON.parse(values.get(key)).twinPairId,'pair-b');
+});
+
+test('unapproved or missing pinned pair fails safely to an approved name pair',async()=>{
+  let pinned='unsafe-pair';
+  const engine=createTwinConversationDirector({getNamePairs:()=>names,
+    getScenes:()=>validateTwinScenes(sceneLines),
+    getPinnedPairId:()=>pinned,setPinnedPairId:id=>{pinned=id}});
+  await engine.start({encounter:0});
+  assert.equal(pinned,'pair-a');
+  assert.equal((await engine.advance()).speakerName,'テストA');
+  engine.end();
+  pinned='pair-a';
+  const reduced=createTwinConversationDirector({getNamePairs:()=>[names[1]],
+    getScenes:()=>validateTwinScenes(sceneLines),
+    getPinnedPairId:()=>pinned,setPinnedPairId:id=>{pinned=id}});
+  await reduced.start({encounter:0});
+  assert.equal(pinned,'pair-b');
+  assert.equal((await reduced.advance()).speakerName,'テストC');
 });
 
 test('twins autoplay one prepared scene, then offer optional participation and close',async()=>{
@@ -58,7 +109,7 @@ test('twins autoplay one prepared scene, then offer optional participation and c
   assert.equal(last.conversationComplete,true);
   assert.equal(engine.select({choiceId:'invalid'}),null);
   const reaction=engine.select({choiceId:'bird'});
-  assert.equal(reaction.speakerName,'テストC');
+  assert.equal(reaction.speakerName,'テストA');
   assert.match(reaction.text,/鳥も/);
   assert.equal(reaction.autoNext,false);
   assert.equal(reaction.conversationComplete,true);

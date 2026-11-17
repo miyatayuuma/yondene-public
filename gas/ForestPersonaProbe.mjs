@@ -163,7 +163,7 @@ export function compactProbeStorage(storage){
     if(!['generated-opening','generated-reply'].includes(e.event))return false;
     counts[e.characterId]=(counts[e.characterId]||0)+1;
     return counts[e.characterId]<=3;
-  }).reverse());
+  }).reverse().filter(e=>typeof e.text==='string').map(({event,characterId,text})=>({event,characterId,text})));
   return result;
 }
 
@@ -263,7 +263,7 @@ export async function processQueue(){
           const valid=conversation.trace.length>0&&conversation.trace.every(t=>t.validation==='accepted');
           const compact={...conversation,storage:compactProbeStorage(conversation.storage),
             trace:conversation.trace.map(({prompt,...rest})=>rest)};
-          const saved=JSON.stringify({...conversation.trace[0]?.input,conversation:compact});
+          const saved=JSON.stringify({conversation:compact});
           if(saved.length>48000)throw Error('TRACE_TOO_LARGE');
           out.appendRow([safeText(id),npc,npc,safeText(scene),safeText(utterance),
             safeText(JSON.stringify(conversation.frames.map(f=>f.result))),MODEL,

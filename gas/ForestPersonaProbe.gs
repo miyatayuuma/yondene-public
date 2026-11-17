@@ -949,6 +949,8 @@ var ForestPersonaProbe = (() => {
             memoryId: option.memory?.id || null
           };
           persist();
+          active.choices = [];
+          return { text: normalizeText(choice.text), choices: [], conversationComplete: true };
         }
         const response = normalizeText(choice.text);
         if (response) {
@@ -1655,7 +1657,7 @@ var ForestPersonaProbe = (() => {
       closing,
       // Different situations demand different reactions. Do not make an
       // incidental physical gesture the only answer to a reader's reflection.
-      task: closing ? "\u3053\u306E\u5834\u306E\u3084\u308A\u53D6\u308A\u3092\u81EA\u7136\u306B\u7D42\u3048\u308B\u3002\u4F59\u97FB\u3084\u9759\u304B\u306A\u9593\u3067\u3082\u3088\u3044" : mode === "reply" ? "\u76F8\u624B\u304C\u9078\u3093\u3060\u3053\u3068\u3068\u76F4\u524D\u306E\u884C\u52D5\u3092\u8E0F\u307E\u3048\u3001\u540C\u3058\u5408\u56F3\u306E\u7E70\u308A\u8FD4\u3057\u3067\u306F\u306A\u3044\u6B21\u306E\u53CD\u5FDC\u3092\u3059\u308B" : reviewSpotlight ? "readerReflection\u306E\u5177\u4F53\u7684\u306A\u5185\u5BB9\u3092\u53D7\u3051\u6B62\u3081\u3001\u305D\u306E\u7740\u773C\u70B9\u306B\u4EBA\u7269\u8A2D\u5B9A\u3089\u3057\u304F\u7121\u8A00\u3067\u53CD\u5FDC\u3059\u308B\u3002\u5225\u4F5C\u54C1\u306A\u3089\u7B2C\u4E09\u8005\u3068\u3057\u3066\u63A5\u3059\u308B" : sourceKind === "story" ? "\u78BA\u8A8D\u6E08\u307F\u306E\u65E2\u8AAD\u306E\u51FA\u6765\u4E8B\u3092\u8E0F\u307E\u3048\u3001\u4EBA\u7269\u8A2D\u5B9A\u306B\u5408\u3046\u81EA\u7136\u306A\u53CD\u5FDC\u3092\u3059\u308B\u3002\u539F\u4F5C\u306B\u306A\u3044\u4E8B\u5B9F\u3092\u4F5C\u3089\u306A\u3044" : sourceKind === "relay" ? "\u524D\u306E\u4EBA\u7269\u304B\u3089\u306E\u8A71\u984C\u306B\u672C\u4EBA\u3089\u3057\u304F\u53CD\u5FDC\u3059\u308B\u3002\u76F4\u63A5\u805E\u3044\u305F\u3075\u308A\u3092\u3057\u306A\u3044" : sourceKind === "meet" ? "\u521D\u5BFE\u9762\u306E\u76F8\u624B\u306B\u3001\u4EBA\u7269\u8A2D\u5B9A\u306B\u5408\u3046\u7121\u8A00\u306E\u521D\u3081\u306E\u53CD\u5FDC\u3092\u3059\u308B" : "\u3053\u306E\u5834\u9762\u306E\u610F\u5473\u3068\u4EBA\u7269\u8A2D\u5B9A\u306B\u5408\u3046\u81EA\u7136\u306A\u53CD\u5FDC\u3092\u3059\u308B",
+      task: closing ? "\u3053\u306E\u5834\u306E\u3084\u308A\u53D6\u308A\u3092\u81EA\u7136\u306B\u7D42\u3048\u308B\u3002\u4F59\u97FB\u3084\u9759\u304B\u306A\u9593\u3067\u3082\u3088\u3044" : mode === "reply" ? "\u76F8\u624B\u304C\u9078\u3093\u3060\u3053\u3068\u3068\u76F4\u524D\u306E\u884C\u52D5\u3092\u8E0F\u307E\u3048\u3001\u540C\u3058\u5408\u56F3\u306E\u7E70\u308A\u8FD4\u3057\u3067\u306F\u306A\u3044\u6B21\u306E\u53CD\u5FDC\u3092\u3059\u308B" : reviewSpotlight ? "readerReflection\u306E\u5177\u4F53\u7684\u306A\u5185\u5BB9\u3092\u53D7\u3051\u6B62\u3081\u3001\u305D\u306E\u7740\u773C\u70B9\u306B\u4EBA\u7269\u8A2D\u5B9A\u3089\u3057\u304F\u7121\u8A00\u3067\u53CD\u5FDC\u3059\u308B\u3002\u5225\u4F5C\u54C1\u306A\u3089\u7B2C\u4E09\u8005\u3068\u3057\u3066\u63A5\u3059\u308B" : sourceKind === "story" ? "\u78BA\u8A8D\u6E08\u307F\u306E\u65E2\u8AAD\u306E\u51FA\u6765\u4E8B\u306F\u904E\u53BB\u306E\u8A18\u61B6\u3068\u3057\u3066\u53D7\u3051\u6B62\u3081\u3001\u4ECA\u306E\u68EE\u3067\u518D\u6F14\u305B\u305A\u3001\u4EBA\u7269\u8A2D\u5B9A\u306B\u5408\u3046\u81EA\u7136\u306A\u53CD\u5FDC\u3092\u3059\u308B" : sourceKind === "relay" ? "\u524D\u306E\u4EBA\u7269\u304B\u3089\u306E\u8A71\u984C\u306B\u672C\u4EBA\u3089\u3057\u304F\u53CD\u5FDC\u3059\u308B\u3002\u76F4\u63A5\u805E\u3044\u305F\u3075\u308A\u3092\u3057\u306A\u3044" : sourceKind === "meet" ? "\u521D\u5BFE\u9762\u306E\u76F8\u624B\u306B\u3001\u4EBA\u7269\u8A2D\u5B9A\u306B\u5408\u3046\u7121\u8A00\u306E\u521D\u3081\u306E\u53CD\u5FDC\u3092\u3059\u308B" : "\u3053\u306E\u5834\u9762\u306E\u610F\u5473\u3068\u4EBA\u7269\u8A2D\u5B9A\u306B\u5408\u3046\u81EA\u7136\u306A\u53CD\u5FDC\u3092\u3059\u308B",
       npc,
       context,
       constraints: [
@@ -1680,7 +1682,7 @@ var ForestPersonaProbe = (() => {
     };
     const firstLineTask = {
       meet: "\u3053\u306E\u76F8\u624B\u3068\u306F\u521D\u5BFE\u9762\u3002\u4EE5\u524D\u8A71\u3057\u305F\u3075\u308A\u3092\u305B\u305A\u3001\u30AD\u30E3\u30E9\u81EA\u8EAB\u306E\u95A2\u5FC3\u304B\u3089\u81EA\u7136\u306A\u7B2C\u4E00\u58F0\u3068\u8FD4\u7B54\u5019\u88DC2\u3064\u3092\u4F5C\u308B",
-      story: "\u3053\u306E\u30AD\u30E3\u30E9\u304C\u95A2\u308F\u308B\u65E2\u8AAD\u4F5C\u54C1\u306E\u78BA\u8A8D\u6E08\u307F\u306E\u5834\u9762\u3092\u8E0F\u307E\u3048\u3001\u672C\u4EBA\u3089\u3057\u3044\u7B2C\u4E00\u58F0\u3068\u8FD4\u7B54\u5019\u88DC2\u3064\u3092\u4F5C\u308B",
+      story: "\u3053\u306E\u30AD\u30E3\u30E9\u304C\u95A2\u308F\u308B\u78BA\u8A8D\u6E08\u307F\u306E\u7269\u8A9E\u3092\u904E\u53BB\u306E\u8A18\u61B6\u3068\u3057\u3066\u632F\u308A\u8FD4\u308A\u3001\u672C\u4EBA\u3089\u3057\u3044\u7B2C\u4E00\u58F0\u3068\u8FD4\u7B54\u5019\u88DC2\u3064\u3092\u4F5C\u308B\u3002\u4ECA\u306E\u68EE\u3067\u539F\u4F5C\u306E\u5834\u9762\u304C\u9032\u884C\u4E2D\u3067\u3042\u308B\u3088\u3046\u306B\u518D\u6F14\u3057\u306A\u3044",
       reflection: "\u53F0\u5E33\u304C\u793A\u3059\u8AAD\u66F8\u611F\u60F3\u3092\u53D6\u308A\u4E0A\u3052\u3001\u539F\u6587\u3068\u4FDD\u8B77\u8005\u306E\u8981\u7D04\u3092\u533A\u5225\u3057\u306A\u304C\u3089\u672C\u4EBA\u3089\u3057\u304F\u53CD\u5FDC\u3059\u308B",
       relay: "\u524D\u306E\u30AD\u30E3\u30E9\u304B\u3089\u306E\u8A71\u984C\u306E\u5F15\u304D\u7D99\u304E\u3002\u4F1A\u8A71\u3092\u76F4\u63A5\u805E\u3044\u305F\u3075\u308A\u3092\u305B\u305A\u3001\u81EA\u7136\u306A\u7B2C\u4E00\u58F0\u3068\u8FD4\u7B54\u5019\u88DC2\u3064\u3092\u4F5C\u308B",
       ambient: "\u30AD\u30E3\u30E9\u56FA\u6709\u306E\u95A2\u5FC3\u3084\u68EE\u306E\u8EAB\u8FD1\u306A\u51FA\u6765\u4E8B\u304B\u3089\u3001\u6BCE\u56DE\u7570\u306A\u308B\u7B2C\u4E00\u58F0\u3068\u8FD4\u7B54\u5019\u88DC2\u3064\u3092\u4F5C\u308B"
@@ -2066,7 +2068,7 @@ var ForestPersonaProbe = (() => {
             sourceKind: current.sourceKind,
             promptVersion: PROMPT_VERSION
           });
-          return scripted(authored, characterId);
+          return authored?.text ? scripted(authored, characterId) : { text: safeEnd(characterId), choices: [], conversationComplete: true };
         }
         record({
           event: "generated-reply",
@@ -2297,7 +2299,8 @@ var ForestPersonaProbe = (() => {
       createForestDialogueDirector,
       createForestLiveDialogueDirector,
       forestGenerationInput,
-      readCompletion
+      readCompletion,
+      validateLiveForestOutput
     },
     onStep = () => {
     }
@@ -2352,7 +2355,14 @@ var ForestPersonaProbe = (() => {
             closing: prompt.closing,
             context: prompt.context
           });
-          entry.validation = "accepted";
+          entry.workerValidation = "accepted";
+          entry.validation = implementation.validateLiveForestOutput(entry.validated, {
+            characterId: prompt.npc.id,
+            requireLine: prompt.mode !== "choices",
+            closing: prompt.closing,
+            context: prompt.context
+          }) ? "accepted" : "rejected";
+          if (entry.validation === "rejected") entry.failure = "output-validation";
           return entry.validated;
         } catch (error) {
           entry.validation = "rejected";
@@ -2597,7 +2607,7 @@ var ForestPersonaProbe = (() => {
       if (!["generated-opening", "generated-reply"].includes(e.event)) return false;
       counts[e.characterId] = (counts[e.characterId] || 0) + 1;
       return counts[e.characterId] <= 3;
-    }).reverse());
+    }).reverse().filter((e) => typeof e.text === "string").map(({ event, characterId, text }) => ({ event, characterId, text })));
     return result;
   }
   async function probeConversation(personRows, sourceRows, characterId, {
@@ -2727,7 +2737,7 @@ var ForestPersonaProbe = (() => {
               storage: compactProbeStorage(conversation.storage),
               trace: conversation.trace.map(({ prompt, ...rest }) => rest)
             };
-            const saved = JSON.stringify({ ...conversation.trace[0]?.input, conversation: compact });
+            const saved = JSON.stringify({ conversation: compact });
             if (saved.length > 48e3) throw Error("TRACE_TOO_LARGE");
             out.appendRow([
               safeText(id),

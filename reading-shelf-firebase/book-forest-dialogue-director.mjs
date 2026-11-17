@@ -318,6 +318,9 @@ export function createForestDialogueDirector({getBooks=()=>[],getCatalog=()=>[],
       if(choice.relayTo&&choice.relayTo!==characterId){
         state.pendingRelay={from:characterId,to:choice.relayTo,
           memoryId:option.memory?.id||null};persist();
+        active.choices=[];
+        // A hand-off is a control transition, not another displayed topic.
+        return {text:normalizeText(choice.text),choices:[],conversationComplete:true};
       }
       const response=normalizeText(choice.text);
       if(response){active.choices=[];return {text:response,choices:[]}}

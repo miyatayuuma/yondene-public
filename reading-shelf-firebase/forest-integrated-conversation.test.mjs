@@ -139,3 +139,12 @@ test('unidentified forest fruit is guarded even when the model omits the word un
     {...context,recentTurns:[{npc:opening.text}]}),true);
   assert.equal(unsafeForestForaging({text:'森で持ってきたパンを食べよう。',choices:['いっしょに食べる','とっておく']},context),false);
 });
+
+
+test('a model-format success rejected by the real browser validator is not a pipeline PASS',async()=>{
+  const run=await runForestConversationScenario({...defaults,visits:[{characterId:'kiki'}],
+    transport:async()=>({response:JSON.stringify({text:'キキはここにいるよ。',choices:['見ている','手をふる']})})});
+  assert.equal(run.trace[0].workerValidation,'accepted');
+  assert.equal(run.trace[0].validation,'rejected');
+  assert.doesNotMatch(run.frames[0].result.text,/キキは/);
+});

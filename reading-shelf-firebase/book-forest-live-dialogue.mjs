@@ -113,7 +113,7 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
     task:closing?'この場のやり取りを自然に終える。余韻や静かな間でもよい':
       mode==='reply'?'相手が選んだことと直前の行動を踏まえ、同じ合図の繰り返しではない次の反応をする':
       reviewSpotlight?'readerReflectionの具体的な内容を受け止め、その着眼点に人物設定らしく無言で反応する。別作品なら第三者として接する':
-      sourceKind==='story'?'確認済みの既読の出来事を踏まえ、人物設定に合う自然な反応をする。原作にない事実を作らない':
+      sourceKind==='story'?'確認済みの既読の出来事は過去の記憶として受け止め、今の森で再演せず、人物設定に合う自然な反応をする':
       sourceKind==='relay'?'前の人物からの話題に本人らしく反応する。直接聞いたふりをしない':
       sourceKind==='meet'?'初対面の相手に、人物設定に合う無言の初めの反応をする':
       'この場面の意味と人物設定に合う自然な反応をする',
@@ -139,7 +139,7 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
   };
   const firstLineTask={
     meet:'この相手とは初対面。以前話したふりをせず、キャラ自身の関心から自然な第一声と返答候補2つを作る',
-    story:'このキャラが関わる既読作品の確認済みの場面を踏まえ、本人らしい第一声と返答候補2つを作る',
+    story:'このキャラが関わる確認済みの物語を過去の記憶として振り返り、本人らしい第一声と返答候補2つを作る。今の森で原作の場面が進行中であるように再演しない',
     reflection:'台帳が示す読書感想を取り上げ、原文と保護者の要約を区別しながら本人らしく反応する',
     relay:'前のキャラからの話題の引き継ぎ。会話を直接聞いたふりをせず、自然な第一声と返答候補2つを作る',
     ambient:'キャラ固有の関心や森の身近な出来事から、毎回異なる第一声と返答候補2つを作る'
@@ -420,7 +420,8 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
       if(!generated){
         record({event:'script-fallback',characterId,reason:'relay-generation-unavailable',
           sourceKind:current.sourceKind,promptVersion:PROMPT_VERSION});
-        return scripted(authored,characterId);
+        return authored?.text?scripted(authored,characterId):
+          {text:safeEnd(characterId),choices:[],conversationComplete:true};
       }
       record({event:'generated-reply',characterId,
         ...(current.sourceKind==='reflection'?{}:{text:generated.text}),

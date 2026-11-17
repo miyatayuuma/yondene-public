@@ -2,7 +2,7 @@
 // clock, storage, source readers and network transport are replaced. Full traces
 // may contain PRIVATE inputs: callers must not log or publish them by default.
 import {createForestDialogueDirector} from '../reading-shelf-firebase/book-forest-dialogue-director.mjs';
-import {createForestLiveDialogueDirector,FOREST_PROMPT_VERSION}
+import {createForestLiveDialogueDirector,validateLiveForestOutput,FOREST_PROMPT_VERSION}
   from '../reading-shelf-firebase/book-forest-live-dialogue.mjs';
 import {FOREST_DIALOGUE_PROTOCOL,FOREST_ROSTER_REVISION}
   from '../reading-shelf-firebase/forest-character-registry.mjs';
@@ -26,7 +26,7 @@ export async function runForestConversationScenario({visits=[],transport,
   getCharacterProfiles=()=>[],getTwinNames=()=>[],getTwinScenes=()=>[],
   dailyLimit=300,requestTimeoutMs=11000,runtime={},
   implementation={createForestDialogueDirector,createForestLiveDialogueDirector,
-    forestGenerationInput,readCompletion},onStep=()=>{}}={}){
+    forestGenerationInput,readCompletion,validateLiveForestOutput},onStep=()=>{}}={}){
   if(typeof transport!=='function')throw Error('A model transport is required');
   const trace=[],frames=[];
   const versions={protocolRevision:FOREST_DIALOGUE_PROTOCOL,registryRevision:FOREST_ROSTER_REVISION,
@@ -50,7 +50,11 @@ export async function runForestConversationScenario({visits=[],transport,
         entry.raw=await transport(input,{prompt,signal,index:trace.length-1});
         entry.validated=implementation.readCompletion(entry.raw,{characterId:prompt.npc.id,
           mode:prompt.mode,closing:prompt.closing,context:prompt.context});
-        entry.validation='accepted';return entry.validated;
+        entry.workerValidation='accepted';
+        entry.validation=implementation.validateLiveForestOutput(entry.validated,{characterId:prompt.npc.id,
+          requireLine:prompt.mode!=='choices',closing:prompt.closing,context:prompt.context})?'accepted':'rejected';
+        if(entry.validation==='rejected')entry.failure='output-validation';
+        return entry.validated;
       }catch(error){entry.validation='rejected';
         // Do not retain provider exception bodies or credentials in traces.
         entry.failure=/timeout/iu.test(String(error?.message||''))?'timeout':

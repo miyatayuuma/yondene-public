@@ -7,7 +7,7 @@ const SAFE_REASONS=new Set(['model-json','output-validation','response-json',
   'request-error','missing-character-profile','generation-unavailable',
   'relay-generation-unavailable']);
 const safeReason=value=>typeof value==='string'&&
-  (SAFE_REASONS.has(value)||/^worker-http-(?:4\\d{2}|5\\d{2})$/u.test(value));
+  (SAFE_REASONS.has(value)||/^worker-http-(?:4\d{2}|5\d{2})$/u.test(value));
 
 export function forestConversationLog({storage,uid,familyId}={}){
   if(!storage||!uid||!familyId)return [];

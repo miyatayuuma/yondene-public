@@ -20,13 +20,18 @@ export function createForestCloudflareGenerator({workerUrl,getIdToken,
       body:JSON.stringify({prompt}),cache:'no-store',signal
     });
     if(!response.ok){
-      let reason='';
-      try{reason=(await response.json())?.error||''}catch{}
+      let reason='',code='';
+      try{const failure=await response.json();reason=failure?.error||'';
+        code=failure?.code||''}catch{}
       if(response.status===429&&reason==='AI quota reached')
         throw Error('Forest AI daily quota reached');
+      // Ignore anything except a small fixed set of worker diagnostic codes.
+      if(response.status===502&&['model-json','output-validation'].includes(code))
+        throw Error('Forest AI diagnostic '+code);
       throw Error('Forest AI unavailable ('+response.status+')');
     }
-    const value=await response.json();
+    let value;
+    try{value=await response.json()}catch{throw Error('Invalid Forest AI JSON')}
     if(!value||!Array.isArray(value.choices)||JSON.stringify(value).length>3000)
       throw Error('Invalid Forest AI response');
     return value;

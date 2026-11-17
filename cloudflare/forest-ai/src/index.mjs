@@ -89,7 +89,8 @@ function readCompletion(result,{closing=false,mode='reply',characterId=''}={}){
   let content=result?.choices?.[0]?.message?.content??result?.response;
   if(typeof content!=='string'||content.length>3000)throw Error('Invalid model output');
   content=content.trim().replace(/^```(?:json)?\s*/iu,'').replace(/\s*```$/u,'');
-  const parsed=JSON.parse(content);
+  let parsed;
+  try{parsed=JSON.parse(content)}catch{throw Error('Invalid model JSON')}
   const silent=ACTION_WRITING_IDS.has(characterId);
   const mark=silent?validateForestGestureMark(parsed?.mark):null;
   if(silent&&(!validateForestGestureText(parsed?.text)||mark===undefined))
@@ -175,8 +176,12 @@ export async function handleRequest(request,env,{verifyToken=verifyOwnerIdToken}
     const message=String(error?.message||'');
     const depleted=/3036|daily free allocation|quota|used up|neurons.*exceed/iu.test(message);
     const temporary=error?.status===429||/rate limit|capacity temporarily|out of capacity/iu.test(message);
-    return json({error:depleted?'AI quota reached':temporary?'AI temporarily busy':'AI unavailable'},
-      depleted||temporary?429:502,origin);
+    // Only fixed diagnostic categories cross the trust boundary; never expose
+    // raw model output, prompts, exceptions, user data or authentication tokens.
+    const code=message==='Invalid model JSON'?'model-json':
+      /^(?:Invalid (?:model|silent|closing)|Opening line required)/u.test(message)?'output-validation':null;
+    return json({error:depleted?'AI quota reached':temporary?'AI temporarily busy':'AI unavailable',
+      ...(!depleted&&!temporary&&code?{code}:{})},depleted||temporary?429:502,origin);
   }
 }
 

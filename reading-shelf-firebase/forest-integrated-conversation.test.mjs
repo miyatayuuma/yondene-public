@@ -124,7 +124,7 @@ test('foraging guard distinguishes unidentified plants, refusals and ordinary kn
     assert.throws(()=>readCompletion({response:JSON.stringify({text:'見つけたよ。',choices:[line,'見ている']})},
       {characterId:'king',mode:'opening',context}),/unsafe-foraging/);
   }
-  for(const line of ['食べないで観察しよう','食べていいかわからない','持ってきたパンを食べよう'])
+  for(const line of ['食べないで観察しよう','食べていいかわからない','むやみに食べるのは危ないよ','持ってきたパンを食べよう'])
     assert.equal(unsafeForestForaging({text:line,choices:['見ている','先へ進む']},context),false,line);
   assert.equal(unsafeForestForaging({text:'焼いたパンがおいしいよ。',choices:['食べよう','とっておく']}),false);
 });

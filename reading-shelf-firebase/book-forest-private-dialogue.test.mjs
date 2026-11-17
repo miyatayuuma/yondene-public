@@ -53,7 +53,7 @@ test('Drive lookup and Google Sheets batchGet are owner-authorized, bounded, and
     calls.push({url,options});
     const data=calls.length===1?{files:[{name:'よんでね｜本の森 キャラクター設定・セリフ台帳',
       mimeType:'application/vnd.google-apps.spreadsheet',id:'x'.repeat(40)}]}:
-      {valueRanges:[{values:fact},{values},{values:twinNames},{values:twinTalk},{values:seeds},
+      {valueRanges:[{values:fact},{values},{values:twinNames},{values:twinTalk},
         {values:characters},{values:speech}]};
     return {ok:true,text:async()=>JSON.stringify(data)};
   };
@@ -62,7 +62,7 @@ test('Drive lookup and Google Sheets batchGet are owner-authorized, bounded, and
   assert.equal(result.cues.length,2);
   assert.equal(result.twinNames.length,1);
   assert.equal(result.twinScenes.length,2);
-  assert.equal(result.thoughtSeeds.length,1);
+  assert.deepEqual(result.thoughtSeeds,[]);
   assert.equal(result.characterProfiles[0].firstPerson,'ぼく');
   assert.match(calls[0].url,/drive\/v3\/files/);
   assert.match(calls[1].url,/sheets\.googleapis\.com\/v4\/spreadsheets/);
@@ -106,7 +106,7 @@ test('zero authored cues and absent twin scenes still load reviewed personalitie
       name:'よんでね｜本の森 キャラクター設定・セリフ台帳',
       mimeType:'application/vnd.google-apps.spreadsheet',id:'f'.repeat(40)}]}:
       {valueRanges:[{values:[]},{values:[headers]},{values:[]},{values:[]},
-        {values:[]},{values:characters},{values:speech}]})})});
+        {values:characters},{values:speech}]})})});
   assert.deepEqual(loaded.cues,[]);
   assert.equal(loaded.characterProfiles[0].id,'jiji');
   const entries=new Map();

@@ -465,7 +465,8 @@ test('all authored stages become newly generated openings while retaining their 
     assert.equal(calls.at(-1)?.context.readerReflection,undefined,
       'a fresh unrelated review must not displace this scene');
     assert.ok(calls.at(-1).task.includes(kind==='meet'?'初対面':
-      kind==='story'?'既読作品':kind==='relay'?'引き継ぎ':'読書感想'));
+      kind==='story'?'確認済み':kind==='relay'?'引き継ぎ':'読書感想'));
+    if(kind==='story')assert.match(calls.at(-1).task,/過去の記憶/);
     director.onDisplayed(result,{characterId:'kiki'});director.end();
   }
   assert.equal(calls.length,4);

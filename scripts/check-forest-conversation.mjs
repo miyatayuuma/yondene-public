@@ -66,6 +66,7 @@ const visits=data.visits||[...ids.map(characterId=>({characterId,choices:[]})),
 const result=await runForestConversationScenario({visits,transport,storage:scenarioStorage(data.storage),
   now:()=>data.clock,getBooks:()=>data.books,getCatalog:()=>data.catalog||[],getCues:()=>data.cues||[],
   getCharacterProfiles:()=>data.characterProfiles,getRecentReflections:async()=>data.reflections||[],
+  getReflections:async bookId=>(data.reflections||[]).filter(r=>r.bookId===bookId),
   implementation:{...base,...live,...worker,versions}});
 const storyReplies=result.trace.filter(t=>t.prompt.mode==='reply'&&t.prompt.context.sourceKind==='story');
 const reviewReplies=result.trace.filter(t=>t.prompt.mode==='reply'&&t.prompt.context.readerReflection);

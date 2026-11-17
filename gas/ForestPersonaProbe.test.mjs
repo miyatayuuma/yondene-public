@@ -170,3 +170,11 @@ test('continuation reuses the same prompt builder, checks offered choices and re
     {mode:'continuation',mirror:{...mirror,books:[{id:'fake-read',status:'unread'}]},
       previous,previousId:'fixture-previous',choice:'いっしょに行く',now}),/READ_REVOKED/);
 });
+
+
+test('compressed replay keeps the same last visible lines when recent review logs have no reader text',()=>{
+  const entries=['前の一言','次の一言','その次の一言'].map(text=>({event:'generated-reply',characterId:'cat',text,at:1}));
+  entries.push({event:'generated-opening',characterId:'cat',readerContext:true});
+  const compact=compactProbeStorage({'scenario:live:log':JSON.stringify(entries)});
+  assert.deepEqual(JSON.parse(compact['scenario:live:log']).map(e=>e.text),['前の一言','次の一言','その次の一言']);
+});

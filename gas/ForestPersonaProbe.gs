@@ -2604,7 +2604,7 @@ var ForestPersonaProbe = (() => {
     const result = { ...storage }, key = "scenario:live:log";
     const entries = JSON.parse(result[key] || "[]"), counts = {};
     result[key] = JSON.stringify(entries.slice().reverse().filter((e) => {
-      if (!["generated-opening", "generated-reply"].includes(e.event)) return false;
+      if (!["generated-opening", "generated-reply"].includes(e.event) || typeof e.text !== "string") return false;
       counts[e.characterId] = (counts[e.characterId] || 0) + 1;
       return counts[e.characterId] <= 3;
     }).reverse().filter((e) => typeof e.text === "string").map(({ event, characterId, text }) => ({ event, characterId, text })));
@@ -2631,6 +2631,7 @@ var ForestPersonaProbe = (() => {
       getCues: () => cues,
       getCharacterProfiles: () => profiles,
       getRecentReflections: async () => snapshot.reflections || [],
+      getReflections: async (bookId) => (snapshot.reflections || []).filter((r) => r.bookId === bookId),
       runtime: {
         createAbortController: () => ({ signal: { aborted: false }, abort() {
           this.signal.aborted = true;

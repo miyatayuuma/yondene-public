@@ -8,12 +8,13 @@ const knownFood=/(?:パン|ぱん|おにぎり|弁当|べんとう|サンドイ�
 export function unsafeForestForaging(output,context={}){
   const background=JSON.stringify({situation:context.situation,topic:context.topic,
     scene:context.today?.scene,recentTurns:context.recentTurns,chosenLabel:context.chosenLabel});
-  const subject=background+' '+String(output?.text||'');
+  const utterances=Array.isArray(output?.turns)?output.turns.map(turn=>turn?.text):[];
+  const subject=background+' '+[output?.text,...utterances].join(' ');
   // A wild plant is unverified by default. The model need not say
   // 'unknown' for its invented fruit to be unsafe to taste.
   const wild=/(?:本の森|森の|林|野生|道ばた|拾|ひろ|生え|なっている)/u;
   const riskyBackground=plant.test(subject)&&(unknown.test(subject)||wild.test(subject));
-  const lines=[output?.text,output?.mark?.word,...(Array.isArray(output?.choices)?
+  const lines=[output?.text,...utterances,output?.mark?.word,...(Array.isArray(output?.choices)?
     output.choices.map(x=>typeof x==='string'?x:x?.label):[])];
   return lines.some(line=>typeof line==='string'&&line.split(/[。！!\n]/u).some(clause=>{
     if(!consumption.test(clause)||refusal.test(clause))return false;

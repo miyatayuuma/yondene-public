@@ -1,6 +1,6 @@
 import {FOREST_CHARACTER_IDS,FOREST_SELF_NAMES,FOREST_AI_GENERATION_IDS,FOREST_RELATIONS,forestMemoryBelongsToCharacter} from './forest-character-registry.mjs';
 import {unlockedStoryMemories} from './book-forest-story-memory.mjs';
-import {createTwinConversationDirector} from './book-forest-twins.mjs';
+import {createTwinConversationDirector,validateTwinNamePairs} from './book-forest-twins.mjs';
 
 // The conversation director is intentionally independent of Firebase, Sheets,
 // Google Drive and Three.js. Real dialogue and story facts are PRIVATE inputs.
@@ -155,7 +155,7 @@ export function createForestDialogueDirector({getBooks=()=>[],getCatalog=()=>[],
             '（ねこは前足で地面をちょんとたたいた。）':'（森の風に、そっと耳をすませている。）'),
           choices:[{id:'another-topic',label:'ほかの話も聞く'},...(relay?[relay]:[])]};
         options.push({cue,memory,index:options.length,score,
-          situation:{place:'本の森',presentNpcIds:[characterId],
+          situation:{place:'本の森',presentNpcIds:characterId==='twins'?['twins','twins_second']:[characterId],
             firstEncounter:visit===0,visitNumber:visit+1,
             focus:kind==='ambient'?(visit%2?'character':'forest'):kind,
             ...(kind==='relay'?{fromNpc:state.pendingRelay.from}:{}),
@@ -293,7 +293,7 @@ export function createForestDialogueDirector({getBooks=()=>[],getCatalog=()=>[],
     async start({characterId,preferredMemoryId='',generation=false}={}){
       if(!CHARACTERS.has(characterId))return {text:'また、森で会おうね。',choices:[]};
       active=null;
-      if(characterId==='twins'){
+      if(characterId==='twins'&&!generation){
         const result=await twins.start({encounter:state.visits.twins||0});
         if(result){state.visits.twins=numbers((state.visits.twins||0)+1,0,100000);
           persist();return result}
@@ -301,6 +301,13 @@ export function createForestDialogueDirector({getBooks=()=>[],getCatalog=()=>[],
       const result=await nextTopic(characterId,'',preferredMemoryId,generation);
       if(!generation){state.visits[characterId]=numbers((state.visits[characterId]||0)+1,0,100000);persist()}
       return result;
+    },
+    async twinNames(){
+      const pairs=validateTwinNamePairs(await getTwinNames());
+      return pairs.find(pair=>pair.id===state.twinPairId)||pairs[0]||null;
+    },
+    pinTwinNames(pair){
+      if(validId(pair?.id)&&state.twinPairId!==pair.id){state.twinPairId=pair.id;persist()}
     },
     onDisplayed(result,{characterId}={}){
       if(active?.characterId===characterId&&result?.situation)commitActive();

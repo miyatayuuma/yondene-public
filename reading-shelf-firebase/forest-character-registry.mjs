@@ -85,7 +85,8 @@ export const FOREST_AI_SPEAKER_IDS=Object.freeze(roster.filter(item=>item.mode==
 export const FOREST_ACTION_WRITING_IDS=Object.freeze(roster.filter(item=>
   item.outputMode==='action-writing').map(item=>item.id));
 export const FOREST_AI_GENERATION_IDS=Object.freeze(roster.filter(item=>
-  item.mode==='ai'||item.outputMode==='action-writing').map(item=>item.id));
+  item.mode==='ai'||item.mode==='twins'||item.outputMode==='action-writing').map(item=>item.id));
+export const FOREST_MULTI_SPEAKER_IDS=Object.freeze(roster.filter(item=>item.mode==='twins').map(item=>item.id));
 export const FOREST_CHARACTER_ROW_LIMIT=100;
 export const FOREST_ACTORS=Object.freeze(roster.flatMap(item=>[
   {id:item.id,name:item.name,...item.actor,
@@ -128,7 +129,7 @@ export const FOREST_VOICE_CHARACTERS=Object.freeze([
 ]);
 
 // Version the browser/Worker input contract separately from roster membership.
-export const FOREST_DIALOGUE_PROTOCOL='scene-dialogue-v20-profile2';
+export const FOREST_DIALOGUE_PROTOCOL='scene-dialogue-v22-profile2';
 
 export function forestMemoryBelongsToCharacter(memory,characterId){
   const names=FOREST_ACTOR_NAMES[characterId]||[];

@@ -5,6 +5,24 @@ import {unlockedStoryMemories} from './book-forest-story-memory.mjs';
 const ID=/^[A-Za-z0-9_-]{1,100}$/u;
 const NAME=/^[^「」『』<>\r\n{}]{1,12}$/u;
 const MAX_LINES=160;
+
+// The model addresses speaker slots. The UI assigns the saved names.
+export function validateTwinTurns(turns){
+  if(!Array.isArray(turns)||turns.length!==2)return null;
+  const lines=turns.map(turn=>({speakerSlot:turn?.speakerSlot,text:typeof turn?.text==='string'?turn.text.trim():''}));
+  if(lines.some(line=>![1,2].includes(line.speakerSlot)||typeof line.text!=='string'||
+    line.text.length<2||line.text.length>90||/[「」『』{}<>\r\n]/u.test(line.text))||
+    lines[0].speakerSlot===lines[1].speakerSlot||lines[0].text===lines[1].text)return null;
+  return lines;
+}
+
+export function twinDialogueFrame(line,names,{next,choices=[],closing=false}={}){
+  const nameFor=slot=>slot===1?names.firstName:names.secondName;
+  return {mode:'twins',speakerSlot:line.speakerSlot,speakerName:nameFor(line.speakerSlot),
+    text:line.text,choices:next?[]:choices,conversationComplete:closing&&!next,
+    ...(next?{autoNext:true,autoDelayMs:Math.min(5500,2900+line.text.length*65),
+      nextSpeakerSlot:next.speakerSlot,nextSpeakerName:nameFor(next.speakerSlot)}:{})};
+}
 const acceptableText=value=>typeof value==='string'&&value.trim().length>0&&
   value.length<=180&&!/[「」<>]/u.test(value)&&
   !/\{(?!firstName\}|secondName\})[^}]*\}/u.test(value);

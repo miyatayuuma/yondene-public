@@ -6,7 +6,7 @@ import {parseForestCharacterProfiles,parseForestProfileSources}
   from '../reading-shelf-firebase/book-forest-character-profiles.mjs';
 import {parseStoryMemoryRows,unlockedStoryMemories}
   from '../reading-shelf-firebase/book-forest-story-memory.mjs';
-import {parseForestDialogueRows} from '../reading-shelf-firebase/book-forest-private-dialogue.mjs';
+import {parseForestDialogueRows,parseTwinNameRows,parseTwinSceneRows} from '../reading-shelf-firebase/book-forest-private-dialogue.mjs';
 import {chooseForestReflectionSpotlight}
   from '../reading-shelf-firebase/book-forest-reflection-spotlight.mjs';
 import {createForestDailyContextSession}
@@ -15,10 +15,12 @@ import {parseForestBookshelfMirror}
   from '../reading-shelf-firebase/book-forest-mirror-snapshot.mjs';
 import {forestMemoryBelongsToCharacter}
   from '../reading-shelf-firebase/forest-character-registry.mjs';
-import {promptFor} from '../reading-shelf-firebase/book-forest-live-dialogue.mjs';
+import {FOREST_PROMPT_VERSION,promptFor} from '../reading-shelf-firebase/book-forest-live-dialogue.mjs';
 import {runForestConversationScenario,scenarioStorage} from '../scripts/forest-conversation-scenario.mjs';
 import {forestGenerationInput,readCompletion} from '../cloudflare/forest-ai/src/index.mjs';
 
+// A release acceptance batch can follow the original 60-call baseline on the same day.
+const DAILY_TEST_LIMIT=76;
 const MODEL='@cf/google/gemma-4-26b-a4b-it';
 const MODES=new Set(['synthetic','mirror-reflection','mirror-daily','mirror-story','continuation','integrated-synthetic','integrated-mirror']);
 const safeText=v=>/^\s*[=+@-]/u.test(String(v))?"'"+String(v):String(v);
@@ -172,12 +174,13 @@ export function compactProbeStorage(storage){
  * browser's deadline; no claim that GAS can abort an in-flight network call.
  */
 export async function probeConversation(personRows,sourceRows,characterId,{snapshot={books:[],reflections:[]},
-  catalog=[],cues=[],storage,choices=[0,0],transport,now=()=>Date.now()}={}){
+  catalog=[],cues=[],twinNames=[],twinScenes=[],storage,choices=[0,0],transport,now=()=>Date.now()}={}){
   const profiles=parseForestCharacterProfiles(personRows,parseForestProfileSources(sourceRows));
   if(!profiles.some(p=>p.id===characterId))throw Error('MISSING_PROFILE');
   return runForestConversationScenario({visits:[{characterId,choices}],transport,
     now,storage:scenarioStorage(storage||{}),getBooks:()=>snapshot.books,
     getCatalog:()=>catalog,getCues:()=>cues,getCharacterProfiles:()=>profiles,
+    getTwinNames:()=>twinNames,getTwinScenes:()=>twinScenes,
     getRecentReflections:async()=>snapshot.reflections||[],
     getReflections:async bookId=>(snapshot.reflections||[]).filter(r=>r.bookId===bookId),
     runtime:{createAbortController:()=>({signal:{aborted:false},abort(){this.signal.aborted=true}}),
@@ -214,7 +217,7 @@ export async function processQueue(){
     const cues=parseForestDialogueRows(cuesSheet?.getDataRange().getDisplayValues()||[]);
     const originalPeople=person.getDataRange().getDisplayValues(),
       originalSources=source.getDataRange().getDisplayValues();
-    for(let i=0;i<rows.length&&done<3&&attempts<60;i++){
+    for(let i=0;i<rows.length&&done<3&&attempts<DAILY_TEST_LIMIT;i++){
       const [id,npc,scene,utterance,state,,,,modeCell,bookId,previousId,choice,caseId,issue]=rows[i];
       if(state!=='PENDING')continue;
       const mode=norm(modeCell)||'synthetic';
@@ -227,7 +230,15 @@ export async function processQueue(){
       }
       if(existing.has(id)){mark('APPLIED','ALREADY_RECORDED');continue;}
       const integrated=mode.startsWith('integrated-');
-      if(integrated&&(3-done<3||60-attempts<3))break;
+      let selectedChoices;
+      if(integrated){
+        try{selectedChoices=choice?JSON.parse(choice):[0,0]}catch{}
+        if(!Array.isArray(selectedChoices)||selectedChoices.length>2||
+          selectedChoices.some(c=>!Number.isInteger(c)||c<0||c>1)){
+          mark('ERROR','INVALID_CHOICE');continue;
+        }
+        if(done!==0||DAILY_TEST_LIMIT-attempts<1+selectedChoices.length)break;
+      }
       mark('RUNNING','');SpreadsheetApp.flush();done++;
       let prepared;
       try{
@@ -241,23 +252,28 @@ export async function processQueue(){
             try{prior=JSON.parse(matches[0][15]).conversation.storage}catch{throw Error('PREVIOUS_INPUT_INVALID')}
             if(!prior)throw Error('PREVIOUS_INPUT_INVALID');
           }
-          const selectedChoices=choice?JSON.parse(choice):[0,0];
-          if(!Array.isArray(selectedChoices)||selectedChoices.length>2||
-            selectedChoices.some(c=>!Number.isInteger(c)||c<0||c>1))throw Error('INVALID_CHOICE');
           const snapshot=mode==='integrated-mirror'?mirror:{books:[],reflections:[]};
           const conversation=await probeConversation(originalPeople,originalSources,npc,{
             snapshot,catalog,cues,storage:prior,choices:selectedChoices,
+            ...(npc==='twins'?{
+              twinNames:parseTwinNameRows(ss.getSheetByName('ふたご名前')?.getDataRange().getDisplayValues()||[]),
+              twinScenes:parseTwinSceneRows(ss.getSheetByName('ふたご会話')?.getDataRange().getDisplayValues()||[])
+            }:{}),
             transport:async input=>{
-              if(attempts>=60)throw Error('Local quota reached');
+              if(attempts>=DAILY_TEST_LIMIT)throw Error('Local quota reached');
               props.setProperty(key,String(++attempts));
               const started=Date.now();
-              const response=UrlFetchApp.fetch('https://api.cloudflare.com/client/v4/accounts/'+account.trim()+'/ai/run/'+MODEL,{
+              let response;
+              try{response=UrlFetchApp.fetch('https://api.cloudflare.com/client/v4/accounts/'+account.trim()+'/ai/run/'+MODEL,{
                 method:'post',contentType:'application/json',headers:{Authorization:'Bearer '+token.trim()},
                 payload:JSON.stringify({...input,stream:false}),muteHttpExceptions:true,followRedirects:false});
+              }catch{throw Error('Model network error')}
               if(Date.now()-started>11000)throw Error('timeout');
-              if(response.getResponseCode()<200||response.getResponseCode()>=300)throw Error('Worker transport unavailable');
-              const envelope=JSON.parse(response.getContentText());
-              if(envelope.success===false)throw Error('Provider unavailable');
+              const status=response.getResponseCode();
+              if(status<200||status>=300)throw Error('Model HTTP '+status);
+              let envelope;
+              try{envelope=JSON.parse(response.getContentText())}catch{throw Error('Model response JSON')}
+              if(envelope?.success===false)throw Error('Model provider error');
               return envelope.result;
             }});
           done+=2;
@@ -273,7 +289,7 @@ export async function processQueue(){
             safeText(saved),new Date(),valid?'PASS':'FAIL',mode,mirror?.snapshotAt?new Date(mirror.snapshotAt):'',
             '', '',mode==='integrated-synthetic'?'SYNTHETIC':'READ_ONLY_MIRROR',
             safeText(previousId||''),safeText(caseId||''),safeText(issue||''),
-            conversation.frames.length-1,'']);
+            conversation.trace.filter(t=>t.prompt.mode==='reply').length,'']);
           existing.add(id);mark(valid?'APPLIED':'ERROR',valid?'':'OUTPUT_VALIDATION');
           continue;
         }
@@ -314,7 +330,7 @@ export async function processQueue(){
       out.appendRow([safeText(id),safeText(npc),safeText(npc),safeText(scene),safeText(utterance),
         safeText(typeof raw==='string'?raw:JSON.stringify(raw??null)),MODEL,
         prepared.profile.version+' / '+prepared.profile.revision,prepared.profile.review,
-        'profile2-worker-v20',new Date(),'','','','品質評価未実施',
+        FOREST_PROMPT_VERSION,new Date(),'','','','品質評価未実施',
         safeText(JSON.stringify(prepared.input)),new Date(),valid?'PASS':'FAIL',
         mode,meta.syncAt?new Date(meta.syncAt):'',safeText(meta.bookId||''),
         meta.attribution||'',mode==='synthetic'?'SYNTHETIC':SOURCE_PROVEN,

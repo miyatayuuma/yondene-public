@@ -1,16 +1,24 @@
 import {unsafeForestForaging} from '../../../reading-shelf-firebase/book-forest-output-safety.mjs';
-import {FOREST_AI_GENERATION_IDS,FOREST_ACTION_WRITING_IDS,FOREST_ROSTER_REVISION,FOREST_DIALOGUE_PROTOCOL} from '../../../reading-shelf-firebase/forest-character-registry.mjs';
+import {FOREST_AI_GENERATION_IDS,FOREST_ACTION_WRITING_IDS,FOREST_MULTI_SPEAKER_IDS,FOREST_ROSTER_REVISION,FOREST_DIALOGUE_PROTOCOL} from '../../../reading-shelf-firebase/forest-character-registry.mjs';
 import {validateForestGestureMark,validateForestGestureText} from '../../../reading-shelf-firebase/book-forest-gesture.mjs';
+import {validateTwinTurns} from '../../../reading-shelf-firebase/book-forest-twins.mjs';
 // よんでね 本の森: a small, owner-only proxy for the free Workers AI allowance.
 // No bookshelf data, Firebase private credentials, or Cloudflare API keys here.
 const MODEL='@cf/google/gemma-4-26b-a4b-it';
-export const FOREST_WORKER_VERSION='forest-dialogue-v21-profile2';
+export const FOREST_WORKER_VERSION='forest-dialogue-v23-profile2';
 const VERSION=FOREST_WORKER_VERSION;
 const JWKS_URL='https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com';
 const ORIGINS=new Set(['https://kodomo-reading-shelf-87f11.web.app',
   'https://kodomo-reading-shelf-87f11.firebaseapp.com']);
 const NPCS=new Set(FOREST_AI_GENERATION_IDS);
 const ACTION_WRITING_IDS=new Set(FOREST_ACTION_WRITING_IDS);
+const MULTI_SPEAKER=new Set(FOREST_MULTI_SPEAKER_IDS);
+function validSpeakers(speakers){
+  return Array.isArray(speakers)&&speakers.length===2&&speakers.every((speaker,i)=>
+    speaker?.slot===i+1&&typeof speaker.name==='string'&&
+    /^[^「」『』<>\r\n{}]{1,12}$/u.test(speaker.name.trim()))&&
+    speakers[0].name.trim()!==speakers[1].name.trim();
+}
 let cachedKeys=null,keysExpireAt=0;
 
 function json(data,status=200,origin=''){
@@ -85,6 +93,7 @@ function validPrompt(prompt){
       prompt.npc.approvedExamples.length<=2&&prompt.npc.approvedExamples.every(line=>
         typeof line==='string'&&line.length<=100)))&&
     typeof prompt.context?.npcLine==='string'&&
+    (!MULTI_SPEAKER.has(prompt.npc.id)||prompt.mode!=='choices'&&validSpeakers(prompt.context.speakers))&&
     Array.isArray(prompt.context.recentTurns)&&prompt.context.recentTurns.length<=4&&
     Array.isArray(prompt.constraints)&&prompt.constraints.length<=12&&
     prompt.constraints.every(item=>typeof item==='string'&&item.length<=500);
@@ -96,6 +105,10 @@ export function readCompletion(result,{closing=false,mode='reply',characterId=''
   let parsed;
   try{parsed=JSON.parse(content)}catch{throw Error('Invalid model JSON')}
   if(unsafeForestForaging(parsed,context))throw Error('Invalid model unsafe-foraging');
+  const multi=MULTI_SPEAKER.has(characterId);
+  const turns=multi?validateTwinTurns(parsed?.turns):null;
+  if(multi&&!turns)throw Error('Invalid model speaker turns');
+  if(turns&&closing)return {turns,choices:[]};
   const silent=ACTION_WRITING_IDS.has(characterId);
   const mark=silent?validateForestGestureMark(parsed?.mark):null;
   if(silent&&(!validateForestGestureText(parsed?.text)||mark===undefined))
@@ -109,18 +122,19 @@ export function readCompletion(result,{closing=false,mode='reply',characterId=''
   const choices=parsed.choices.map(choice=>typeof choice==='string'?choice:choice?.label);
   if(choices.some(choice=>typeof choice!=='string'||choice.length<2||choice.length>24))
     throw Error('Invalid model choices');
-  if(mode==='opening'&&(typeof parsed.text!=='string'||!parsed.text.trim()))
+  if(!multi&&mode==='opening'&&(typeof parsed.text!=='string'||!parsed.text.trim()))
     throw Error('Opening line required');
   if(parsed.text!==undefined&&(typeof parsed.text!=='string'||parsed.text.length>90))
     throw Error('Invalid model text');
   // Gemma may supply a third button despite the requested two. Keep its valid
   // NPC line and normalize the UI-only choices instead of discarding the turn.
-  return {choices:choices.slice(0,2),...(typeof parsed.text==='string'?{text:parsed.text}:{}),
+  return {choices:choices.slice(0,2),...(turns?{turns}:typeof parsed.text==='string'?{text:parsed.text}:{}),
     ...(mark?{mark}:{})};
 }
 
 export function forestGenerationInput(prompt){
   const actionWriting=ACTION_WRITING_IDS.has(prompt.npc.id);
+  const multi=MULTI_SPEAKER.has(prompt.npc.id);
   return {messages:[{role:'system',content:
         'あなたは児童向け「本の森」で登場人物の短い即興会話を助ける。'+
         '子どもの個人情報を質問しない。物語にない出来事を断定しない。'+
@@ -131,16 +145,20 @@ export function forestGenerationInput(prompt){
         'situationのplaceが今いる場所、presentNpcIdsが同席を確認できる人物。relatedNpcIdsは関係性で、今そばにいる証拠ではない。'+
         '今日のsceneはevidence=reviewedなら読了済み原作の承認済み事実を含み、evidence=imaginedなら森の即興の出来事。'+
         '原作の記憶は過去の物語であり、今日この森で起きた事実に置き換えない。森での想像や提案は区別する。'+
-        '知らない木の実・きのこ・植物の食用性を断定せず、味見や摂取を選択肢にしない。安全な食事や食欲は表現してよい。'+
+        '知らない木の実・きのこ・植物の食用性を断定せず、味見や摂取を選択肢にしない。安全な食事や食欲は表現してよい。見知らぬ実の場面では、見る・調べる・そのままにするなど次の行動を出す。'+
         'readerReflectionがある場合は本の感想を受け止め、別作品の人物なら第三者の立場で反応する。'+
         '原作に登場した・直接目撃したと偽らず、本人の気持ちを勝手に決めつけない。'+
         '保護者による要約を子どもの直接の発言として扱わず、感想の追記を要求しない。'+
         '別のNPCの会話内容を聞いたふりをせず、選択肢を子どもの信念とみなさない。'+
         '必ずJSONオブジェクトだけを返す。mode=choicesならtextを省略し、choicesを2件、各16字以内。'+
         'mode=openingならcontext.sourceKind（meet/story/reflection/relay/ambient/review-reaction）とtaskを優先し、'+
-        '台帳のnpcLineをコピーせず、本人の新しい第一声textとchoicesを2件作る。'+
-        'mode=replyは新しい第一声ではなく直前の選択への応答。相手の問いや場面説明を復唱するだけで済ませず、短い答えや次の行動を返す。'+
+        '台帳のnpcLineをコピーせず、本人の新しい反応とchoicesを2件作る。'+
+        'mode=replyは新しい第一声ではなく直前の選択への応答。問いには短く答える。相づちや感想なら同意を言い換えず、人物らしい小さな反応で会話を一歩進める。'+
         '通常の発話NPCのtextは65字以内。選択肢は子ども側の次の言葉や行動にする。'+
+        (multi?
+          '出力はturns:[{speakerSlot:1,text:"..."},{speakerSlot:2,text:"..."}]とchoices。各スロットを一度ずつ、順番は会話に合わせる。'+
+          '名前はcontext.speakersで固定し、初対面では各自が自分の名前を名乗る。'+
+          '二人目は一人目の言葉に反応する。発話に話者ラベルやかぎ括弧を付けず、各65字以内。子どもへの問いかけは二人目まで待つ。':'')+
         (ACTION_WRITING_IDS.has(prompt.npc.id)?
           'このNPCは非発話モード。人物像はnpc.voiceの非公開台帳由来の設定を優先し、ここで人物像を推測しない。'+
           'textは全角丸括弧（ ）で囲んだ無言の行動描写だけ。文字は必要なときだけmarkで表現する。'+

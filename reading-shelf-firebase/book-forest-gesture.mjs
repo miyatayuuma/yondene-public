@@ -29,8 +29,12 @@ export function validateForestGestureMark(raw){
   if(raw===null||raw===undefined)return null;
   if(!raw||typeof raw!=='object'||Array.isArray(raw)||
     !FOREST_GESTURE_SURFACES.includes(raw.surface)||
-    typeof raw.word!=='string'||!validForestWrittenGlyphs(raw.word))return undefined;
-  return {surface:raw.surface,word:raw.word};
+    typeof raw.word!=='string'||raw.word.length>96)return undefined;
+  // Gemma may insert visual word separators. Preserve all lexical glyphs
+  // and apply the original character policy to what will actually render.
+  const word=raw.word.replace(/[ 　]/gu,'');
+  if(!validForestWrittenGlyphs(word))return undefined;
+  return {surface:raw.surface,word};
 }
 
 export function validateForestGestureText(raw){

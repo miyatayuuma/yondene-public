@@ -13,7 +13,8 @@ const source=resolve(option('--source')||repo);
 const ids=['king','cat','kiki','jiji','skipper','zorori','ishishi','noshishi','hachibee','hakase','mochan'];
 const clock=Date.parse('2026-11-17T07:00:00Z');
 const synthetic={provenance:'synthetic',clock,
-  characterProfiles:ids.map(id=>profileFixture({id,firstPerson:id==='cat'?'':'合成試験用'})),
+  twinNames:[{schemaVersion:1,approval:'approved',id:'sample-pair',firstName:'あお',secondName:'そら'}],
+  characterProfiles:[...ids,'twins'].map(id=>profileFixture({id,firstPerson:id==='cat'?'':'合成試験用'})),
   books:[{id:'synthetic-read',title:'架空の試験本',status:'read'},
     {id:'synthetic-unread',title:'未読の試験本',status:'unread'}],
   catalog:[{schemaVersion:1,id:'synthetic-memory',bookId:'synthetic-read',
@@ -51,10 +52,13 @@ async function transport(input,{prompt,signal}){
       '/ai/run/@cf/google/gemma-4-26b-a4b-it',{method:'POST',signal,
       headers:{'Content-Type':'application/json',Authorization:'Bearer '+process.env.CLOUDFLARE_AI_TEST_TOKEN},
       body:JSON.stringify({...input,stream:false})});
-    if(!response.ok)throw Error('Model transport HTTP '+response.status);
-    const body=await response.json();if(body.success===false)throw Error('Model transport unavailable');
+    if(!response.ok)throw Error('Model HTTP '+response.status);
+    const body=await response.json();if(body.success===false)throw Error('Model provider error');
     return body.result;
   }
+  if(prompt.context.speakers)return {response:JSON.stringify({
+    turns:[{speakerSlot:1,text:'あっ、小川だ。'},{speakerSlot:2,text:'水の音がするね。'}],
+    choices:prompt.closing?[]:['いっしょに見る','ここで待つ']})};
   return {response:JSON.stringify({text:prompt.npc.id==='cat'?'（ねこはとなりにすわった。）':
     prompt.closing?'続きはまた会ったときにね。':prompt.mode==='reply'?'あの曲がり角まで見に行こう。':
     '向こうの道が気になるな。',...(prompt.npc.id==='cat'?{mark:null}:{}),
@@ -62,9 +66,12 @@ async function transport(input,{prompt,signal}){
 }
 const visits=data.visits||[...ids.map(characterId=>({characterId,choices:[]})),
   ...Array.from({length:6},()=>({characterId:'kiki',choices:[0,0]})),
-  {characterId:'king',choices:[0]},{characterId:'cat',choices:[0]}];
+  {characterId:'king',choices:[0]},{characterId:'cat',choices:[0]},
+  ...(registry.FOREST_MULTI_SPEAKER_IDS?.includes('twins')&&data.twinNames?.length?
+    [{characterId:'twins',choices:[0,1]},{characterId:'twins'}]:[])];
 const result=await runForestConversationScenario({visits,transport,storage:scenarioStorage(data.storage),
   now:()=>data.clock,getBooks:()=>data.books,getCatalog:()=>data.catalog||[],getCues:()=>data.cues||[],
+  getTwinNames:()=>data.twinNames||[],getTwinScenes:()=>data.twinScenes||[],
   getCharacterProfiles:()=>data.characterProfiles,getRecentReflections:async()=>data.reflections||[],
   getReflections:async bookId=>(data.reflections||[]).filter(r=>r.bookId===bookId),
   implementation:{...base,...live,...worker,versions}});

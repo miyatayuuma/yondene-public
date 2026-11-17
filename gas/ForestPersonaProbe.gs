@@ -1612,7 +1612,7 @@ var ForestPersonaProbe = (() => {
   var ACTION_WRITING_IDS2 = new Set(FOREST_ACTION_WRITING_IDS);
   var safeEnd = (id, comma = false) => ACTION_WRITING_IDS2.has(id) ? "\uFF08\u306D\u3053\u306F\u3057\u3063\u307D\u3092\u3086\u3063\u304F\u308A\u3075\u3063\u305F\u3002\uFF09" : GOODBYE[id] || (comma ? "\u307E\u305F\u3001\u68EE\u3067\u4F1A\u304A\u3046\u306D\u3002" : "\u307E\u305F\u68EE\u3067\u4F1A\u304A\u3046\u306D\u3002");
   var WRONG_FIRST_PERSON = FOREST_WRONG_FIRST_PERSON;
-  var FOREST_PROMPT_VERSION = "forest-scene-generation-v22-profile2";
+  var FOREST_PROMPT_VERSION = "forest-scene-generation-v23-profile2";
   var PROMPT_VERSION = FOREST_PROMPT_VERSION;
   var clean3 = (value) => typeof value === "string" ? value.trim().replace(/\s+/gu, " ") : "";
   function readJson(storage, key, fallback) {
@@ -1820,7 +1820,7 @@ var ForestPersonaProbe = (() => {
     cancelTimeout = globalThis.clearTimeout
   } = {}) {
     if (!base || typeof base.start !== "function" || typeof base.select !== "function" || typeof generate !== "function") throw Error("base and generate are required");
-    let pending = null, pendingScripted = null, history = [], sessionCount = 0, repliesThisSession = 0, fallbackTurns = 0, serial = 0, closed = false, epoch = 0, inflight = null, activeCharacterProfile = null, activeDaily = null, activeDailyInput = null, activeOriginal = null, activeTopic = null, displayedTopicKey = "", encounterDisplayed = false, activeSituation = null, twinNames = null, queuedFrame = null, activeFrameSource = {};
+    let pending = null, pendingScripted = null, history = [], sessionCount = 0, repliesThisSession = 0, fallbackTurns = 0, serial = 0, closed = false, epoch = 0, inflight = null, activeCharacterProfile = null, activeDaily = null, activeDailyInput = null, activeOriginal = null, activeTopic = null, displayedTopicKey = "", encounterDisplayed = false, activeSituation = null, twinNames = null, queuedFrame = null;
     const daily = createForestDailyContextSession({ storage, storageKey: storageKey + ":daily", now });
     const reviewSession = createForestReflectionSpotlightSession({
       storage,
@@ -1938,7 +1938,7 @@ var ForestPersonaProbe = (() => {
         if (inflight?.controller === controller) inflight = null;
       }
     }
-    function present(result, choices, closing = false) {
+    function present(result, choices, closing = false, source = pending) {
       if (!result.turns) return {
         ...result.mark ? { mark: result.mark } : {},
         text: result.text,
@@ -1948,7 +1948,7 @@ var ForestPersonaProbe = (() => {
       const [first, second] = result.turns;
       queuedFrame = {
         characterId: "twins",
-        source: pending || activeFrameSource,
+        source,
         result: twinDialogueFrame(second, twinNames, { choices, closing })
       };
       return twinDialogueFrame(first, twinNames, { next: second });
@@ -1968,7 +1968,7 @@ var ForestPersonaProbe = (() => {
         text,
         choices: [],
         conversationComplete: true,
-        ...twinNames && MULTI_SPEAKER.has(characterId) ? { mode: "twins", speakerName: twinNames.secondName, speakerSlot: 2 } : {}
+        ...twinNames && MULTI_SPEAKER.has(characterId) ? { mode: "twins", speakerName: encounterDisplayed ? twinNames.secondName : "\u3075\u305F\u3054", speakerSlot: encounterDisplayed ? 2 : 0 } : {}
       };
     }
     async function sourceStillAllowed({ reviewEvidence, sourceMemoryId, dailySourceMemoryId }) {
@@ -1997,7 +1997,6 @@ var ForestPersonaProbe = (() => {
       sessionCount = 0;
       twinNames = null;
       queuedFrame = null;
-      activeFrameSource = {};
       repliesThisSession = 0;
       fallbackTurns = 0;
       displayedTopicKey = "";
@@ -2162,7 +2161,6 @@ var ForestPersonaProbe = (() => {
         return original ? scripted(original, characterId) : { text: safeEnd(characterId), choices: [], conversationComplete: true };
       }
       pending = null;
-      activeFrameSource = current;
       const label = current.choices.find((choice) => choice.id === choiceId).label;
       const allowed = await sourceStillAllowed(current);
       if (closed || generation !== epoch) return null;
@@ -2205,7 +2203,7 @@ var ForestPersonaProbe = (() => {
           elapsedMs: generated2.elapsedMs,
           turn: 1
         });
-        return present(generated2, [], true);
+        return present(generated2, [], true, current);
       }
       history.push({ playerChoice: label });
       history = history.slice(-4);
@@ -2251,7 +2249,7 @@ var ForestPersonaProbe = (() => {
         elapsedMs: generated.elapsedMs,
         turn: repliesThisSession
       });
-      if (closing) return present(generated, [], true);
+      if (closing) return present(generated, [], true, current);
       return decorate(characterId, generated, {
         ...generated.mark ? { mark: generated.mark } : {},
         sourceKind: current.sourceKind,
@@ -2266,6 +2264,7 @@ var ForestPersonaProbe = (() => {
       start,
       select,
       onDisplayed(result, identity) {
+        if (twinNames && !encounterDisplayed && !result?.autoNext) return;
         if (!encounterDisplayed && typeof result?.text === "string") {
           encounterDisplayed = true;
           if (twinNames) base.pinTwinNames?.(twinNames);
@@ -2273,7 +2272,7 @@ var ForestPersonaProbe = (() => {
           if (activeDailyInput) daily.visit(identity?.characterId, activeDailyInput);
           reviewSession.visited();
         }
-        if (pending?.reviewSpotlightKey && pending.characterId === identity?.characterId && (result?.text === pending.text || result?.mode === "twins")) {
+        if (pending?.reviewSpotlightKey && pending.characterId === identity?.characterId && (result?.text === pending.text || result?.mode === "twins" && !result.autoNext)) {
           reviewSession.displayed(identity.characterId, {
             key: pending.reviewSpotlightKey,
             bookKey: pending.reviewSpotlightBookKey
@@ -2287,7 +2286,7 @@ var ForestPersonaProbe = (() => {
         }
         if (pending?.sourceKind !== "ambient") return;
         const scene = activeDaily?.scene;
-        if (scene?.evidence !== "reviewed" || !pending || pending.characterId !== identity?.characterId || result?.text !== pending.text && result?.mode !== "twins" || displayedTopicKey === scene.id) return;
+        if (scene?.evidence !== "reviewed" || !pending || pending.characterId !== identity?.characterId || result?.text !== pending.text && (result?.mode !== "twins" || result.autoNext) || displayedTopicKey === scene.id) return;
         displayedTopicKey = scene.id;
         record({
           event: "daily-topic-displayed",
@@ -2302,7 +2301,7 @@ var ForestPersonaProbe = (() => {
         if (!frame || frame.characterId !== identity?.characterId) return base.advance?.(identity) || null;
         queuedFrame = null;
         const generation = epoch;
-        const allowed = await sourceStillAllowed(frame.source);
+        const allowed = !frame.source || await sourceStillAllowed(frame.source);
         if (closed || generation !== epoch) return null;
         if (!allowed) {
           pending = null;
@@ -2344,7 +2343,7 @@ var ForestPersonaProbe = (() => {
   }
 
   // cloudflare/forest-ai/src/index.mjs
-  var FOREST_WORKER_VERSION = "forest-dialogue-v22-profile2";
+  var FOREST_WORKER_VERSION = "forest-dialogue-v23-profile2";
   var NPCS = new Set(FOREST_AI_GENERATION_IDS);
   var ACTION_WRITING_IDS3 = new Set(FOREST_ACTION_WRITING_IDS);
   var MULTI_SPEAKER2 = new Set(FOREST_MULTI_SPEAKER_IDS);
@@ -2391,7 +2390,7 @@ var ForestPersonaProbe = (() => {
     const multi = MULTI_SPEAKER2.has(prompt.npc.id);
     return {
       messages: [
-        { role: "system", content: "\u3042\u306A\u305F\u306F\u5150\u7AE5\u5411\u3051\u300C\u672C\u306E\u68EE\u300D\u3067\u767B\u5834\u4EBA\u7269\u306E\u77ED\u3044\u5373\u8208\u4F1A\u8A71\u3092\u52A9\u3051\u308B\u3002\u5B50\u3069\u3082\u306E\u500B\u4EBA\u60C5\u5831\u3092\u8CEA\u554F\u3057\u306A\u3044\u3002\u7269\u8A9E\u306B\u306A\u3044\u51FA\u6765\u4E8B\u3092\u65AD\u5B9A\u3057\u306A\u3044\u3002\u65E5\u672C\u8A9E\u3067\u81EA\u7136\u306B\u77ED\u304F" + (actionWriting ? "\u7121\u8A00\u306E\u884C\u52D5\u3092\u63CF\u5199\u3059\u308B\u3002" : "\u8A71\u3059\u3002") + "\u4EBA\u7269\u50CF\u306F\u9001\u4FE1\u3055\u308C\u305Fnpc.voice\u306E\u975E\u516C\u958B\u53F0\u5E33\u7531\u6765\u306E\u8A2D\u5B9A\u3092\u6700\u512A\u5148\u3057\u3001\u8A2D\u5B9A\u3092\u8AAC\u660E\u3059\u308B\u3060\u3051\u306E\u6587\u306B\u3057\u306A\u3044\u3002\u5404\u9805\u76EE\u306E\u6839\u62E0\u533A\u5206\u30FB\u76E3\u4FEE\u72B6\u614B\u30FB\u9069\u7528\u7BC4\u56F2\u3068\u672C\u6587\u4E2D\u306E\u7559\u4FDD\u3092\u5B88\u308B\u3002\u4E8C\u6B21\u8CC7\u6599\u306F\u539F\u4F5C\u672C\u6587\u3067\u306F\u306A\u3044\u3002\u7DE8\u96C6\u89E3\u91C8\u30FB\u30B2\u30FC\u30E0\u6F14\u51FA\u30FB\u66AB\u5B9A\u63A1\u7528\u306F\u6F14\u6280\u306E\u624B\u639B\u304B\u308A\u3067\u3042\u308A\u3001\u539F\u4F5C\u306E\u78BA\u5B9A\u4E8B\u5B9F\u3068\u3057\u3066\u8A9E\u3089\u306A\u3044\u3002situation\u306Eplace\u304C\u4ECA\u3044\u308B\u5834\u6240\u3001presentNpcIds\u304C\u540C\u5E2D\u3092\u78BA\u8A8D\u3067\u304D\u308B\u4EBA\u7269\u3002relatedNpcIds\u306F\u95A2\u4FC2\u6027\u3067\u3001\u4ECA\u305D\u3070\u306B\u3044\u308B\u8A3C\u62E0\u3067\u306F\u306A\u3044\u3002\u4ECA\u65E5\u306Escene\u306Fevidence=reviewed\u306A\u3089\u8AAD\u4E86\u6E08\u307F\u539F\u4F5C\u306E\u627F\u8A8D\u6E08\u307F\u4E8B\u5B9F\u3092\u542B\u307F\u3001evidence=imagined\u306A\u3089\u68EE\u306E\u5373\u8208\u306E\u51FA\u6765\u4E8B\u3002\u539F\u4F5C\u306E\u8A18\u61B6\u306F\u904E\u53BB\u306E\u7269\u8A9E\u3067\u3042\u308A\u3001\u4ECA\u65E5\u3053\u306E\u68EE\u3067\u8D77\u304D\u305F\u4E8B\u5B9F\u306B\u7F6E\u304D\u63DB\u3048\u306A\u3044\u3002\u68EE\u3067\u306E\u60F3\u50CF\u3084\u63D0\u6848\u306F\u533A\u5225\u3059\u308B\u3002\u77E5\u3089\u306A\u3044\u6728\u306E\u5B9F\u30FB\u304D\u306E\u3053\u30FB\u690D\u7269\u306E\u98DF\u7528\u6027\u3092\u65AD\u5B9A\u305B\u305A\u3001\u5473\u898B\u3084\u6442\u53D6\u3092\u9078\u629E\u80A2\u306B\u3057\u306A\u3044\u3002\u5B89\u5168\u306A\u98DF\u4E8B\u3084\u98DF\u6B32\u306F\u8868\u73FE\u3057\u3066\u3088\u3044\u3002\u898B\u77E5\u3089\u306C\u5B9F\u306E\u5834\u9762\u3067\u306F\u3001\u898B\u308B\u30FB\u8ABF\u3079\u308B\u30FB\u305D\u306E\u307E\u307E\u306B\u3059\u308B\u306A\u3069\u6B21\u306E\u884C\u52D5\u3092\u51FA\u3059\u3002readerReflection\u304C\u3042\u308B\u5834\u5408\u306F\u672C\u306E\u611F\u60F3\u3092\u53D7\u3051\u6B62\u3081\u3001\u5225\u4F5C\u54C1\u306E\u4EBA\u7269\u306A\u3089\u7B2C\u4E09\u8005\u306E\u7ACB\u5834\u3067\u53CD\u5FDC\u3059\u308B\u3002\u539F\u4F5C\u306B\u767B\u5834\u3057\u305F\u30FB\u76F4\u63A5\u76EE\u6483\u3057\u305F\u3068\u507D\u3089\u305A\u3001\u672C\u4EBA\u306E\u6C17\u6301\u3061\u3092\u52DD\u624B\u306B\u6C7A\u3081\u3064\u3051\u306A\u3044\u3002\u4FDD\u8B77\u8005\u306B\u3088\u308B\u8981\u7D04\u3092\u5B50\u3069\u3082\u306E\u76F4\u63A5\u306E\u767A\u8A00\u3068\u3057\u3066\u6271\u308F\u305A\u3001\u611F\u60F3\u306E\u8FFD\u8A18\u3092\u8981\u6C42\u3057\u306A\u3044\u3002\u5225\u306ENPC\u306E\u4F1A\u8A71\u5185\u5BB9\u3092\u805E\u3044\u305F\u3075\u308A\u3092\u305B\u305A\u3001\u9078\u629E\u80A2\u3092\u5B50\u3069\u3082\u306E\u4FE1\u5FF5\u3068\u307F\u306A\u3055\u306A\u3044\u3002\u5FC5\u305AJSON\u30AA\u30D6\u30B8\u30A7\u30AF\u30C8\u3060\u3051\u3092\u8FD4\u3059\u3002mode=choices\u306A\u3089text\u3092\u7701\u7565\u3057\u3001choices\u30922\u4EF6\u3001\u540416\u5B57\u4EE5\u5185\u3002mode=opening\u306A\u3089context.sourceKind\uFF08meet/story/reflection/relay/ambient/review-reaction\uFF09\u3068task\u3092\u512A\u5148\u3057\u3001\u53F0\u5E33\u306EnpcLine\u3092\u30B3\u30D4\u30FC\u305B\u305A\u3001\u672C\u4EBA\u306E\u65B0\u3057\u3044\u53CD\u5FDC\u3068choices\u30922\u4EF6\u4F5C\u308B\u3002mode=reply\u306F\u65B0\u3057\u3044\u7B2C\u4E00\u58F0\u3067\u306F\u306A\u304F\u76F4\u524D\u306E\u9078\u629E\u3078\u306E\u5FDC\u7B54\u3002\u76F8\u624B\u306E\u554F\u3044\u3084\u5834\u9762\u8AAC\u660E\u3092\u5FA9\u5531\u3059\u308B\u3060\u3051\u3067\u6E08\u307E\u305B\u305A\u3001\u77ED\u3044\u7B54\u3048\u3084\u6B21\u306E\u884C\u52D5\u3092\u8FD4\u3059\u3002\u901A\u5E38\u306E\u767A\u8A71NPC\u306Etext\u306F65\u5B57\u4EE5\u5185\u3002\u9078\u629E\u80A2\u306F\u5B50\u3069\u3082\u5074\u306E\u6B21\u306E\u8A00\u8449\u3084\u884C\u52D5\u306B\u3059\u308B\u3002" + (multi ? '\u51FA\u529B\u306Fturns:[{speakerSlot:1,text:"..."},{speakerSlot:2,text:"..."}]\u3068choices\u3002\u5404\u30B9\u30ED\u30C3\u30C8\u3092\u4E00\u5EA6\u305A\u3064\u3001\u9806\u756A\u306F\u4F1A\u8A71\u306B\u5408\u308F\u305B\u308B\u3002\u540D\u524D\u306Fcontext.speakers\u3067\u56FA\u5B9A\u3057\u3001\u521D\u5BFE\u9762\u3067\u306F\u5404\u81EA\u304C\u81EA\u5206\u306E\u540D\u524D\u3092\u540D\u4E57\u308B\u3002\u4E8C\u4EBA\u76EE\u306F\u4E00\u4EBA\u76EE\u306E\u8A00\u8449\u306B\u53CD\u5FDC\u3059\u308B\u3002\u767A\u8A71\u306B\u8A71\u8005\u30E9\u30D9\u30EB\u3084\u304B\u304E\u62EC\u5F27\u3092\u4ED8\u3051\u305A\u3001\u540465\u5B57\u4EE5\u5185\u3002\u5B50\u3069\u3082\u3078\u306E\u554F\u3044\u304B\u3051\u306F\u4E8C\u4EBA\u76EE\u307E\u3067\u5F85\u3064\u3002' : "") + (ACTION_WRITING_IDS3.has(prompt.npc.id) ? "\u3053\u306ENPC\u306F\u975E\u767A\u8A71\u30E2\u30FC\u30C9\u3002\u4EBA\u7269\u50CF\u306Fnpc.voice\u306E\u975E\u516C\u958B\u53F0\u5E33\u7531\u6765\u306E\u8A2D\u5B9A\u3092\u512A\u5148\u3057\u3001\u3053\u3053\u3067\u4EBA\u7269\u50CF\u3092\u63A8\u6E2C\u3057\u306A\u3044\u3002text\u306F\u5168\u89D2\u4E38\u62EC\u5F27\uFF08 \uFF09\u3067\u56F2\u3093\u3060\u7121\u8A00\u306E\u884C\u52D5\u63CF\u5199\u3060\u3051\u3002\u6587\u5B57\u306F\u5FC5\u8981\u306A\u3068\u304D\u3060\u3051mark\u3067\u8868\u73FE\u3059\u308B\u3002mark={surface:note\u307E\u305F\u306Fground\u307E\u305F\u306Fleaf,word:\u3072\u3089\u304C\u306A\u3068\u5C0F\u5B661\u5E74\u751F\u307E\u3067\u306E\u6F22\u5B57\u30FB\u8AAD\u70B9\u53E5\u70B9\u30FB\uFF01\uFF1F\u304B\u3089\u306A\u308B1\u301C48\u6587\u5B57}\u3002\u66F8\u304B\u306A\u3044\u5834\u5408\u306Fmark:null\u3002\u4EBA\u8A9E\u306E\u767A\u58F0\u30FB\u5FC3\u306E\u58F0\u306F\u7981\u6B62\u3002mark\u306E\u6587\u5B57\u7A2E\u306F\u30B5\u30FC\u30D0\u30FC\u3067\u3082\u691C\u8A3C\u3059\u308B\u3002" : "") + "closing=true\u3067\u3082\u76F4\u524D\u306E\u554F\u3044\u3084\u983C\u307F\u306B\u5148\u306B\u7B54\u3048\u3001\u7D04\u675F\u3057\u305F\u5185\u5BB9\u3092\u307E\u305F\u4ECA\u5EA6\u3078\u5148\u9001\u308A\u3057\u306A\u3044\u3002\u65B0\u305F\u306A\u8CEA\u554F\u3092\u305B\u305Achoices\u306F\u7A7A\u914D\u5217\u3068\u3059\u308B\u3002" },
+        { role: "system", content: "\u3042\u306A\u305F\u306F\u5150\u7AE5\u5411\u3051\u300C\u672C\u306E\u68EE\u300D\u3067\u767B\u5834\u4EBA\u7269\u306E\u77ED\u3044\u5373\u8208\u4F1A\u8A71\u3092\u52A9\u3051\u308B\u3002\u5B50\u3069\u3082\u306E\u500B\u4EBA\u60C5\u5831\u3092\u8CEA\u554F\u3057\u306A\u3044\u3002\u7269\u8A9E\u306B\u306A\u3044\u51FA\u6765\u4E8B\u3092\u65AD\u5B9A\u3057\u306A\u3044\u3002\u65E5\u672C\u8A9E\u3067\u81EA\u7136\u306B\u77ED\u304F" + (actionWriting ? "\u7121\u8A00\u306E\u884C\u52D5\u3092\u63CF\u5199\u3059\u308B\u3002" : "\u8A71\u3059\u3002") + "\u4EBA\u7269\u50CF\u306F\u9001\u4FE1\u3055\u308C\u305Fnpc.voice\u306E\u975E\u516C\u958B\u53F0\u5E33\u7531\u6765\u306E\u8A2D\u5B9A\u3092\u6700\u512A\u5148\u3057\u3001\u8A2D\u5B9A\u3092\u8AAC\u660E\u3059\u308B\u3060\u3051\u306E\u6587\u306B\u3057\u306A\u3044\u3002\u5404\u9805\u76EE\u306E\u6839\u62E0\u533A\u5206\u30FB\u76E3\u4FEE\u72B6\u614B\u30FB\u9069\u7528\u7BC4\u56F2\u3068\u672C\u6587\u4E2D\u306E\u7559\u4FDD\u3092\u5B88\u308B\u3002\u4E8C\u6B21\u8CC7\u6599\u306F\u539F\u4F5C\u672C\u6587\u3067\u306F\u306A\u3044\u3002\u7DE8\u96C6\u89E3\u91C8\u30FB\u30B2\u30FC\u30E0\u6F14\u51FA\u30FB\u66AB\u5B9A\u63A1\u7528\u306F\u6F14\u6280\u306E\u624B\u639B\u304B\u308A\u3067\u3042\u308A\u3001\u539F\u4F5C\u306E\u78BA\u5B9A\u4E8B\u5B9F\u3068\u3057\u3066\u8A9E\u3089\u306A\u3044\u3002situation\u306Eplace\u304C\u4ECA\u3044\u308B\u5834\u6240\u3001presentNpcIds\u304C\u540C\u5E2D\u3092\u78BA\u8A8D\u3067\u304D\u308B\u4EBA\u7269\u3002relatedNpcIds\u306F\u95A2\u4FC2\u6027\u3067\u3001\u4ECA\u305D\u3070\u306B\u3044\u308B\u8A3C\u62E0\u3067\u306F\u306A\u3044\u3002\u4ECA\u65E5\u306Escene\u306Fevidence=reviewed\u306A\u3089\u8AAD\u4E86\u6E08\u307F\u539F\u4F5C\u306E\u627F\u8A8D\u6E08\u307F\u4E8B\u5B9F\u3092\u542B\u307F\u3001evidence=imagined\u306A\u3089\u68EE\u306E\u5373\u8208\u306E\u51FA\u6765\u4E8B\u3002\u539F\u4F5C\u306E\u8A18\u61B6\u306F\u904E\u53BB\u306E\u7269\u8A9E\u3067\u3042\u308A\u3001\u4ECA\u65E5\u3053\u306E\u68EE\u3067\u8D77\u304D\u305F\u4E8B\u5B9F\u306B\u7F6E\u304D\u63DB\u3048\u306A\u3044\u3002\u68EE\u3067\u306E\u60F3\u50CF\u3084\u63D0\u6848\u306F\u533A\u5225\u3059\u308B\u3002\u77E5\u3089\u306A\u3044\u6728\u306E\u5B9F\u30FB\u304D\u306E\u3053\u30FB\u690D\u7269\u306E\u98DF\u7528\u6027\u3092\u65AD\u5B9A\u305B\u305A\u3001\u5473\u898B\u3084\u6442\u53D6\u3092\u9078\u629E\u80A2\u306B\u3057\u306A\u3044\u3002\u5B89\u5168\u306A\u98DF\u4E8B\u3084\u98DF\u6B32\u306F\u8868\u73FE\u3057\u3066\u3088\u3044\u3002\u898B\u77E5\u3089\u306C\u5B9F\u306E\u5834\u9762\u3067\u306F\u3001\u898B\u308B\u30FB\u8ABF\u3079\u308B\u30FB\u305D\u306E\u307E\u307E\u306B\u3059\u308B\u306A\u3069\u6B21\u306E\u884C\u52D5\u3092\u51FA\u3059\u3002readerReflection\u304C\u3042\u308B\u5834\u5408\u306F\u672C\u306E\u611F\u60F3\u3092\u53D7\u3051\u6B62\u3081\u3001\u5225\u4F5C\u54C1\u306E\u4EBA\u7269\u306A\u3089\u7B2C\u4E09\u8005\u306E\u7ACB\u5834\u3067\u53CD\u5FDC\u3059\u308B\u3002\u539F\u4F5C\u306B\u767B\u5834\u3057\u305F\u30FB\u76F4\u63A5\u76EE\u6483\u3057\u305F\u3068\u507D\u3089\u305A\u3001\u672C\u4EBA\u306E\u6C17\u6301\u3061\u3092\u52DD\u624B\u306B\u6C7A\u3081\u3064\u3051\u306A\u3044\u3002\u4FDD\u8B77\u8005\u306B\u3088\u308B\u8981\u7D04\u3092\u5B50\u3069\u3082\u306E\u76F4\u63A5\u306E\u767A\u8A00\u3068\u3057\u3066\u6271\u308F\u305A\u3001\u611F\u60F3\u306E\u8FFD\u8A18\u3092\u8981\u6C42\u3057\u306A\u3044\u3002\u5225\u306ENPC\u306E\u4F1A\u8A71\u5185\u5BB9\u3092\u805E\u3044\u305F\u3075\u308A\u3092\u305B\u305A\u3001\u9078\u629E\u80A2\u3092\u5B50\u3069\u3082\u306E\u4FE1\u5FF5\u3068\u307F\u306A\u3055\u306A\u3044\u3002\u5FC5\u305AJSON\u30AA\u30D6\u30B8\u30A7\u30AF\u30C8\u3060\u3051\u3092\u8FD4\u3059\u3002mode=choices\u306A\u3089text\u3092\u7701\u7565\u3057\u3001choices\u30922\u4EF6\u3001\u540416\u5B57\u4EE5\u5185\u3002mode=opening\u306A\u3089context.sourceKind\uFF08meet/story/reflection/relay/ambient/review-reaction\uFF09\u3068task\u3092\u512A\u5148\u3057\u3001\u53F0\u5E33\u306EnpcLine\u3092\u30B3\u30D4\u30FC\u305B\u305A\u3001\u672C\u4EBA\u306E\u65B0\u3057\u3044\u53CD\u5FDC\u3068choices\u30922\u4EF6\u4F5C\u308B\u3002mode=reply\u306F\u65B0\u3057\u3044\u7B2C\u4E00\u58F0\u3067\u306F\u306A\u304F\u76F4\u524D\u306E\u9078\u629E\u3078\u306E\u5FDC\u7B54\u3002\u554F\u3044\u306B\u306F\u77ED\u304F\u7B54\u3048\u308B\u3002\u76F8\u3065\u3061\u3084\u611F\u60F3\u306A\u3089\u540C\u610F\u3092\u8A00\u3044\u63DB\u3048\u305A\u3001\u4EBA\u7269\u3089\u3057\u3044\u5C0F\u3055\u306A\u53CD\u5FDC\u3067\u4F1A\u8A71\u3092\u4E00\u6B69\u9032\u3081\u308B\u3002\u901A\u5E38\u306E\u767A\u8A71NPC\u306Etext\u306F65\u5B57\u4EE5\u5185\u3002\u9078\u629E\u80A2\u306F\u5B50\u3069\u3082\u5074\u306E\u6B21\u306E\u8A00\u8449\u3084\u884C\u52D5\u306B\u3059\u308B\u3002" + (multi ? '\u51FA\u529B\u306Fturns:[{speakerSlot:1,text:"..."},{speakerSlot:2,text:"..."}]\u3068choices\u3002\u5404\u30B9\u30ED\u30C3\u30C8\u3092\u4E00\u5EA6\u305A\u3064\u3001\u9806\u756A\u306F\u4F1A\u8A71\u306B\u5408\u308F\u305B\u308B\u3002\u540D\u524D\u306Fcontext.speakers\u3067\u56FA\u5B9A\u3057\u3001\u521D\u5BFE\u9762\u3067\u306F\u5404\u81EA\u304C\u81EA\u5206\u306E\u540D\u524D\u3092\u540D\u4E57\u308B\u3002\u4E8C\u4EBA\u76EE\u306F\u4E00\u4EBA\u76EE\u306E\u8A00\u8449\u306B\u53CD\u5FDC\u3059\u308B\u3002\u767A\u8A71\u306B\u8A71\u8005\u30E9\u30D9\u30EB\u3084\u304B\u304E\u62EC\u5F27\u3092\u4ED8\u3051\u305A\u3001\u540465\u5B57\u4EE5\u5185\u3002\u5B50\u3069\u3082\u3078\u306E\u554F\u3044\u304B\u3051\u306F\u4E8C\u4EBA\u76EE\u307E\u3067\u5F85\u3064\u3002' : "") + (ACTION_WRITING_IDS3.has(prompt.npc.id) ? "\u3053\u306ENPC\u306F\u975E\u767A\u8A71\u30E2\u30FC\u30C9\u3002\u4EBA\u7269\u50CF\u306Fnpc.voice\u306E\u975E\u516C\u958B\u53F0\u5E33\u7531\u6765\u306E\u8A2D\u5B9A\u3092\u512A\u5148\u3057\u3001\u3053\u3053\u3067\u4EBA\u7269\u50CF\u3092\u63A8\u6E2C\u3057\u306A\u3044\u3002text\u306F\u5168\u89D2\u4E38\u62EC\u5F27\uFF08 \uFF09\u3067\u56F2\u3093\u3060\u7121\u8A00\u306E\u884C\u52D5\u63CF\u5199\u3060\u3051\u3002\u6587\u5B57\u306F\u5FC5\u8981\u306A\u3068\u304D\u3060\u3051mark\u3067\u8868\u73FE\u3059\u308B\u3002mark={surface:note\u307E\u305F\u306Fground\u307E\u305F\u306Fleaf,word:\u3072\u3089\u304C\u306A\u3068\u5C0F\u5B661\u5E74\u751F\u307E\u3067\u306E\u6F22\u5B57\u30FB\u8AAD\u70B9\u53E5\u70B9\u30FB\uFF01\uFF1F\u304B\u3089\u306A\u308B1\u301C48\u6587\u5B57}\u3002\u66F8\u304B\u306A\u3044\u5834\u5408\u306Fmark:null\u3002\u4EBA\u8A9E\u306E\u767A\u58F0\u30FB\u5FC3\u306E\u58F0\u306F\u7981\u6B62\u3002mark\u306E\u6587\u5B57\u7A2E\u306F\u30B5\u30FC\u30D0\u30FC\u3067\u3082\u691C\u8A3C\u3059\u308B\u3002" : "") + "closing=true\u3067\u3082\u76F4\u524D\u306E\u554F\u3044\u3084\u983C\u307F\u306B\u5148\u306B\u7B54\u3048\u3001\u7D04\u675F\u3057\u305F\u5185\u5BB9\u3092\u307E\u305F\u4ECA\u5EA6\u3078\u5148\u9001\u308A\u3057\u306A\u3044\u3002\u65B0\u305F\u306A\u8CEA\u554F\u3092\u305B\u305Achoices\u306F\u7A7A\u914D\u5217\u3068\u3059\u308B\u3002" },
         { role: "user", content: JSON.stringify(prompt) }
       ],
       max_completion_tokens: 320,
@@ -2506,7 +2505,7 @@ var ForestPersonaProbe = (() => {
           return entry.validated;
         } catch (error) {
           entry.validation = "rejected";
-          entry.failure = /timeout/iu.test(String(error?.message || "")) ? "timeout" : /Invalid model unsafe-foraging/u.test(String(error?.message || "")) ? "unsafe-foraging" : /Invalid silent cat action/u.test(String(error?.message || "")) ? "silent-output-contract" : /Model HTTP (\d{3})/u.exec(String(error?.message || ""))?.[0]?.toLowerCase().replaceAll(" ", "-") || (/Invalid model JSON/u.test(String(error?.message || "")) ? "model-json" : /Invalid model|Invalid silent|Invalid closing/u.test(String(error?.message || "")) ? "output-validation" : "model-or-transport");
+          entry.failure = /timeout/iu.test(String(error?.message || "")) ? "timeout" : /Model network error/u.test(String(error?.message || "")) ? "network" : /Model response JSON/u.test(String(error?.message || "")) ? "response-json" : /Model provider error/u.test(String(error?.message || "")) ? "model-provider" : /Invalid model unsafe-foraging/u.test(String(error?.message || "")) ? "unsafe-foraging" : /Invalid silent cat action/u.test(String(error?.message || "")) ? "silent-output-contract" : /Model HTTP (\d{3})/u.exec(String(error?.message || ""))?.[0]?.toLowerCase().replaceAll(" ", "-") || (/Invalid model JSON/u.test(String(error?.message || "")) ? "model-json" : /Invalid model|Invalid silent|Invalid closing/u.test(String(error?.message || "")) ? "output-validation" : "model-or-transport");
           throw error;
         }
       }
@@ -2570,7 +2569,7 @@ var ForestPersonaProbe = (() => {
   }
 
   // gas/ForestPersonaProbe.mjs
-  var DAILY_TEST_LIMIT = 72;
+  var DAILY_TEST_LIMIT = 76;
   var MODEL = "@cf/google/gemma-4-26b-a4b-it";
   var MODES = /* @__PURE__ */ new Set(["synthetic", "mirror-reflection", "mirror-daily", "mirror-story", "continuation", "integrated-synthetic", "integrated-mirror"]);
   var safeText = (v) => /^\s*[=+@-]/u.test(String(v)) ? "'" + String(v) : String(v);
@@ -2874,19 +2873,29 @@ var ForestPersonaProbe = (() => {
                 if (attempts >= DAILY_TEST_LIMIT) throw Error("Local quota reached");
                 props.setProperty(key, String(++attempts));
                 const started = Date.now();
-                const response = UrlFetchApp.fetch("https://api.cloudflare.com/client/v4/accounts/" + account.trim() + "/ai/run/" + MODEL, {
-                  method: "post",
-                  contentType: "application/json",
-                  headers: { Authorization: "Bearer " + token.trim() },
-                  payload: JSON.stringify({ ...input, stream: false }),
-                  muteHttpExceptions: true,
-                  followRedirects: false
-                });
+                let response;
+                try {
+                  response = UrlFetchApp.fetch("https://api.cloudflare.com/client/v4/accounts/" + account.trim() + "/ai/run/" + MODEL, {
+                    method: "post",
+                    contentType: "application/json",
+                    headers: { Authorization: "Bearer " + token.trim() },
+                    payload: JSON.stringify({ ...input, stream: false }),
+                    muteHttpExceptions: true,
+                    followRedirects: false
+                  });
+                } catch {
+                  throw Error("Model network error");
+                }
                 if (Date.now() - started > 11e3) throw Error("timeout");
                 const status = response.getResponseCode();
                 if (status < 200 || status >= 300) throw Error("Model HTTP " + status);
-                const envelope = JSON.parse(response.getContentText());
-                if (envelope.success === false) throw Error("Provider unavailable");
+                let envelope;
+                try {
+                  envelope = JSON.parse(response.getContentText());
+                } catch {
+                  throw Error("Model response JSON");
+                }
+                if (envelope?.success === false) throw Error("Model provider error");
                 return envelope.result;
               }
             });
@@ -3014,7 +3023,7 @@ var ForestPersonaProbe = (() => {
           MODEL,
           prepared.profile.version + " / " + prepared.profile.revision,
           prepared.profile.review,
-          "profile2-worker-v20",
+          FOREST_PROMPT_VERSION,
           /* @__PURE__ */ new Date(),
           "",
           "",

@@ -15,12 +15,12 @@ import {parseForestBookshelfMirror}
   from '../reading-shelf-firebase/book-forest-mirror-snapshot.mjs';
 import {forestMemoryBelongsToCharacter}
   from '../reading-shelf-firebase/forest-character-registry.mjs';
-import {promptFor} from '../reading-shelf-firebase/book-forest-live-dialogue.mjs';
+import {FOREST_PROMPT_VERSION,promptFor} from '../reading-shelf-firebase/book-forest-live-dialogue.mjs';
 import {runForestConversationScenario,scenarioStorage} from '../scripts/forest-conversation-scenario.mjs';
 import {forestGenerationInput,readCompletion} from '../cloudflare/forest-ai/src/index.mjs';
 
 // A release acceptance batch can follow the original 60-call baseline on the same day.
-const DAILY_TEST_LIMIT=72;
+const DAILY_TEST_LIMIT=76;
 const MODEL='@cf/google/gemma-4-26b-a4b-it';
 const MODES=new Set(['synthetic','mirror-reflection','mirror-daily','mirror-story','continuation','integrated-synthetic','integrated-mirror']);
 const safeText=v=>/^\s*[=+@-]/u.test(String(v))?"'"+String(v):String(v);
@@ -258,14 +258,17 @@ export async function processQueue(){
               if(attempts>=DAILY_TEST_LIMIT)throw Error('Local quota reached');
               props.setProperty(key,String(++attempts));
               const started=Date.now();
-              const response=UrlFetchApp.fetch('https://api.cloudflare.com/client/v4/accounts/'+account.trim()+'/ai/run/'+MODEL,{
+              let response;
+              try{response=UrlFetchApp.fetch('https://api.cloudflare.com/client/v4/accounts/'+account.trim()+'/ai/run/'+MODEL,{
                 method:'post',contentType:'application/json',headers:{Authorization:'Bearer '+token.trim()},
                 payload:JSON.stringify({...input,stream:false}),muteHttpExceptions:true,followRedirects:false});
+              }catch{throw Error('Model network error')}
               if(Date.now()-started>11000)throw Error('timeout');
               const status=response.getResponseCode();
               if(status<200||status>=300)throw Error('Model HTTP '+status);
-              const envelope=JSON.parse(response.getContentText());
-              if(envelope.success===false)throw Error('Provider unavailable');
+              let envelope;
+              try{envelope=JSON.parse(response.getContentText())}catch{throw Error('Model response JSON')}
+              if(envelope?.success===false)throw Error('Model provider error');
               return envelope.result;
             }});
           done+=2;
@@ -322,7 +325,7 @@ export async function processQueue(){
       out.appendRow([safeText(id),safeText(npc),safeText(npc),safeText(scene),safeText(utterance),
         safeText(typeof raw==='string'?raw:JSON.stringify(raw??null)),MODEL,
         prepared.profile.version+' / '+prepared.profile.revision,prepared.profile.review,
-        'profile2-worker-v20',new Date(),'','','','品質評価未実施',
+        FOREST_PROMPT_VERSION,new Date(),'','','','品質評価未実施',
         safeText(JSON.stringify(prepared.input)),new Date(),valid?'PASS':'FAIL',
         mode,meta.syncAt?new Date(meta.syncAt):'',safeText(meta.bookId||''),
         meta.attribution||'',mode==='synthetic'?'SYNTHETIC':SOURCE_PROVEN,

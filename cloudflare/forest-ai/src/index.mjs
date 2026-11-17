@@ -5,7 +5,7 @@ import {validateTwinTurns} from '../../../reading-shelf-firebase/book-forest-twi
 // よんでね 本の森: a small, owner-only proxy for the free Workers AI allowance.
 // No bookshelf data, Firebase private credentials, or Cloudflare API keys here.
 const MODEL='@cf/google/gemma-4-26b-a4b-it';
-export const FOREST_WORKER_VERSION='forest-dialogue-v22-profile2';
+export const FOREST_WORKER_VERSION='forest-dialogue-v23-profile2';
 const VERSION=FOREST_WORKER_VERSION;
 const JWKS_URL='https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com';
 const ORIGINS=new Set(['https://kodomo-reading-shelf-87f11.web.app',
@@ -153,7 +153,7 @@ export function forestGenerationInput(prompt){
         '必ずJSONオブジェクトだけを返す。mode=choicesならtextを省略し、choicesを2件、各16字以内。'+
         'mode=openingならcontext.sourceKind（meet/story/reflection/relay/ambient/review-reaction）とtaskを優先し、'+
         '台帳のnpcLineをコピーせず、本人の新しい反応とchoicesを2件作る。'+
-        'mode=replyは新しい第一声ではなく直前の選択への応答。相手の問いや場面説明を復唱するだけで済ませず、短い答えや次の行動を返す。'+
+        'mode=replyは新しい第一声ではなく直前の選択への応答。問いには短く答える。相づちや感想なら同意を言い換えず、人物らしい小さな反応で会話を一歩進める。'+
         '通常の発話NPCのtextは65字以内。選択肢は子ども側の次の言葉や行動にする。'+
         (multi?
           '出力はturns:[{speakerSlot:1,text:"..."},{speakerSlot:2,text:"..."}]とchoices。各スロットを一度ずつ、順番は会話に合わせる。'+

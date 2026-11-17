@@ -196,3 +196,15 @@ test('twins reject dangerous lines across speakers and stop cleanly after reply 
   assert.equal(run.frames[2].result.choices.length,0);
   assert.equal(run.trace[2].prompt.context.today.previousNpc,'twins');
 });
+
+test('twins keep the first meeting available after no generated greeting was displayed',async()=>{
+  const run=await runForestConversationScenario({...twinDefaults,
+    visits:[{characterId:'twins'},{characterId:'twins',display:false},{characterId:'twins'}],
+    transport:async(_input,{index})=>{
+      if(index===0)throw Error('Model network error');
+      return twinRaw();
+    }});
+  assert.deepEqual(run.trace.map(t=>t.prompt.context.sourceKind),['meet','meet','meet']);
+  assert.equal(run.frames[0].result.conversationComplete,true);
+  assert.equal(run.progress.visits.twins,1);
+});

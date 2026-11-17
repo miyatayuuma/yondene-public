@@ -58,6 +58,9 @@ export async function runForestConversationScenario({visits=[],transport,
       }catch(error){entry.validation='rejected';
         // Do not retain provider exception bodies or credentials in traces.
         entry.failure=/timeout/iu.test(String(error?.message||''))?'timeout':
+          /Model network error/u.test(String(error?.message||''))?'network':
+          /Model response JSON/u.test(String(error?.message||''))?'response-json':
+          /Model provider error/u.test(String(error?.message||''))?'model-provider':
           /Invalid model unsafe-foraging/u.test(String(error?.message||''))?'unsafe-foraging':
           /Invalid silent cat action/u.test(String(error?.message||''))?'silent-output-contract':
           /Model HTTP (\d{3})/u.exec(String(error?.message||''))?.[0]?.toLowerCase().replaceAll(' ','-')||

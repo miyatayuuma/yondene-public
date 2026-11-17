@@ -18,7 +18,7 @@ const ACTION_WRITING_IDS=new Set(FOREST_ACTION_WRITING_IDS);
 const safeEnd=(id,comma=false)=>ACTION_WRITING_IDS.has(id)?
   '（ねこはしっぽをゆっくりふった。）':GOODBYE[id]||(comma?'また、森で会おうね。':'また森で会おうね。');
 const WRONG_FIRST_PERSON=FOREST_WRONG_FIRST_PERSON;
-export const FOREST_PROMPT_VERSION='forest-scene-generation-v22-profile2';
+export const FOREST_PROMPT_VERSION='forest-scene-generation-v23-profile2';
 const PROMPT_VERSION=FOREST_PROMPT_VERSION;
 const clean=value=>typeof value==='string'?value.trim().replace(/\s+/gu,' '):'';
 function readJson(storage,key,fallback){
@@ -195,7 +195,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     typeof generate!=='function')throw Error('base and generate are required');
   let pending=null,pendingScripted=null,history=[],sessionCount=0,repliesThisSession=0,fallbackTurns=0,serial=0,closed=false,epoch=0,
     inflight=null,activeCharacterProfile=null,activeDaily=null,activeDailyInput=null,activeOriginal=null,activeTopic=null,
-    displayedTopicKey='',encounterDisplayed=false,activeSituation=null,twinNames=null,queuedFrame=null,activeFrameSource={};
+    displayedTopicKey='',encounterDisplayed=false,activeSituation=null,twinNames=null,queuedFrame=null;
   const daily=createForestDailyContextSession({storage,storageKey:storageKey+':daily',now});
   const reviewSession=createForestReflectionSpotlightSession({storage,
     storageKey:storageKey+':review-reactions',now});
@@ -263,11 +263,11 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
       return null;
     }finally{cancelTimeout(timeout);if(inflight?.controller===controller)inflight=null}
   }
-  function present(result,choices,closing=false){
+  function present(result,choices,closing=false,source=pending){
     if(!result.turns)return {...(result.mark?{mark:result.mark}:{}),text:result.text,choices,
       ...(closing?{conversationComplete:true}:{})};
     const [first,second]=result.turns;
-    queuedFrame={characterId:'twins',source:pending||activeFrameSource,
+    queuedFrame={characterId:'twins',source,
       result:twinDialogueFrame(second,twinNames,{choices,closing})};
     return twinDialogueFrame(first,twinNames,{next:second});
   }
@@ -283,7 +283,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
   function finish(characterId){
     const text=safeEnd(characterId);
     return {text,choices:[],conversationComplete:true,
-      ...(twinNames&&MULTI_SPEAKER.has(characterId)?{mode:'twins',speakerName:twinNames.secondName,speakerSlot:2}:{})};
+      ...(twinNames&&MULTI_SPEAKER.has(characterId)?{mode:'twins',speakerName:encounterDisplayed?twinNames.secondName:'ふたご',speakerSlot:encounterDisplayed?2:0}:{})};
   }
   async function sourceStillAllowed({reviewEvidence,sourceMemoryId,dailySourceMemoryId}){
     try{
@@ -304,7 +304,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
   async function start(identity){
     const generation=++epoch;
     closed=false;pending=null;pendingScripted=null;history=[];sessionCount=0;
-    twinNames=null;queuedFrame=null;activeFrameSource={};
+    twinNames=null;queuedFrame=null;
     repliesThisSession=0;fallbackTurns=0;
     displayedTopicKey='';encounterDisplayed=false;
     activeCharacterProfile=null;
@@ -438,7 +438,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
       if(selected&&original)daily.selected(characterId,selected.label);
       return original?scripted(original,characterId):{text:safeEnd(characterId),choices:[],conversationComplete:true};
     }
-    pending=null;activeFrameSource=current;
+    pending=null;
     const label=current.choices.find(choice=>choice.id===choiceId).label;
     const allowed=await sourceStillAllowed(current);
     if(closed||generation!==epoch)return null;
@@ -463,7 +463,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
         ...(current.sourceKind==='reflection'?{}:{text:generated.text}),
         closing:true,mode:'relay',modelId,promptVersion:PROMPT_VERSION,
         elapsedMs:generated.elapsedMs,turn:1});
-      return present(generated,[],true);
+      return present(generated,[],true,current);
     }
     history.push({playerChoice:label});history=history.slice(-4);
     record({event:'selected-offered-choice',characterId,
@@ -491,7 +491,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
         activeDaily?.scene?.kind||'ambient',
       closing,modelId,promptVersion:PROMPT_VERSION,
       elapsedMs:generated.elapsedMs,turn:repliesThisSession});
-    if(closing)return present(generated,[],true);
+    if(closing)return present(generated,[],true,current);
     return decorate(characterId,generated,{
       ...(generated.mark?{mark:generated.mark}:{}),sourceKind:current.sourceKind,
       sourceMemoryId:current.sourceMemoryId,
@@ -502,6 +502,9 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
   return {
     start,select,
     onDisplayed(result,identity){
+      // A greeting that failed before either twin spoke is still a first
+      // encounter on the next visit. No names or story were presented.
+      if(twinNames&&!encounterDisplayed&&!result?.autoNext)return;
       if(!encounterDisplayed&&typeof result?.text==='string'){
         encounterDisplayed=true;
         if(twinNames)base.pinTwinNames?.(twinNames);
@@ -510,7 +513,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
         reviewSession.visited();
       }
       if(pending?.reviewSpotlightKey&&pending.characterId===identity?.characterId&&
-        (result?.text===pending.text||result?.mode==='twins')){
+        (result?.text===pending.text||result?.mode==='twins'&&!result.autoNext)){
         reviewSession.displayed(identity.characterId,{key:pending.reviewSpotlightKey,
           bookKey:pending.reviewSpotlightBookKey});
         pending.reviewSpotlightKey='';
@@ -521,7 +524,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
       const scene=activeDaily?.scene;
       if(scene?.evidence!=='reviewed'||!pending||
         pending.characterId!==identity?.characterId||
-        (result?.text!==pending.text&&result?.mode!=='twins')||displayedTopicKey===scene.id)return;
+        (result?.text!==pending.text&&(result?.mode!=='twins'||result.autoNext))||displayedTopicKey===scene.id)return;
       displayedTopicKey=scene.id;
       record({event:'daily-topic-displayed',characterId:identity.characterId,
         topicKey:scene.id,kind:scene.kind,promptVersion:PROMPT_VERSION});
@@ -531,7 +534,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
       if(!frame||frame.characterId!==identity?.characterId)return base.advance?.(identity)||null;
       queuedFrame=null;
       const generation=epoch;
-      const allowed=await sourceStillAllowed(frame.source);
+      const allowed=!frame.source||await sourceStillAllowed(frame.source);
       if(closed||generation!==epoch)return null;
       if(!allowed){pending=null;return finish(frame.characterId)}
       return frame.result;

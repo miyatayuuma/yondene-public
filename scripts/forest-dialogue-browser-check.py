@@ -25,12 +25,17 @@ import {createForestDialogueDirector} from '../reading-shelf-firebase/book-fores
 import {createForestLiveDialogueDirector} from '../reading-shelf-firebase/book-forest-live-dialogue.mjs';
 import {profileFixture} from '../reading-shelf-firebase/forest-profile-fixture.mjs';
 window.testPrompts=[];
+const namePair={id:'fixture-pair',schemaVersion:1,approval:'approved',firstName:'あお',secondName:'そら'};
 const dialogue=createForestLiveDialogueDirector({
-  base:createForestDialogueDirector({storage:localStorage}),storage:localStorage,
-  startDelayMs:0,requireCharacterProfile:true,getCharacterProfiles:()=>FOREST_AI_SPEAKER_IDS.map(id=>profileFixture({id,firstPerson:'わたし'})),
+  base:createForestDialogueDirector({storage:localStorage,getTwinNames:()=>[namePair]}),storage:localStorage,
+  startDelayMs:0,requireCharacterProfile:true,getCharacterProfiles:()=>[...FOREST_AI_SPEAKER_IDS,'twins'].map(id=>profileFixture({id,firstPerson:'わたし'})),
   generate:async prompt=>{
     testPrompts.push(prompt);
     if(new URLSearchParams(location.search).has('fail'))throw Error('fixture unavailable');
+    if(prompt.npc.id==='twins')return {
+      turns:prompt.mode==='opening'?[{speakerSlot:1,text:'わたしはあお。'},{speakerSlot:2,text:'わたしはそら。'}]:
+        [{speakerSlot:2,text:'小川を見に行こう。'},{speakerSlot:1,text:'足もとに気をつけてね。'}],
+      choices:prompt.closing?[]:['いっしょに見る','またね']};
     return {text:prompt.mode==='opening'?'まるい木の実を見つけたよ。':'じゃあ、いっしょに見てみよう。',
       choices:prompt.closing?[]:['いっしょに見る','ここで待つ']};
   }
@@ -80,6 +85,20 @@ try:
         expect_message('まるい木の実を見つけたよ。')
         assert not page.evaluate('testPrompts.at(-1).context.situation.firstEncounter')
         page.screenshot(path=out / 'revisit.png')
+        page.locator('.bookForestDismiss').click()
+        page.evaluate('forest.setView({x:52,z:30,yaw:0})')
+        page.get_by_role('button', name='はなす', exact=True).click()
+        turns = page.locator('.bookForestTwinTurn')
+        expect(turns.first.locator('.bookForestTwinName')).to_have_text('あお')
+        expect(turns.nth(1).locator('.bookForestTwinName')).to_have_text('そら', timeout=15000)
+        expect(turns.nth(1).locator('.bookForestTwinText')).to_have_attribute('role', 'button')
+        page.get_by_role('button', name='いっしょに見る', exact=True).click()
+        expect(turns.nth(2).locator('.bookForestTwinName')).to_have_text('そら')
+        expect(turns.nth(3).locator('.bookForestTwinName')).to_have_text('あお', timeout=15000)
+        assert page.evaluate('testPrompts.at(-1).context.chosenLabel') == 'いっしょに見る'
+        page.screenshot(path=out / 'twins.png')
+        page.get_by_role('button', name='またね', exact=True).click()
+        expect(page.locator('.bookForestDismiss')).to_have_text('またね', timeout=15000)
         page.goto(url + '?fail=1')
         page.wait_for_function('window.forest !== undefined', timeout=90000)
         page.evaluate('forest.setView({x:23,z:9,yaw:0})')
@@ -88,7 +107,7 @@ try:
         page.screenshot(path=out / 'fallback.png')
         assert not errors and not page.evaluate('forestErrors'), errors
         print(json.dumps({'opening': 'PASS', 'reply': 'PASS', 'closing': 'PASS',
-                          'revisit': 'PASS', 'fallback': 'PASS', 'pageErrors': errors}))
+                          'revisit': 'PASS', 'twins': 'PASS', 'fallback': 'PASS', 'pageErrors': errors}))
         browser.close()
 finally:
     server.shutdown()

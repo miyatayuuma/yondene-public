@@ -145,9 +145,9 @@ test('Health reports all supported generators, including non-speaking cat',async
   const response=await handleRequest(request('/health',{method:'GET'}),{
     OWNER_UID:ownerUid,AI:{run:async()=>({})}});
   assert.equal(response.status,200);
-  assert.equal(response.headers.get('X-Forest-AI-Version'),'forest-dialogue-v22-profile2');
+  assert.equal(response.headers.get('X-Forest-AI-Version'),'forest-dialogue-v23-profile2');
   assert.deepEqual((({profileRevision,...rest})=>rest)(await response.json()),{
-    model:'@cf/google/gemma-4-26b-a4b-it',version:'forest-dialogue-v22-profile2',
+    model:'@cf/google/gemma-4-26b-a4b-it',version:'forest-dialogue-v23-profile2',
     registryRevision:FOREST_ROSTER_REVISION,protocolRevision:FOREST_DIALOGUE_PROTOCOL,
     supportedNpcCount:FOREST_AI_GENERATION_IDS.length,configured:true});
 });
@@ -251,4 +251,24 @@ test('Worker returns only safe model JSON/validation categories without raw exce
     assert.deepEqual(await response.json(),{error:'AI unavailable',code});
     assert.equal(response.headers.get('Cache-Control'),'no-store');
   }
+});
+
+test('twins use the same authenticated Worker contract and reject duplicate speaker slots',async()=>{
+  const speakers=[{slot:1,name:'あお'},{slot:2,name:'そら'}];
+  const twinPrompt={...prompt,mode:'opening',npc:{...profileMeta,id:'twins',voice:'架空の双子'},
+    context:{...prompt.context,speakers,sourceKind:'meet'}};
+  const turns=[{speakerSlot:1,text:'わたしはあお。'},{speakerSlot:2,text:'わたしはそら。'}];
+  let duplicate=false;
+  const env={OWNER_UID:ownerUid,FIREBASE_PROJECT_ID:projectId,AI:{run:async()=>({
+    response:JSON.stringify({turns:duplicate?[turns[0],{...turns[1],speakerSlot:1}]:turns,
+      choices:['こんにちは','森を見る']})})}};
+  const send=p=>handleRequest(request('/dialogue',{body:{prompt:p}}),env,{verifyToken:async()=>ownerUid});
+  const accepted=await send(twinPrompt);
+  assert.equal(accepted.status,200);
+  assert.deepEqual((await accepted.json()).turns,turns);
+  assert.equal((await send({...twinPrompt,context:{...twinPrompt.context,speakers:[]}})).status,400);
+  duplicate=true;
+  const rejected=await send(twinPrompt);
+  assert.equal(rejected.status,502);
+  assert.equal((await rejected.json()).code,'output-validation');
 });

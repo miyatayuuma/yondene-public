@@ -1,6 +1,5 @@
 import {FOREST_CHARACTER_ROW_LIMIT} from './forest-character-registry.mjs';
 import {parseStoryMemoryRows} from './book-forest-story-memory.mjs';
-import {parseForestThoughtSeeds} from './book-forest-thought-seeds.mjs';
 import {validateForestDialogueCues} from './book-forest-dialogue-director.mjs';
 import {validateTwinNamePairs,validateTwinScenes} from './book-forest-twins.mjs';
 import {parseForestCharacterProfiles} from './book-forest-character-profiles.mjs';
@@ -94,18 +93,19 @@ export async function loadPrivateForestDialogue(token,{fetchImpl=fetch}={}){
   sheetUrl.searchParams.append('ranges',"'会話台本'!A1:J250");
   sheetUrl.searchParams.append('ranges',"'ふたご名前'!A1:E40");
   sheetUrl.searchParams.append('ranges',"'ふたご会話'!A1:I200");
-  sheetUrl.searchParams.append('ranges',"'思考の種'!A1:R190");
   sheetUrl.searchParams.append('ranges',"'キャラ設定'!A1:L"+(FOREST_CHARACTER_ROW_LIMIT+1));
   sheetUrl.searchParams.append('ranges',"'話し方'!A1:K"+(FOREST_CHARACTER_ROW_LIMIT+1));
   const data=await authorizedJson(sheetUrl.href,token,fetchImpl);
-  if(!Array.isArray(data.valueRanges)||data.valueRanges.length!==7)
+  if(!Array.isArray(data.valueRanges)||data.valueRanges.length!==6)
     throw Error('非公開の会話台本の形式が正しくありません');
   const catalog=parseStoryMemoryRows(data.valueRanges[0]?.values);
   const cues=parseForestDialogueRows(data.valueRanges[1]?.values);
   const twinNames=parseTwinNameRows(data.valueRanges[2]?.values);
   const twinScenes=parseTwinSceneRows(data.valueRanges[3]?.values);
-  const thoughtSeeds=parseForestThoughtSeeds(data.valueRanges[4]?.values);
-  const characterProfiles=parseForestCharacterProfiles(data.valueRanges[5]?.values,
-    data.valueRanges[6]?.values);
-  return {catalog,cues,twinNames,twinScenes,thoughtSeeds,characterProfiles};
+  const characterProfiles=parseForestCharacterProfiles(data.valueRanges[4]?.values,
+    data.valueRanges[5]?.values);
+  // Legacy callers still expect thoughtSeeds in the private package; this is
+  // intentionally empty. Character-driven topics now come from verified
+  // story memories and each NPC's profile, not philosophical seed rows.
+  return {catalog,cues,twinNames,twinScenes,thoughtSeeds:[],characterProfiles};
 }

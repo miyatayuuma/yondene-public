@@ -37,7 +37,7 @@ test('generated speech prompt contains no fallback script text or copied voice e
     const serialized=JSON.stringify(p);
     assert.equal(serialized.includes('SENTINEL'),false);
     assert.equal('approvedExamples' in p.npc,false);
-    assert.equal('npcLine' in p.context,false);
+    assert.equal(p.context.npcLine,'');
     assert.equal(p.npc.id,characterId);
   }
 });

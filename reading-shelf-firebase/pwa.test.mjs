@@ -169,9 +169,9 @@ test('single-step sorting options have distinct clear Japanese descriptions',()=
 });
 test('PWA build integrates activity previews and preserves forest module versions',()=>{
   const html=text('index.html'),app=text('app.mjs'),recs=text('recommendations.mjs');
-  const build='20261116-forest-drive-discovery-v18',activityBuild='20261111-activity-preview-v1',
+  const build='20261117-forest-dialogue-simplify-v18',activityBuild='20261111-activity-preview-v1',
     forestBuild='20261110-forest-ai-v6',voiceBuild='20261111-forest-voice-v1',
-    personaBuild='20261116-forest-cat-persona-v17',voiceV8Build='20261111-forest-voice-v8',
+    personaBuild='20261116-forest-cat-persona-v17',dialogueBuild='20261117-forest-dialogue-simplify-v18',voiceV8Build='20261111-forest-voice-v8',
     dailyV10Build='20261112-forest-stories-v10',zukkokeBuild='20261114-zukkoke-v1',
     unchanged='20261019-shelf-v28',readingBuild='20261025-reading-legacy-v1';
   assert.match(html,new RegExp('data-app-build="'+build+'"'));
@@ -183,22 +183,18 @@ test('PWA build integrates activity previews and preserves forest module version
   assert.ok(text('reading-record-editor.mjs').includes("'./reading-record-domain.mjs?build="+readingBuild+"'"));
   assert.ok(app.includes("'./domain.mjs?build=20261115-series-order-v1'"));
   assert.ok(app.includes("'./book-forest.mjs?build="+personaBuild+"'"));
-  assert.ok(app.includes("'./book-forest-drive.mjs?build="+build+"'"));
+  assert.ok(app.includes("'./book-forest-drive.mjs?build=20261116-forest-drive-discovery-v18'"));
   assert.ok(app.includes("'./book-forest-cache.mjs?build="+zukkokeBuild+"'"));
   assert.ok(html.includes('book-forest.css?build='+voiceBuild));
   assert.ok(app.includes("'./firebase-config.mjs?build="+forestBuild+"'"));
   assert.ok(app.includes("'./activity.mjs?build="+activityBuild+"'"));
-  assert.ok(app.includes("'./book-forest-private-dialogue.mjs?build="+personaBuild+"'"));
+  assert.ok(app.includes("'./book-forest-private-dialogue.mjs?build="+dialogueBuild+"'"));
   for(const module of ['book-forest-dialogue-cache']){
-    assert.ok(app.includes("'./"+module+".mjs?build="+personaBuild+"'"),
+    assert.ok(app.includes("'./"+module+".mjs?build="+dialogueBuild+"'"),
       'persona-enabled import: '+module);
   }
-  for(const module of ['book-forest-thought-seeds']){
-    assert.ok(app.includes("'./"+module+".mjs?build="+zukkokeBuild+"'"),
-      'voice-v8 import: '+module);
-  }
   assert.ok(app.includes("'./book-forest-dialogue-director.mjs?build=20261116-forest-cat-persona-v17'"));
-  assert.ok(app.includes("'./book-forest-live-dialogue.mjs?build=20261116-forest-cat-persona-v17'"));
+  assert.ok(app.includes("'./book-forest-live-dialogue.mjs?build="+dialogueBuild+"'"));
   assert.ok(app.includes("'./forest-character-registry.mjs?build="+personaBuild+"'"));
   assert.ok(app.includes("'./book-forest-cloudflare-provider.mjs?build="+personaBuild+"'"));
   assert.ok(app.includes('verifyForestCloudflareRoster'));

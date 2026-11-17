@@ -230,7 +230,15 @@ export async function processQueue(){
       }
       if(existing.has(id)){mark('APPLIED','ALREADY_RECORDED');continue;}
       const integrated=mode.startsWith('integrated-');
-      if(integrated&&(3-done<3||DAILY_TEST_LIMIT-attempts<3))break;
+      let selectedChoices;
+      if(integrated){
+        try{selectedChoices=choice?JSON.parse(choice):[0,0]}catch{}
+        if(!Array.isArray(selectedChoices)||selectedChoices.length>2||
+          selectedChoices.some(c=>!Number.isInteger(c)||c<0||c>1)){
+          mark('ERROR','INVALID_CHOICE');continue;
+        }
+        if(done!==0||DAILY_TEST_LIMIT-attempts<1+selectedChoices.length)break;
+      }
       mark('RUNNING','');SpreadsheetApp.flush();done++;
       let prepared;
       try{
@@ -244,9 +252,6 @@ export async function processQueue(){
             try{prior=JSON.parse(matches[0][15]).conversation.storage}catch{throw Error('PREVIOUS_INPUT_INVALID')}
             if(!prior)throw Error('PREVIOUS_INPUT_INVALID');
           }
-          const selectedChoices=choice?JSON.parse(choice):[0,0];
-          if(!Array.isArray(selectedChoices)||selectedChoices.length>2||
-            selectedChoices.some(c=>!Number.isInteger(c)||c<0||c>1))throw Error('INVALID_CHOICE');
           const snapshot=mode==='integrated-mirror'?mirror:{books:[],reflections:[]};
           const conversation=await probeConversation(originalPeople,originalSources,npc,{
             snapshot,catalog,cues,storage:prior,choices:selectedChoices,

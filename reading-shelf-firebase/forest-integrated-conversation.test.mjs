@@ -128,3 +128,14 @@ test('foraging guard distinguishes unidentified plants, refusals and ordinary kn
     assert.equal(unsafeForestForaging({text:line,choices:['見ている','先へ進む']},context),false,line);
   assert.equal(unsafeForestForaging({text:'焼いたパンがおいしいよ。',choices:['食べよう','とっておく']}),false);
 });
+
+
+test('unidentified forest fruit is guarded even when the model omits the word unknown',()=>{
+  const context={situation:{place:'本の森',presentNpcIds:['mochan']}};
+  const opening={text:'そこの木、なんだかおいしそうな実がなっているね。',
+    choices:['本当だ、おいしそう！','食べられるのかな？']};
+  assert.equal(unsafeForestForaging(opening,context),true);
+  assert.equal(unsafeForestForaging({text:'これ、食べていいのかな？',choices:['食べてみようよ！','ゆっくり見よう。']},
+    {...context,recentTurns:[{npc:opening.text}]}),true);
+  assert.equal(unsafeForestForaging({text:'森で持ってきたパンを食べよう。',choices:['いっしょに食べる','とっておく']},context),false);
+});

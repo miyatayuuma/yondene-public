@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test domain.test.mjs",
+    "test": "node --test domain.test.mjs forest-dialogue-consolidation.test.mjs",
     "test:rules": "firebase emulators:exec --only firestore \"node --test firestore.rules.test.mjs\""
   },
   "devDependencies": {

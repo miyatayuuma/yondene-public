@@ -72,7 +72,7 @@ const reviewReplies=result.trace.filter(t=>t.prompt.mode==='reply'&&t.prompt.con
 const summary={...result.summary,versions,source:data.provenance||'private-readonly',
   transport:useModel?'real-gemma':'synthetic-model-output',qualityAccepted:false,
   structural:{storyReplies:storyReplies.length,groundedStoryReplies:storyReplies.filter(t=>t.prompt.context.topic?.fact).length,
-    reviewReplies:reviewReplies.length,continuationReviewTasks:reviewReplies.filter(t=>/直前の会話|直前に選ばれた/u.test(t.prompt.task)).length,
+    reviewReplies:reviewReplies.length,continuationReviewTasks:reviewReplies.filter(t=>/直前の会話|直前に選ばれた|選択された問い/u.test(t.prompt.task)).length,
     storyOpenings:result.trace.filter(t=>t.prompt.mode==='opening'&&t.prompt.context.sourceKind==='story').length}};
 if(option('--trace-output')){
   const output=resolve(option('--trace-output')),parent=realpathSync(dirname(output));

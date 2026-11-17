@@ -4,7 +4,7 @@ import {validateForestGestureMark,validateForestGestureText} from '../../../read
 // よんでね 本の森: a small, owner-only proxy for the free Workers AI allowance.
 // No bookshelf data, Firebase private credentials, or Cloudflare API keys here.
 const MODEL='@cf/google/gemma-4-26b-a4b-it';
-export const FOREST_WORKER_VERSION='forest-dialogue-v20-profile2';
+export const FOREST_WORKER_VERSION='forest-dialogue-v21-profile2';
 const VERSION=FOREST_WORKER_VERSION;
 const JWKS_URL='https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com';
 const ORIGINS=new Set(['https://kodomo-reading-shelf-87f11.web.app',
@@ -147,7 +147,7 @@ export function forestGenerationInput(prompt){
           'mark={surface:noteまたはgroundまたはleaf,word:ひらがなと小学1年生までの漢字・読点句点・！？からなる1〜48文字}。'+
           '書かない場合はmark:null。人語の発声・心の声は禁止。markの文字種はサーバーでも検証する。':
           '')+
-        'closing=trueなら新たな質問をせず、choicesは空配列とする。'},
+        'closing=trueでも直前の問いや頼みに先に答え、約束した内容をまた今度へ先送りしない。新たな質問をせずchoicesは空配列とする。'},
         {role:'user',content:JSON.stringify(prompt)}],
       max_completion_tokens:320,temperature:.75,
       chat_template_kwargs:{enable_thinking:false}};

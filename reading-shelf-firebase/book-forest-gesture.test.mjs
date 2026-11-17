@@ -38,6 +38,7 @@ test('nonverbal cat narration accepts varied subjects and omitted subjects, but 
   ];
   for(const text of natural)assert.equal(validateForestGestureText(text),true,text);
   const invalid=[
+    '（こんにちは！）',
     '（ねこは心の中で王さまに返事をした。）',
     '（困ったな、と心の中で思った。）',
     '（ねこは王さまに向かっておはようと言った。）',

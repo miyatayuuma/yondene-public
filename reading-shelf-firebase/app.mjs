@@ -23,6 +23,7 @@ import {saveCachedForestDialogue,loadCachedForestDialogue,clearCachedForestDialo
 import {createForestDialogueDirector} from './book-forest-dialogue-director.mjs?build=20261116-forest-cat-persona-v17';
 import {diagnoseForestCharacters} from './book-forest-character-profiles.mjs?build=20261117-forest-profile-contract-v19';
 import {createForestLiveDialogueDirector} from './book-forest-live-dialogue.mjs?build=20261117-forest-profile-contract-v19';
+import {selectRecentForestReflectionEntries,normalizeRecentForestReflection} from './book-forest-reflection-source.mjs?build=20261117-forest-context-probe-v1';
 import {resetForestConversationHistoryOnce} from './book-forest-conversation-reset.mjs?build=20261110-forest-ai-v6';
 import {forestConversationLog} from './book-forest-conversation-log.mjs?build=20261110-forest-ai-v6';
 import {createForestAIGenerator} from './book-forest-ai-provider.mjs?build=20261110-forest-ai-v6';
@@ -758,30 +759,16 @@ function renderFamily(){
                 if(recentReflectionsPromise)return recentReflectionsPromise;
                 recentReflectionsPromise=(async()=>{
                   if(role!=='owner'||fid!==familyId||user?.uid!==ownerUid)return [];
-                  const readIds=new Set(books.filter(book=>book.status==='read').map(book=>book.id));
                   const snapshot=await getDocs(query(familyCollection('activity'),
                     orderBy('createdAt','desc'),limit(60)));
-                  const seen=new Set(),selected=[];
-                  for(const entry of snapshot.docs.map(item=>item.data())){
-                    if(entry.kind!=='reflection'||entry.hidden||
-                      !readIds.has(entry.bookId)||typeof entry.sourceId!=='string'||
-                      !entry.sourceId)continue;
-                    const key=entry.bookId+':'+entry.sourceId;
-                    if(seen.has(key))continue;
-                    seen.add(key);selected.push(entry);
-                    if(selected.length>=12)break;
-                  }
+                  const selected=selectRecentForestReflectionEntries(
+                    snapshot.docs.map(item=>item.data()),books);
                   const recent=await Promise.all(selected.map(async entry=>{
                     try{
                       const item=await getDoc(familyDoc('books',entry.bookId,
                         'childReflections',entry.sourceId));
                       if(!item.exists())return null;
-                      const value=item.data();
-                      if(value.hidden||!['verbatim','parent-summary'].includes(value.attribution))return null;
-                      const quote=String(value.quote||value.text||'').trim();
-                      const createdAt=value.createdAt?.toMillis?.()||entry.createdAt?.toMillis?.()||0;
-                      return quote&&createdAt?{id:item.id,bookId:entry.bookId,
-                        quote,attribution:value.attribution,createdAt}:null;
+                      return normalizeRecentForestReflection(entry,item.data(),{id:item.id});
                     }catch{return null}
                   }));
                   if(role!=='owner'||fid!==familyId||user?.uid!==ownerUid)return [];

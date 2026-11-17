@@ -82,7 +82,9 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
   // Personhood is always loaded from the same private Sheets as other NPCs.
   // Only the response format differs; this code has no cat personality text.
   const nonverbal=ACTION_WRITING_IDS.has(characterId);
-  const context={sourceKind,
+  // Existing Worker protocol requires a string field; keep it empty rather than
+  // sending a completed script as a model-generation anchor.
+  const context={npcLine:'',sourceKind,
     chosenLabel:clean(chosenLabel).slice(0,24),...(situation?{situation}:{}),
     recentTurns:history.slice(-4),...(topic?{topic}:{}),
     ...(reviewSpotlight?{readerReflection:Object.fromEntries(

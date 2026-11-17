@@ -716,3 +716,35 @@ test('changing only the private cat profile changes the generated prompt without
   assert.doesNotMatch(received[1].npc.voice,/人物像A/);
   assert.equal(received[0].context.sourceKind,'meet');
 });
+
+
+test('model failures retain distinct safe categories and fallback causality',async()=>{
+  for(const [message,reason] of [
+    ['Forest AI diagnostic model-json','model-json'],
+    ['Forest AI diagnostic output-validation','output-validation'],
+    ['Invalid Forest AI JSON','response-json'],
+    ['Forest AI unavailable (401)','authentication'],
+    ['Failed to fetch','network']
+  ]){
+    const storage=memoryStorage();
+    const director=createForestLiveDialogueDirector({base:base(),storage,startDelayMs:0,
+      generate:async()=>{throw Error(message)}});
+    const result=await director.start(identity);
+    assert.equal(result.text,'今日はいい風がふいているね。');
+    const entries=JSON.parse(storage.getItem('forest-ai-local-v1:log'));
+    assert.equal(entries.find(entry=>entry.event==='generation-failed')?.reason,reason,message);
+    assert.ok(entries.some(entry=>entry.event==='script-fallback'));
+    assert.ok(entries.every(entry=>typeof entry.protocolRevision==='string'));
+  }
+});
+
+test('an automatic timeout is diagnosed, whereas player cancellation is not a model failure',async()=>{
+  const storage=memoryStorage();
+  const director=createForestLiveDialogueDirector({base:base(),storage,startDelayMs:0,
+    requestTimeoutMs:5,generate:async()=>new Promise(()=>{})});
+  const result=await director.start(identity);
+  assert.equal(result.text,'今日はいい風がふいているね。');
+  const events=JSON.parse(storage.getItem('forest-ai-local-v1:log'));
+  assert.ok(events.some(event=>event.event==='generation-failed'&&event.reason==='timeout'));
+  assert.ok(events.some(event=>event.event==='script-fallback'&&event.reason==='generation-unavailable'));
+});

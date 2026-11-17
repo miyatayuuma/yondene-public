@@ -26,8 +26,9 @@ const {createForestCloudflareGenerator,verifyForestCloudflareRoster}=await load(
 const {handleRequest}=await load('cloudflare/forest-ai/src/index.mjs');
 const {FOREST_ROSTER_REVISION,FOREST_CHARACTER_REGISTRY}=await load('reading-shelf-firebase/forest-character-registry.mjs');
 const {diagnoseForestCharacters}=await load('reading-shelf-firebase/book-forest-character-profiles.mjs');
+const {profileFixture}=await load('reading-shelf-firebase/forest-profile-fixture.mjs');
 const now=Date.UTC(2026,10,16,3);
-const profiles=ids.map(id=>({id,summary:'慎重で木の実を集める架空の人物',values:'友だち',
+const profiles=ids.map(id=>profileFixture({id,summary:'慎重で木の実を集める架空の人物',values:'友だち',
   motivation:'木の実を見つける',relationships:'森の友だち',behavior:'木を見る',reactions:'小声で驚く',
   firstPerson:'ぼく',address:'きみ',cadence:'短く静かに話す',endings:'固定しない',habits:'なし',
   expression:'自然に',emotion:'小さく笑う',avoid:'説教しない',review:'確認済'}));
@@ -71,7 +72,7 @@ test('zero-cue future NPC: real director -> provider -> Worker -> displayed open
   assert.equal(s.prompts[0].context.sourceKind,'meet');
   assert.equal(s.prompts[0].context.situation.firstEncounter,true);
   assert.match(s.prompts[0].task,/初対面/);
-  assert.match(s.prompts[0].npc.voice,/一人称:ぼく/);
+  assert.match(s.prompts[0].npc.voice,/一人称 \[.*\]:ぼく/);
   const reply=await s.live.select({characterId:ids[0],choiceId:first.choices[0].id});
   assert.equal(reply.text,'木の実をさがしてみよう。');
   const closing=await s.live.select({characterId:ids[0],choiceId:reply.choices[0].id});

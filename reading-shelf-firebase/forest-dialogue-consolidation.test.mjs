@@ -21,8 +21,8 @@ test('private dialogue loads without legacy thought seed tab', async ()=>{
   const ranges=new URL(requested[1]).searchParams.getAll('ranges');
   assert.equal(ranges.length,6);
   assert.equal(ranges.some(range=>range.includes('思考の種')),false);
-  assert.equal(ranges.some(range=>range.includes('キャラ設定')),true);
-  assert.equal(ranges.some(range=>range.includes('話し方')),true);
+  assert.equal(ranges.some(range=>range.includes('人物設定')),true);
+  assert.equal(ranges.some(range=>range.includes('根拠資料')),true);
   assert.deepEqual(data.thoughtSeeds,[]);
   assert.deepEqual(data.characterProfiles,[]);
 });

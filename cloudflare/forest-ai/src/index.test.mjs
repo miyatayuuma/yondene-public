@@ -27,8 +27,9 @@ test('Firebase JWT verification checks RS256 signature, issuer, expiry and allow
   }
 });
 
+const profileMeta={profileSchemaVersion:2,profileRevision:'profile2-0123456789abcdef',profileVersion:'test-v2'};
 const prompt={mode:'choices',closing:false,task:'返答候補を作る',
-  npc:{id:'kiki',voice:'元気',approvedExamples:['荷物、気をつけてね。']},
+  npc:{...profileMeta,id:'kiki',voice:'元気',approvedExamples:['荷物、気をつけてね。']},
   context:{npcLine:'いい天気だね。',
   chosenLabel:'',recentTurns:[]},constraints:['短い日本語にする']};
 function request(path='/dialogue',{
@@ -45,7 +46,7 @@ test('Worker accepts only authenticated approved-origin requests and invokes Gem
       JSON.stringify({choices:['どこへ行く？','一緒に歩こう']})}}]}}}};
   const response=await handleRequest(request(),env,{verifyToken:async()=>ownerUid});
   assert.equal(response.status,200);
-  assert.deepEqual(await response.json(),{choices:['どこへ行く？','一緒に歩こう']});
+  assert.deepEqual((({profileRevision,...rest})=>rest)(await response.json()),{choices:['どこへ行く？','一緒に歩こう']});
   assert.equal(called,1);
   assert.equal(modelInput.model,'@cf/google/gemma-4-26b-a4b-it');
   assert.equal(modelInput.payload.chat_template_kwargs.enable_thinking,false);
@@ -70,15 +71,15 @@ test('Worker fails closed without owner configuration and handles preflight and 
   const liveEnv={...env,OWNER_UID:ownerUid,AI:{run:async()=>{throw Error('quota exceeded')}}};
   const limited=await handleRequest(request(),liveEnv,{verifyToken:async()=>ownerUid});
   assert.equal(limited.status,429);
-  assert.deepEqual(await limited.json(),{error:'AI quota reached'});
-  const invalid=await handleRequest(request('/dialogue',{body:{prompt:{...prompt,npc:{id:'unregistered',voice:'ねこ'}}}}),
+  assert.deepEqual((({profileRevision,...rest})=>rest)(await limited.json()),{error:'AI quota reached'});
+  const invalid=await handleRequest(request('/dialogue',{body:{prompt:{...prompt,npc:{...profileMeta,id:'unregistered',voice:'ねこ'}}}}),
     liveEnv,{verifyToken:async()=>ownerUid});
   assert.equal(invalid.status,400);
   const temporarilyBusy=await handleRequest(request(),{...liveEnv,
     AI:{run:async()=>{throw Object.assign(Error('Capacity temporarily exceeded'),{status:429})}}},
     {verifyToken:async()=>ownerUid});
   assert.equal(temporarilyBusy.status,429);
-  assert.deepEqual(await temporarilyBusy.json(),{error:'AI temporarily busy'});
+  assert.deepEqual((({profileRevision,...rest})=>rest)(await temporarilyBusy.json()),{error:'AI temporarily busy'});
 });
 
 test('Worker normalizes three offered choices and accepts a closing without buttons',async()=>{
@@ -88,11 +89,11 @@ test('Worker normalizes three offered choices and accepts a closing without butt
     run:async()=>({choices:[{message:{content:JSON.stringify(outputs.shift())}}]})}};
   const verifyToken=async()=>ownerUid;
   const first=await handleRequest(request(),env,{verifyToken});
-  assert.deepEqual(await first.json(),{choices:['風の音を聞く','橋を見に行く']});
+  assert.deepEqual((({profileRevision,...rest})=>rest)(await first.json()),{choices:['風の音を聞く','橋を見に行く']});
   const closing=await handleRequest(request('/dialogue',{body:{prompt:{...prompt,
     mode:'reply',closing:true}}}),env,{verifyToken});
   assert.equal(closing.status,200);
-  assert.deepEqual(await closing.json(),{text:'じゃあ、またね。',choices:[]});
+  assert.deepEqual((({profileRevision,...rest})=>rest)(await closing.json()),{text:'じゃあ、またね。',choices:[]});
 });
 
 test('Worker accepts a scene-specific opening with two choices, using the same owner authentication',async()=>{
@@ -107,7 +108,7 @@ test('Worker accepts a scene-specific opening with two choices, using the same o
     mode:'opening',context:{...prompt.context,today:{scene:{id:'tree',focus:'風を聞く',tone:'静か'}}}}}}),
     env,{verifyToken:async()=>ownerUid});
   assert.equal(response.status,200);
-  assert.deepEqual(await response.json(),{text:'あの木のそば、風が気持ちいいね。',
+  assert.deepEqual((({profileRevision,...rest})=>rest)(await response.json()),{text:'あの木のそば、風が気持ちいいね。',
     choices:['見に行く','少し休む']});
   assert.match(systemText,/今日のscene/);
 });
@@ -125,7 +126,7 @@ test('Worker accepts an outsider reaction with bounded reader context and new NP
     }}};
   const response=await handleRequest(request('/dialogue',{body:{prompt:{
     mode:'opening',closing:false,task:'感想に第三者として反応する',
-    npc:{id:'hachibee',voice:'せっかちな行動派',approvedExamples:[]},
+    npc:{...profileMeta,id:'hachibee',voice:'せっかちな行動派',approvedExamples:[]},
     context:{npcLine:'本の感想を聞いた。',recentTurns:[],readerReflection:{
       bookTitle:'よその本',quote:'題名を変えたい',attribution:'verbatim',
       perspective:'別作品なので他人の話として聞く'}},
@@ -134,7 +135,7 @@ test('Worker accepts an outsider reaction with bounded reader context and new NP
   assert.equal(response.status,200);
   assert.equal(forwarded.context.readerReflection.bookTitle,'よその本');
   assert.match(system,/第三者の立場/);
-  assert.deepEqual(await response.json(),{
+  assert.deepEqual((({profileRevision,...rest})=>rest)(await response.json()),{
     text:'へえ、そんな題名にするのか。ちょっと面白いな。',
     choices:['そうだね','もっと考える']});
 });
@@ -144,9 +145,9 @@ test('v17 health reports all supported generators, including non-speaking cat',a
   const response=await handleRequest(request('/health',{method:'GET'}),{
     OWNER_UID:ownerUid,AI:{run:async()=>({})}});
   assert.equal(response.status,200);
-  assert.equal(response.headers.get('X-Forest-AI-Version'),'forest-dialogue-v17');
-  assert.deepEqual(await response.json(),{
-    model:'@cf/google/gemma-4-26b-a4b-it',version:'forest-dialogue-v17',
+  assert.equal(response.headers.get('X-Forest-AI-Version'),'forest-dialogue-v19-profile2');
+  assert.deepEqual((({profileRevision,...rest})=>rest)(await response.json()),{
+    model:'@cf/google/gemma-4-26b-a4b-it',version:'forest-dialogue-v19-profile2',
     registryRevision:FOREST_ROSTER_REVISION,protocolRevision:FOREST_DIALOGUE_PROTOCOL,
     supportedNpcCount:FOREST_AI_GENERATION_IDS.length,configured:true});
 });
@@ -170,7 +171,7 @@ test('all three Zukkoke NPC IDs are accepted as opening speakers by Worker',asyn
       choices:['見に行こう','あとでね']})}}]}}}};
   for(const npcId of ['hachibee','hakase','mochan']){
     const response=await handleRequest(request('/dialogue',{body:{prompt:{...prompt,
-      mode:'opening',npc:{id:npcId,voice:'テスト用の固有の口調'},
+      mode:'opening',npc:{...profileMeta,id:npcId,voice:'テスト用の固有の口調'},
       context:{...prompt.context,sourceKind:'meet'}}}}),env,
       {verifyToken:async()=>ownerUid});
     assert.equal(response.status,200,npcId+' must not fail with HTTP 400');
@@ -189,12 +190,12 @@ test('silent cat generation accepts short hiragana ground/leaf writing, never di
     async run(_model,request){messages.push(request.messages);return {choices:[{message:{
       content:JSON.stringify(output.shift())}}]}}
   }};
-  const gesture={...prompt,mode:'opening',npc:{id:'cat',voice:'非公開Sheetsにある架空の人物像・テスト用A',approvedExamples:[]},
+  const gesture={...prompt,mode:'opening',npc:{...profileMeta,id:'cat',voice:'非公開Sheetsにある架空の人物像・テスト用A',approvedExamples:[]},
     context:{...prompt.context,sourceKind:'meet'},task:'ねこの行動を生成する'};
   const res=await handleRequest(request('/dialogue',{body:{prompt:gesture}}),env,
     {verifyToken:async()=>ownerUid});
   assert.equal(res.status,200);
-  assert.deepEqual(await res.json(),{text:'（ねこはまえあしでじめんをなぞった。）',
+  assert.deepEqual((({profileRevision,...rest})=>rest)(await res.json()),{text:'（ねこはまえあしでじめんをなぞった。）',
     choices:['みてみる','ついていく'],mark:{surface:'ground',word:'こっち'}});
   assert.match(messages[0][0].content,/非発話モード/);
   assert.match(messages[0][1].content,/非公開Sheetsにある架空の人物像/);
@@ -215,7 +216,7 @@ test('silent cat generation accepts short hiragana ground/leaf writing, never di
   const end=await handleRequest(request('/dialogue',{body:{prompt:{...gesture,
     mode:'reply',closing:true}}}),env,{verifyToken:async()=>ownerUid});
   assert.equal(end.status,200);
-  assert.deepEqual(await end.json(),{text:'（ねこはおちばにちいさくかいた。）',
+  assert.deepEqual((({profileRevision,...rest})=>rest)(await end.json()),{text:'（ねこはおちばにちいさくかいた。）',
     choices:[],mark:{surface:'leaf',word:'またね'}});
 });
 
@@ -227,7 +228,7 @@ test('Worker rejects nonverbal speech and writing outside grade-one glyphs',asyn
   ];
   const env={OWNER_UID:ownerUid,FIREBASE_PROJECT_ID:projectId,AI:{
     run:async()=>({choices:[{message:{content:JSON.stringify(invalid.shift())}}]})}};
-  const gesture={...prompt,mode:'opening',npc:{id:'cat',voice:'ねこは無言',approvedExamples:[]}};
+  const gesture={...prompt,mode:'opening',npc:{...profileMeta,id:'cat',voice:'ねこは無言',approvedExamples:[]}};
   for(let i=0;i<3;i++){
     const res=await handleRequest(request('/dialogue',{body:{prompt:gesture}}),env,
       {verifyToken:async()=>ownerUid});

@@ -31,6 +31,11 @@ export function forestConversationLog({storage,uid,familyId}={}){
       if(safeReason(item.reason))safe.reason=item.reason;
       if(typeof item.protocolRevision==='string'&&/^[A-Za-z0-9._-]{1,64}$/u.test(item.protocolRevision))
         safe.protocolRevision=item.protocolRevision;
+      if(typeof item.profileRevision==='string'&&/^profile2-[a-f0-9]{16}$/u.test(item.profileRevision))
+        safe.profileRevision=item.profileRevision;
+      if(typeof item.profileVersion==='string'&&/^[A-Za-z0-9._-]{1,80}$/u.test(item.profileVersion))
+        safe.profileVersion=item.profileVersion;
+      if(item.profileSchemaVersion===2)safe.profileSchemaVersion=2;
       for(const key of ['elapsedMs','turn'])if(Number.isFinite(item[key]))safe[key]=item[key];
       if(typeof item.closing==='boolean')safe.closing=item.closing;
       events.push(safe);

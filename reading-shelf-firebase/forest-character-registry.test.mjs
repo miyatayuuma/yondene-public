@@ -1,3 +1,4 @@
+import {profileFixture} from './forest-profile-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -108,7 +109,7 @@ test('private character profiles are ID-gated, but the row limit permits future 
   assert.ok(!FOREST_CHARACTER_IDS.includes('twins_second'));
   const fields={summary:'人物像',cadence:'簡潔',firstPerson:'ぼく',avoid:'無理に説教しない'};
   assert.deepEqual(validForestCharacterProfiles([{id:'unregistered',...fields}]),[]);
-  assert.equal(validForestCharacterProfiles([{id:'hakase',...fields,
+  assert.equal(validForestCharacterProfiles([profileFixture({id:'hakase',...fields,
     values:'',motivation:'',relationships:'',behavior:'',reactions:'',address:'',
-    endings:'',habits:'',expression:'',emotion:'',review:''}]).length,1);
+    endings:'',habits:'',expression:'',emotion:'',review:''})]).length,1);
 });

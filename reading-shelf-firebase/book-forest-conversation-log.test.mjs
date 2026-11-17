@@ -39,3 +39,12 @@ test('diagnostic export preserves failure-fallback causality and protocol, never
   assert.equal(exported[2].protocolRevision,undefined);
   assert.doesNotMatch(JSON.stringify(exported),/secret|PRIVATE|API token|responseBody|rawError/u);
 });
+
+test('persona receipts export only fixed-shape revisions and short safe version IDs',()=>{
+  const rows=[{event:'generated-opening',profileRevision:'profile2-0123456789abcdef',profileVersion:'v0.5-schema2',profileSchemaVersion:2},
+    {event:'generated-opening',profileRevision:'private free text',profileVersion:'private words in metadata'}];
+  const log=forestConversationLog({uid:'u',familyId:'f',storage:{getItem:()=>JSON.stringify(rows)}});
+  assert.equal(log[0].profileRevision,rows[0].profileRevision);
+  assert.equal(log[0].profileVersion,'v0.5-schema2');assert.equal(log[0].profileSchemaVersion,2);
+  assert.equal(log[1].profileRevision,undefined);assert.equal(log[1].profileVersion,undefined);
+});

@@ -3,7 +3,7 @@ import {validateForestGestureMark,validateForestGestureText} from '../../../read
 // よんでね 本の森: a small, owner-only proxy for the free Workers AI allowance.
 // No bookshelf data, Firebase private credentials, or Cloudflare API keys here.
 const MODEL='@cf/google/gemma-4-26b-a4b-it';
-const VERSION='forest-dialogue-v17';
+const VERSION='forest-dialogue-v19-profile2';
 const JWKS_URL='https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com';
 const ORIGINS=new Set(['https://kodomo-reading-shelf-87f11.web.app',
   'https://kodomo-reading-shelf-87f11.firebaseapp.com']);
@@ -76,7 +76,9 @@ function validPrompt(prompt){
     (prompt.mode===undefined||['choices','opening','reply'].includes(prompt.mode))&&
     (prompt.closing===undefined||typeof prompt.closing==='boolean')&&
     NPCS.has(prompt.npc?.id)&&typeof prompt.npc.voice==='string'&&
-    prompt.npc.voice.length<=2500&&
+    prompt.npc.voice.length>0&&prompt.npc.voice.length<=6000&&
+    prompt.npc.profileSchemaVersion===2&&/^profile2-[a-f0-9]{16}$/u.test(prompt.npc.profileRevision)&&
+    typeof prompt.npc.profileVersion==='string'&&prompt.npc.profileVersion.length<=80&&
     (prompt.npc.approvedExamples===undefined||(Array.isArray(prompt.npc.approvedExamples)&&
       prompt.npc.approvedExamples.length<=2&&prompt.npc.approvedExamples.every(line=>
         typeof line==='string'&&line.length<=100)))&&
@@ -85,7 +87,7 @@ function validPrompt(prompt){
     Array.isArray(prompt.constraints)&&prompt.constraints.length<=12&&
     prompt.constraints.every(item=>typeof item==='string'&&item.length<=500);
 }
-function readCompletion(result,{closing=false,mode='reply',characterId=''}={}){
+export function readCompletion(result,{closing=false,mode='reply',characterId=''}={}){
   let content=result?.choices?.[0]?.message?.content??result?.response;
   if(typeof content!=='string'||content.length>3000)throw Error('Invalid model output');
   content=content.trim().replace(/^```(?:json)?\s*/iu,'').replace(/\s*```$/u,'');
@@ -114,6 +116,37 @@ function readCompletion(result,{closing=false,mode='reply',characterId=''}={}){
     ...(mark?{mark}:{})};
 }
 
+export function forestGenerationInput(prompt){
+  const actionWriting=ACTION_WRITING_IDS.has(prompt.npc.id);
+  return {messages:[{role:'system',content:
+        'あなたは児童向け「本の森」で登場人物の短い即興会話を助ける。'+
+        '子どもの個人情報を質問しない。物語にない出来事を断定しない。'+
+        '日本語で自然に短く'+(actionWriting?'無言の行動を描写する。':'話す。')+
+        '人物像は送信されたnpc.voiceの非公開台帳由来の設定を最優先し、設定を説明するだけの文にしない。'+
+        '各項目の根拠区分・監修状態・適用範囲と本文中の留保を守る。二次資料は原作本文ではない。'+
+        '編集解釈・ゲーム演出・暫定採用は演技の手掛かりであり、原作の確定事実として語らない。'+
+        '今日のsceneはevidence=reviewedなら読了済み原作の承認済み事実を含み、evidence=imaginedなら森の即興の出来事。'+
+        '原作の事実から新たな物語上の出来事を捏造しない。思考の問いや教訓を話す必要はない。'+
+        'readerReflectionがある場合は本の感想を受け止め、別作品の人物なら第三者の立場で反応する。'+
+        '原作に登場した・直接目撃したと偽らず、本人の気持ちを勝手に決めつけない。'+
+        '保護者による要約を子どもの直接の発言として扱わず、感想の追記を要求しない。'+
+        '別のNPCの会話内容を聞いたふりをせず、選択肢を子どもの信念とみなさない。'+
+        '必ずJSONオブジェクトだけを返す。mode=choicesならtextを省略し、choicesを2件、各16字以内。'+
+        'mode=openingならcontext.sourceKind（meet/story/reflection/relay/ambient/review-reaction）とtaskを優先し、'+
+        '台帳のnpcLineをコピーせず、本人の新しい第一声textとchoicesを2件作る。'+
+        '通常の発話NPCのmode=replyならNPC本人のひと言textを65字以内で返す。'+
+        (ACTION_WRITING_IDS.has(prompt.npc.id)?
+          'このNPCは非発話モード。人物像はnpc.voiceの非公開台帳由来の設定を優先し、ここで人物像を推測しない。'+
+          'textは全角丸括弧（ ）で囲んだ無言の行動描写だけ。文字は必要なときだけmarkで表現する。'+
+          'mark={surface:noteまたはgroundまたはleaf,word:ひらがなと小学1年生までの漢字・読点句点・！？からなる1〜48文字}。'+
+          '書かない場合はmark:null。人語の発声・心の声は禁止。markの文字種はサーバーでも検証する。':
+          '')+
+        'closing=trueなら新たな質問をせず、choicesは空配列とする。'},
+        {role:'user',content:JSON.stringify(prompt)}],
+      max_completion_tokens:320,temperature:.75,
+      chat_template_kwargs:{enable_thinking:false}};
+}
+
 export async function handleRequest(request,env,{verifyToken=verifyOwnerIdToken}={}){
   const origin=request.headers.get('Origin')||'';
   const url=new URL(request.url);
@@ -132,46 +165,20 @@ export async function handleRequest(request,env,{verifyToken=verifyOwnerIdToken}
     await verifyToken(authorization.slice(7),{projectId:env.FIREBASE_PROJECT_ID,ownerUid:env.OWNER_UID});
   }catch{return json({error:'Unauthorized'},401,origin)}
   if(!/^application\/json\b/iu.test(request.headers.get('Content-Type')||'')||
-    Number(request.headers.get('Content-Length')||0)>12000)
+    Number(request.headers.get('Content-Length')||0)>48000)
     return json({error:'Bad request'},400,origin);
   let body;
   try{
     const payload=await request.text();
-    if(payload.length>8000)return json({error:'Request too large'},413,origin);
+    if(payload.length>16000)return json({error:'Request too large'},413,origin);
     body=JSON.parse(payload);
   }catch{return json({error:'Bad JSON'},400,origin)}
   if(!validPrompt(body?.prompt))return json({error:'Invalid prompt'},400,origin);
   try{
-    const actionWriting=ACTION_WRITING_IDS.has(body.prompt.npc.id);
-    const result=await env.AI.run(MODEL,{
-      messages:[{role:'system',content:
-        'あなたは児童向け「本の森」で登場人物の短い即興会話を助ける。'+
-        '子どもの個人情報を質問しない。物語にない出来事を断定しない。'+
-        '日本語で自然に短く'+(actionWriting?'無言の行動を描写する。':'話す。')+
-        '人物像は送信されたnpc.voiceの非公開台帳由来の設定を最優先し、設定を説明するだけの文にしない。'+
-        '今日のsceneはevidence=reviewedなら読了済み原作の承認済み事実を含み、evidence=imaginedなら森の即興の出来事。'+
-        '原作の事実から新たな物語上の出来事を捏造しない。思考の問いや教訓を話す必要はない。'+
-        'readerReflectionがある場合は本の感想を受け止め、別作品の人物なら第三者の立場で反応する。'+
-        '原作に登場した・直接目撃したと偽らず、本人の気持ちを勝手に決めつけない。'+
-        '保護者による要約を子どもの直接の発言として扱わず、感想の追記を要求しない。'+
-        '別のNPCの会話内容を聞いたふりをせず、選択肢を子どもの信念とみなさない。'+
-        '必ずJSONオブジェクトだけを返す。mode=choicesならtextを省略し、choicesを2件、各16字以内。'+
-        'mode=openingならcontext.sourceKind（meet/story/reflection/relay/ambient/review-reaction）とtaskを優先し、'+
-        '台帳のnpcLineをコピーせず、本人の新しい第一声textとchoicesを2件作る。'+
-        '通常の発話NPCのmode=replyならNPC本人のひと言textを65字以内で返す。'+
-        (ACTION_WRITING_IDS.has(body.prompt.npc.id)?
-          'このNPCは非発話モード。人物像はnpc.voiceの非公開台帳由来の設定を優先し、ここで人物像を推測しない。'+
-          'textは全角丸括弧（ ）で囲んだ無言の行動描写だけ。文字は必要なときだけmarkで表現する。'+
-          'mark={surface:noteまたはgroundまたはleaf,word:ひらがなと小学1年生までの漢字・読点句点・！？からなる1〜48文字}。'+
-          '書かない場合はmark:null。人語の発声・心の声は禁止。markの文字種はサーバーでも検証する。':
-          '')+
-        'closing=trueなら新たな質問をせず、choicesは空配列とする。'},
-        {role:'user',content:JSON.stringify(body.prompt)}],
-      max_completion_tokens:320,temperature:.75,
-      chat_template_kwargs:{enable_thinking:false}
-    });
-    return json(readCompletion(result,{closing:body.prompt.closing===true,
-      mode:body.prompt.mode||'reply',characterId:body.prompt.npc.id}),200,origin);
+    const result=await env.AI.run(MODEL,forestGenerationInput(body.prompt));
+    return json({...readCompletion(result,{closing:body.prompt.closing===true,
+      mode:body.prompt.mode||'reply',characterId:body.prompt.npc.id}),
+      profileRevision:body.prompt.npc.profileRevision},200,origin);
   }catch(error){
     const message=String(error?.message||'');
     const depleted=/3036|daily free allocation|quota|used up|neurons.*exceed/iu.test(message);

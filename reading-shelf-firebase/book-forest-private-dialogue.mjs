@@ -1,8 +1,7 @@
-import {FOREST_CHARACTER_ROW_LIMIT} from './forest-character-registry.mjs';
 import {parseStoryMemoryRows} from './book-forest-story-memory.mjs';
 import {validateForestDialogueCues} from './book-forest-dialogue-director.mjs';
 import {validateTwinNamePairs,validateTwinScenes} from './book-forest-twins.mjs';
-import {parseForestCharacterProfiles} from './book-forest-character-profiles.mjs';
+import {parseForestCharacterProfiles,parseForestProfileSources,FOREST_PROFILE_ROWS} from './book-forest-character-profiles.mjs';
 
 // The title is a discovery hint, NOT an API credential or spreadsheet ID.
 // The sheet ID, records and OAuth token never appear in the public source.
@@ -69,7 +68,7 @@ async function authorizedJson(url,token,fetchImpl){
     throw Error('会話台帳の読み込みに失敗しました（'+response.status+'）');
   }
   const body=await response.text();
-  if(body.length>240000)throw Error('会話台帳が規定のサイズを超えています');
+  if(body.length>480000)throw Error('会話台帳が規定のサイズを超えています');
   return JSON.parse(body);
 }
 
@@ -93,8 +92,8 @@ export async function loadPrivateForestDialogue(token,{fetchImpl=fetch}={}){
   sheetUrl.searchParams.append('ranges',"'会話台本'!A1:J250");
   sheetUrl.searchParams.append('ranges',"'ふたご名前'!A1:E40");
   sheetUrl.searchParams.append('ranges',"'ふたご会話'!A1:I200");
-  sheetUrl.searchParams.append('ranges',"'キャラ設定'!A1:L"+(FOREST_CHARACTER_ROW_LIMIT+1));
-  sheetUrl.searchParams.append('ranges',"'話し方'!A1:K"+(FOREST_CHARACTER_ROW_LIMIT+1));
+  sheetUrl.searchParams.append('ranges',"'人物設定'!A1:H"+(FOREST_PROFILE_ROWS+2));
+  sheetUrl.searchParams.append('ranges',"'根拠資料'!A1:J500");
   const data=await authorizedJson(sheetUrl.href,token,fetchImpl);
   if(!Array.isArray(data.valueRanges)||data.valueRanges.length!==6)
     throw Error('非公開の会話台本の形式が正しくありません');
@@ -103,9 +102,9 @@ export async function loadPrivateForestDialogue(token,{fetchImpl=fetch}={}){
   const twinNames=parseTwinNameRows(data.valueRanges[2]?.values);
   const twinScenes=parseTwinSceneRows(data.valueRanges[3]?.values);
   const characterProfiles=parseForestCharacterProfiles(data.valueRanges[4]?.values,
-    data.valueRanges[5]?.values);
+    parseForestProfileSources(data.valueRanges[5]?.values));
   // Legacy callers still expect thoughtSeeds in the private package; this is
   // intentionally empty. Character-driven topics now come from verified
   // story memories and each NPC's profile, not philosophical seed rows.
-  return {catalog,cues,twinNames,twinScenes,thoughtSeeds:[],characterProfiles};
+  return {catalog,cues,twinNames,twinScenes,thoughtSeeds:[],characterProfiles,loadedAt:Date.now()};
 }

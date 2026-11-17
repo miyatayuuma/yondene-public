@@ -17,6 +17,7 @@ test('independent GAS probe uses the same parser, prompt and Worker input, with 
   assert.ok(sent.npc.voice.includes('友だちと道具をなおす'));
   assert.equal(sent.context.situation.evidence,'imagined');
   assert.equal('readerReflection' in sent.context,false);
+  assert.ok(sent.constraints.some(rule=>rule.includes('書かない場面はmark:null')));
 });
 test('generated Apps Script saves actual output and exact model input before marking one pending request applied',()=>{
   const output=[],marks=[],requests=[];
@@ -55,6 +56,7 @@ test('real mirror reflection uses the production selector and labels parent summ
     {mode:'mirror-reflection',mirror,now});
   const sent=JSON.parse(p.input.messages[1].content);
   assert.equal(sent.context.sourceKind,'review-reaction');
+  assert.match(sent.task,/readerReflectionの具体的な内容/);
   assert.equal(sent.context.readerReflection.attribution,'parent-summary');
   assert.equal(sent.context.readerReflection.quote,reflection.quote);
   assert.equal(sent.context.readerReflection.bookTitle,'架空の読了本');

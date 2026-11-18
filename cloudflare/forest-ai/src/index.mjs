@@ -172,7 +172,7 @@ export function forestGenerationInput(prompt){
         (prompt.context.repliesLeft===1?
           '最後の候補は{label,outcome}。outcomeは選択後に表示する実際の台詞。' +
           (multi?'各候補のspeakerSlotは話す一人の番号。':'')+
-          '問いには答え、伝言なら渡す言葉を返す。遊びは「どこにかくれる？」のようにその場で答えられる問いか、想像と分かる小さな場面にする。準備・出発・次の約束で区切らない。':
+          'この後は子どもが返事をする番はない。続きを求めず、答え・具体的な伝言・その場の発見を言い切る。遊びを始める誘いは、遊び方やかくれ場所を聞く言葉、または想像の遊びの提案に変える。outcomeで実際に遊びを始めたり、子どもに次の行動を頼んだりしない。':
           'closing=trueでは選ばれた言葉にその場で応え、新しい質問を出さず、choicesは空配列。')},
         {role:'user',content:JSON.stringify(prompt)}],
       max_completion_tokens:320,temperature:.75,

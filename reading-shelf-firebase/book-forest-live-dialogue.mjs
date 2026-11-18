@@ -19,7 +19,7 @@ const ACTION_WRITING_IDS=new Set(FOREST_ACTION_WRITING_IDS);
 const safeEnd=(id,comma=false)=>ACTION_WRITING_IDS.has(id)?
   '（ねこはしっぽをゆっくりふった。）':GOODBYE[id]||(comma?'また、森で会おうね。':'また森で会おうね。');
 const WRONG_FIRST_PERSON=FOREST_WRONG_FIRST_PERSON;
-export const FOREST_PROMPT_VERSION='forest-scene-generation-v27-profile2';
+export const FOREST_PROMPT_VERSION='forest-scene-generation-v27.1-profile2';
 const PROMPT_VERSION=FOREST_PROMPT_VERSION;
 const clean=value=>typeof value==='string'?value.trim().replace(/\s+/gu,' '):'';
 function readJson(storage,key,fallback){
@@ -160,7 +160,7 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
       ...(closing?[
         '質問なら答えを言い切る。行動なら、この場で一手進んだ結果まで返す。「よし、始めよう」で止めない。移動が必要な選択でも、ここで分かることや伝えられる言葉を一つ返す。新しい問いは出さずchoices:[]'
       ]:repliesLeft===1?[
-        'この本文だけでも一区切りつくようにする。最後の各候補のoutcomeには、選んだ子にそのまま見せる答えを入れる'
+        'この本文だけでも一区切りつくようにする。最後の各候補は、子どもからの追加の返事や操作がなくても成立する答えと組にする'
       ]:[])
     ],
     output:{format:'JSON',shape:{...(twinNames?

@@ -5,7 +5,7 @@ import {unsafeForestForaging} from './book-forest-output-safety.mjs';
 // An observed failure was a standalone promise to go, begin or prepare.
 // This catches that ending shape; whether a reply earns its choice also
 // depends on context and is checked on real conversations.
-const unfinished=/[？?]$|(?:準備(?:を)?(?:する|しよう)|じゅんび(?:を)?(?:する|しよう)|(?:探し|さがし)に(?:行こう|いこう)|(?:始め|はじめ)(?:よう|る)|(?:今度|こんど)(?:やろう|しよう))(?:ね|よ|か|ぜ|ぞ|な)?[。！!]*$/u;
+const unfinished=/[？?][。！!]*$|(?:おしえて|教えて|かくる)(?:ね|よ)?[。！!]*$|(?:準備(?:を)?(?:する|しよう)|じゅんび(?:を)?(?:する|しよう)|(?:探し|さがし)に(?:行こう|いこう)|(?:始め|はじめ)(?:よう|る)|(?:今度|こんど)(?:やろう|しよう))(?:ね|よ|か|ぜ|ぞ|な)?[。！!]*$/u;
 
 export function forestEndingChoices(choices,{context={},silent=false,multi=false,line='',validLine=()=>true}={}){
   if(!Array.isArray(choices))return [];

@@ -23,7 +23,7 @@ const INNER_VOICE=/心の(?:中|声)|頭の中|胸の内|内心|ひそかに(?:�
 // Do not classify a short *action* as speech just because it has no explicit cat subject.
 const BARE_GREETING=/^（(?:こんにちは|こんばんは|おはよう(?:ございます)?|ありがとう(?:ございます)?|さようなら|おやすみ(?:なさい)?|どうも|はい|いいえ|おーい|ごめん(?:なさい)?)[！!？?。、]*）$/u;
 export const FOREST_WRITTEN_TURN_LIMIT=80;
-const WRITING_ACTION=/書(?:い|き|く|け)|か(?:い|き|く)[^。]{0,8}(?:見せ|みせ|差し出|さしだ)|(?:紙|地面|落ち葉|葉っぱ|はっぱ|おちば|字|文字)に[^。]{0,12}か(?:いた|き)|(?:地面|じめん)をなぞ/u;
+const WRITING_ACTION=/書(?:い|き|く|け|こ)|か(?:い|き|く)[^。]{0,8}(?:見せ|みせ|差し出|さしだ)|(?:紙|地面|落ち葉|葉っぱ|はっぱ|おちば|字|文字)に[^。]{0,12}か(?:いた|き)|(?:地面|じめん)をなぞ/u;
 const PARENTHETICAL_ACTION=/^（[^（）\n\r]+）$/u;
 
 export function validateForestGestureMark(raw){
@@ -51,7 +51,7 @@ export function validateForestWrittenTurn(rawText,rawMark){
   const text=rawText.trim().replace(/^\(([^()（）\r\n]+)\)$/u,'（$1）');
   if(!validateForestGestureText(text))return null;
   const mark=validateForestGestureMark(rawMark);
-  if(mark===undefined||Boolean(mark)!==WRITING_ACTION.test(text)||
+  if(mark===undefined||(!mark&&WRITING_ACTION.test(text))||
     text.length+(mark?.word.length||0)>FOREST_WRITTEN_TURN_LIMIT)return null;
   return {text,mark};
 }

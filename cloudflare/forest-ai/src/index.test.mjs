@@ -145,9 +145,9 @@ test('Health reports all supported generators, including non-speaking cat',async
   const response=await handleRequest(request('/health',{method:'GET'}),{
     OWNER_UID:ownerUid,AI:{run:async()=>({})}});
   assert.equal(response.status,200);
-  assert.equal(response.headers.get('X-Forest-AI-Version'),'forest-dialogue-v23-profile2');
+  assert.equal(response.headers.get('X-Forest-AI-Version'),'forest-dialogue-v24-profile2');
   assert.deepEqual((({profileRevision,...rest})=>rest)(await response.json()),{
-    model:'@cf/google/gemma-4-26b-a4b-it',version:'forest-dialogue-v23-profile2',
+    model:'@cf/google/gemma-4-26b-a4b-it',version:'forest-dialogue-v24-profile2',
     registryRevision:FOREST_ROSTER_REVISION,protocolRevision:FOREST_DIALOGUE_PROTOCOL,
     supportedNpcCount:FOREST_AI_GENERATION_IDS.length,configured:true});
 });
@@ -205,7 +205,7 @@ test('silent cat generation accepts short hiragana ground/leaf writing, never di
   assert.match(messages[0][1].content,/非公開Sheetsにある架空の人物像・テスト用A/);
   const meaningful={...gesture,mode:'opening'};
   const env2={...env,AI:{run:async()=>({choices:[{message:{content:JSON.stringify({
-    text:'（ねこはていねいにメモをおいた。）',
+    text:'（ねこは紙に書いて、そっとおいた。）',
     mark:{surface:'note',word:'王さま、雨がふりそう。木の下で休もう。'},
     choices:['みてみる','ついていく']
   })}}]})}};

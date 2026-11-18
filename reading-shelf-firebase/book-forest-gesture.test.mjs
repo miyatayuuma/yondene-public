@@ -1,8 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import * as THREE from './vendor/three/three.module.js';
-import {validateForestGestureMark,validateForestGestureText,FOREST_GRADE_ONE_KANJI} from './book-forest-gesture.mjs';
-import {createForestCatWriting} from './book-forest-cat-writing.mjs';
+import {validateForestGestureMark,validateForestGestureText,validateForestWrittenTurn,FOREST_GRADE_ONE_KANJI} from './book-forest-gesture.mjs';
 
 test('written marks accept hiragana and all 80 grade-one kanji, but never higher grades',()=>{
   assert.equal(FOREST_GRADE_ONE_KANJI.length,80);
@@ -54,29 +52,18 @@ test('nonverbal cat narration accepts varied subjects and omitted subjects, but 
   assert.equal(validateForestGestureMark(null),null,'writing stays optional');
 });
 
-test('generated marks appear on ground or leaf, never arbitrary HTML, and dispose cleanly',()=>{
-  const painted=[];
-  const canvas=()=>({width:0,height:0,getContext:()=>({
-    clearRect(){},fillRect(){},beginPath(){},ellipse(){},fill(){},stroke(){},
-    moveTo(){},lineTo(){},fillText(word){painted.push(word)}
-  })});
-  const scene=new THREE.Scene();
-  const writing=createForestCatWriting({THREE,scene,walkHeight:()=>1,createCanvas:canvas});
-  assert.equal(writing.show({surface:'ground',word:'こっち'},{x:2,z:4}),true);
-  assert.equal(painted[0],'こっち');
-  assert.equal(scene.children.length,1);
-  assert.equal(scene.children[0].name,'forest-cat-writing');
-  assert.ok(Math.abs(scene.children[0].position.y-1.17)<.001);
-  const old=scene.children[0];
-  assert.equal(writing.show({surface:'leaf',word:'またね'},{x:3,z:5}),true);
-  assert.ok(!scene.children.includes(old),'old mark is removed before writing again');
-  assert.equal(painted[1],'またね');
-  const message='おうさま、むこうのはしはすべるよ。みぎからまわろう。';
-  assert.equal(writing.show({surface:'note',word:message},{x:2,z:4}),true);
-  assert.deepEqual(painted.slice(2).join(''),message,'the legible message is wrapped without losing a character');
-  assert.ok(painted.slice(2).length>=2,'meaningful notes use multiple lines');
-  assert.equal(writing.show({surface:'ground',word:'abc'},{x:2,z:4}),false);
-  assert.equal(scene.children.length,0,'invalid writing is never shown');
-  writing.dispose();
-  assert.equal(scene.children.length,0);
+test('writing is paired with visible dialogue and shares one length budget',()=>{
+  const action='（ねこは紙に書いて、こちらへ見せた。）';
+  const mark={surface:'note',word:'王さま、きょうはどこへいくの？'};
+  assert.deepEqual(validateForestWrittenTurn(action,mark),{text:action,mark});
+  assert.equal(validateForestWrittenTurn(action,null),null);
+  assert.deepEqual(validateForestWrittenTurn('(ねこは紙に書いて、こちらへ見せた。)',mark),{text:action,mark});
+  assert.equal(validateForestWrittenTurn('(心の中で王さまに返事をした。)',null),null);
+  assert.equal(validateForestWrittenTurn('（ねこは葉っぱにちいさくかいた。）',null),null);
+  const resting='（ねこは王さまのとなりにすわった。）';
+  assert.deepEqual(validateForestWrittenTurn(resting,null),{text:resting,mark:null});
+  const showedNote='（ねこは折った紙をひらいて、こちらに見せた。）';
+  assert.deepEqual(validateForestWrittenTurn(showedNote,mark),{text:showedNote,mark});
+  assert.equal(validateForestWrittenTurn('（地面に文字を書こうとした。）',null),null);
+  assert.equal(validateForestWrittenTurn('（'+ 'あ'.repeat(64)+'と書いた。）',mark),null);
 });

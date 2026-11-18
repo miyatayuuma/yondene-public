@@ -133,3 +133,26 @@ test('parent summary attribution, long text and unverified synopsis are preserve
   assert.equal(long.summary,'');
   assert.equal(long.storyContext,'');
 });
+
+test('a new reflection may return as an older memory for another NPC after cooldown',()=>{
+  let clock=now;
+  const session=createForestReflectionSpotlightSession({storage:storage(),now:()=>clock});
+  const related=[{...catalog[0],characters:'kiki jiji'}];
+  const input={books,reflections:[reflections[0]],catalog:related,cues:[]};
+  const recent=session.choose({...input,characterId:'kiki'});
+  assert.ok(recent);
+  session.visited();session.displayed('kiki',recent);
+  clock+=16*86400000;
+  const jiji={...input,characterId:'jiji'};
+  assert.equal(session.choose(jiji),null);
+  const archiveBooks=session.archiveBooks(jiji);
+  const older=session.choose({...jiji,archiveBooks});
+  assert.equal(older?.key,recent.key);
+  assert.equal(older.kind,'reading-memory');
+  session.visited();session.displayed('jiji',older);
+  clock+=2*86400000;
+  assert.equal(session.archiveBooks({...input,characterId:'kiki'}).length,0);
+  clock+=6*86400000;
+  assert.equal(session.choose({...input,characterId:'kiki',
+    archiveBooks:session.archiveBooks({...input,characterId:'kiki'})})?.key,recent.key);
+});

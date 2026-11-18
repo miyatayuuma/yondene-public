@@ -1,6 +1,6 @@
 import {initializeApp} from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-app.js';
 import {getAuth,getIdToken,GoogleAuthProvider,signInWithPopup,signInWithRedirect,reauthenticateWithPopup,getRedirectResult,setPersistence,browserLocalPersistence,onAuthStateChanged,signOut} from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-auth.js';
-import {getFirestore,doc,collection,getDoc,getDocs,query,limit,orderBy,setDoc,deleteDoc,onSnapshot,Timestamp,serverTimestamp,runTransaction,writeBatch} from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-firestore.js';
+import {getFirestore,doc,collection,getDoc,getDocs,getDocFromServer,getDocsFromServer,query,limit,orderBy,where,setDoc,deleteDoc,onSnapshot,Timestamp,serverTimestamp,runTransaction,writeBatch} from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-firestore.js';
 import {firebaseConfig,forestAIConfig} from './firebase-config.mjs?build=20261110-forest-ai-v6';
 import {isPermissionDenied,staleMembershipRoute} from './startup-recovery.mjs?build=20261019-shelf-v28';
 import {newInviteToken,parseInviteHash,oneTimeInviteUrl} from './invite-links.mjs?build=20261019-shelf-v28';
@@ -14,23 +14,23 @@ import {mountFamilyActivity} from './activity.mjs?build=20261111-activity-previe
 import {mountChildRating} from './child-rating.mjs?build=20261019-shelf-v28';
 import {mountReadingRecordEditor} from './reading-record-editor.mjs?build=20261025-reading-legacy-v1';
 import {readerNameFromShelf} from './reader-name.mjs?build=20261019-shelf-v28';
-import {FOREST_CHARACTER_REGISTRY,FOREST_ROSTER_REVISION} from './forest-character-registry.mjs?build=20261118-forest-shared-twins-v24';
-import {mountBookForest,getForestAvatar,setForestAvatar} from './book-forest.mjs?build=20261118-forest-shared-twins-v24';
+import {FOREST_CHARACTER_REGISTRY,FOREST_ROSTER_REVISION} from './forest-character-registry.mjs?build=20261118-forest-dialogue-quality-v25';
+import {mountBookForest,getForestAvatar,setForestAvatar} from './book-forest.mjs?build=20261118-forest-dialogue-quality-v25';
 import {authorizeForestDrive,loadPrivateForestSprites} from './book-forest-drive.mjs?build=20261116-forest-drive-discovery-v18';
 import {saveCachedForestSprites,loadCachedForestSprites,clearCachedForestSprites} from './book-forest-cache.mjs?build=20261114-zukkoke-v1';
 import {loadPrivateForestDialogue} from './book-forest-private-dialogue.mjs?build=20261117-forest-profile-contract-v19';
 import {saveCachedForestDialogue,loadCachedForestDialogue,clearCachedForestDialogue,freshForestDialogue} from './book-forest-dialogue-cache.mjs?build=20261117-forest-profile-contract-v19';
-import {createForestDialogueDirector} from './book-forest-dialogue-director.mjs?build=20261118-forest-shared-twins-v24';
+import {createForestDialogueDirector} from './book-forest-dialogue-director.mjs?build=20261118-forest-dialogue-quality-v25';
 import {diagnoseForestCharacters} from './book-forest-character-profiles.mjs?build=20261117-forest-profile-contract-v19';
-import {createForestLiveDialogueDirector} from './book-forest-live-dialogue.mjs?build=20261118-forest-shared-twins-v24';
+import {createForestLiveDialogueDirector} from './book-forest-live-dialogue.mjs?build=20261118-forest-dialogue-quality-v25';
 import {selectRecentForestReflectionEntries,normalizeRecentForestReflection} from './book-forest-reflection-source.mjs?build=20261117-forest-context-probe-v1';
 import {resetForestConversationHistoryOnce} from './book-forest-conversation-reset.mjs?build=20261110-forest-ai-v6';
 import {forestConversationLog} from './book-forest-conversation-log.mjs?build=20261110-forest-ai-v6';
 import {createForestAIGenerator} from './book-forest-ai-provider.mjs?build=20261110-forest-ai-v6';
-import {createForestCloudflareGenerator,verifyForestCloudflareRoster} from './book-forest-cloudflare-provider.mjs?build=20261118-forest-shared-twins-v24';
+import {createForestCloudflareGenerator,verifyForestCloudflareRoster} from './book-forest-cloudflare-provider.mjs?build=20261118-forest-dialogue-quality-v25';
 import {STATUSES,ACTIVE_READ_FILTER,filteredBooks,readPeriodLabel,compactReadPeriodLabel,readingModeLabel,emptyStateMessage,seriesVolumeLabel,sortSeriesBooks} from './domain.mjs?build=20261115-series-order-v1';
 
-const APP_BUILD='20261118-forest-shared-twins-v24';
+const APP_BUILD='20261118-forest-dialogue-quality-v25';
 const $=id=>{const element=document.getElementById(id);if(!element)throw new Error('APP_DOM_MISMATCH: missing #'+id);return element};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const safeCover=url=>/^(https:\/\/|data:image\/(jpeg|png|webp);base64,)/i.test(String(url||''))?String(url):'';
@@ -754,21 +754,37 @@ function renderFamily(){
               const generate=await forestAIGeneratorPromise;
               // Activity is already ordered by creation date. Resolve only a few
               // real, non-withdrawn reflections, not every book subcollection.
+              const canReadForest=()=>role==='owner'&&fid===familyId&&user?.uid===ownerUid;
+              const canReadForestBook=bookId=>canReadForest()&&
+                books.some(book=>book.id===bookId&&book.status==='read');
+              const getCurrentReflection=async(bookId,id)=>{
+                if(!canReadForestBook(bookId)||!id)return null;
+                const record=await getDocFromServer(familyDoc('books',bookId,'childReflections',id));
+                return record.exists()&&canReadForestBook(bookId)
+                  ?normalizeRecentForestReflection({bookId},record.data(),{id:record.id}):null;
+              };
+              const getArchivedReflections=async(bookIds,before)=>{
+                const results=await Promise.all(bookIds.slice(0,2).filter(canReadForestBook)
+                  .map(async bookId=>{
+                    const snapshot=await getDocsFromServer(query(familyCollection('books',bookId,'childReflections'),
+                      where('createdAt','<',Timestamp.fromMillis(before)),orderBy('createdAt','desc'),limit(3)));
+                    return canReadForestBook(bookId)?snapshot.docs.map(record=>
+                      normalizeRecentForestReflection({bookId},record.data(),{id:record.id})).filter(Boolean):[];
+                  }));
+                return results.flat();
+              };
               let recentReflectionsPromise=null;
               const getRecentReflections=()=>{
                 if(recentReflectionsPromise)return recentReflectionsPromise;
                 recentReflectionsPromise=(async()=>{
                   if(role!=='owner'||fid!==familyId||user?.uid!==ownerUid)return [];
-                  const snapshot=await getDocs(query(familyCollection('activity'),
+                  const snapshot=await getDocsFromServer(query(familyCollection('activity'),
                     orderBy('createdAt','desc'),limit(60)));
                   const selected=selectRecentForestReflectionEntries(
                     snapshot.docs.map(item=>item.data()),books);
                   const recent=await Promise.all(selected.map(async entry=>{
                     try{
-                      const item=await getDoc(familyDoc('books',entry.bookId,
-                        'childReflections',entry.sourceId));
-                      if(!item.exists())return null;
-                      return normalizeRecentForestReflection(entry,item.data(),{id:item.id});
+                      return await getCurrentReflection(entry.bookId,entry.sourceId);
                     }catch{return null}
                   }));
                   if(role!=='owner'||fid!==familyId||user?.uid!==ownerUid)return [];
@@ -787,7 +803,7 @@ function renderFamily(){
                 getBooks:()=>books,getCatalog:()=>forestDialogueCache?.catalog||[],
                 getCues:()=>forestDialogueCache?.cues||[],
 
-                getRecentReflections,
+                getRecentReflections,getArchivedReflections,getCurrentReflection,
                 getCharacterProfiles:()=>forestDialogueCache?.characterProfiles||[],
                 requireCharacterProfile:true,
                 modelId:forestAIConfig.workerUrl?'@cf/google/gemma-4-26b-a4b-it':forestAIConfig.modelId});

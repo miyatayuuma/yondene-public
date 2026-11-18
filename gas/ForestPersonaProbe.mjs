@@ -182,6 +182,11 @@ export async function probeConversation(personRows,sourceRows,characterId,{snaps
     getCatalog:()=>catalog,getCues:()=>cues,getCharacterProfiles:()=>profiles,
     getTwinNames:()=>twinNames,getTwinScenes:()=>twinScenes,
     getRecentReflections:async()=>snapshot.reflections||[],
+    getArchivedReflections:async(bookIds,before)=>bookIds.flatMap(bookId=>
+      (snapshot.archiveReflections||[]).filter(row=>row.bookId===bookId&&row.createdAt<before)
+        .sort((a,b)=>b.createdAt-a.createdAt).slice(0,3)),
+    getCurrentReflection:async(bookId,id)=>[...(snapshot.reflections||[]),...(snapshot.archiveReflections||[])]
+      .find(row=>row.bookId===bookId&&row.id===id)||null,
     getReflections:async bookId=>(snapshot.reflections||[]).filter(r=>r.bookId===bookId),
     runtime:{createAbortController:()=>({signal:{aborted:false},abort(){this.signal.aborted=true}}),
       scheduleTimeout:()=>null,cancelTimeout:()=>{}}});
@@ -207,8 +212,9 @@ export async function processQueue(){
     for(const row of rows)counts[row[0]]=(counts[row[0]]||0)+1;
     const results=out.getDataRange().getDisplayValues().slice(1),
       existing=new Set(results.map(r=>r[0]));
-    const today=Utilities.formatDate(new Date(),'Asia/Tokyo','yyyy-MM-dd');
-    const key='YONDENE_GEMMA_TEST_ATTEMPTS_'+today;
+    // Use the Workers AI usage day and keep the per-day cap.
+    const today=Utilities.formatDate(new Date(),'UTC','yyyy-MM-dd');
+    const key='YONDENE_GEMMA_TEST_ATTEMPTS_UTC_'+today;
     let attempts=Number(props.getProperty(key)||0),done=0,mirror=null;
     if(!Number.isFinite(attempts)||attempts<0)throw Error('INVALID_LOCAL_USAGE_COUNTER');
     const catalogSheet=ss.getSheetByName('物語記憶');

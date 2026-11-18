@@ -1,7 +1,6 @@
 import {CHARACTERS,START,isWalkable,walkHeight,heightAt,monthInJapan,MONTHS} from './book-forest-world.mjs?build=20261116-forest-cat-persona-v17';
 import {inspectPose,spriteLayout} from './book-forest-sprite.mjs';
 import {createForestNpcMotion} from './book-forest-npc.mjs';
-import {createForestCatWriting} from './book-forest-cat-writing.mjs';
 import {createForestVoiceEngine,forestVoiceProfile} from './book-forest-voice.mjs?build=20261116-forest-cat-persona-v17';
 
 const clamp=(n,a,b)=>Math.min(b,Math.max(a,n));
@@ -19,7 +18,7 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
   const images=privateSprites?.images||{};
   let avatar=debug?.avatar||getForestAvatar(familyId),disposed=false,animationId=0,cleanupWorld=()=>{},resizeObserver=null;
   let joystickX=0,joystickY=0,stickPointer=null,lookPointer=null,chatOpen=false,chatSession=0,activeCharacter=null;
-  let autoDialogueTimer=null,dialogueRender=0,currentDialogue=null,catWriting=null;
+  let autoDialogueTimer=null,dialogueRender=0,currentDialogue=null;
   const voice=debug?.speechEngine||createForestVoiceEngine();
   let voiceToken=0,activeSpeechNode=null;
   const keys=new Set();
@@ -121,12 +120,12 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
   function endDialogue(){
     if(!chatOpen)return;
     const previous=activeCharacter;chatSession++;stopSpeech();cancelAutoDialogue();currentDialogue=null;
-    chatOpen=false;activeCharacter=null;chat.hidden=true;catWriting?.clear();
+    chatOpen=false;activeCharacter=null;chat.hidden=true;
     dismiss.hidden=false;dismiss.textContent='とじる';
     try{dialogue?.end?.({characterId:previous?.dialogueId||previous?.id,displayName:previous?.name})}catch(error){console.warn('Forest dialogue end failed',error)}
   }
   function dispose(){
-    if(disposed)return;disposed=true;endDialogue();stopSpeech();cancelAnimationFrame(animationId);stopInput();catWriting?.dispose();cleanupWorld();resizeObserver?.disconnect();
+    if(disposed)return;disposed=true;endDialogue();stopSpeech();cancelAnimationFrame(animationId);stopInput();cleanupWorld();resizeObserver?.disconnect();
     document.removeEventListener('keydown',onKeyDown);document.removeEventListener('keyup',onKeyUp);document.removeEventListener('visibilitychange',onVisibility);window.removeEventListener('blur',onBlur);
     document.body.classList.remove('bookForestOpen');layer.remove();
   }
@@ -159,8 +158,6 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
   }
   function renderDialogue(result,identity,session){
     stopSpeech();cancelAutoDialogue();currentDialogue=[result,identity,session];
-    if(identity.characterId==='cat'&&result?.mark)catWriting?.show(result.mark,activeCharacter);
-    else catWriting?.clear();
     dismiss.hidden=false;
     dismiss.textContent=result?.conversationComplete===true?'またね':'とじる';
     if(result?.mode==='twins'){
@@ -177,6 +174,9 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
       speaker.textContent=activeCharacter?.name||identity.displayName;
       twinHistory.hidden=true;twinHistory.replaceChildren();message.hidden=false;
       message.textContent=typeof result?.text==='string'?result.text:'';
+      if(identity.characterId==='cat'&&result?.mark?.word){
+        message.textContent+='\n'+result.mark.word;
+      }
       makeSpeechTarget(message,message.textContent,identity.characterId,session);
       chat.scrollTop=0;
     }
@@ -278,7 +278,6 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
     }
     const player=spriteFor(avatar,7.2);scene.add(player.group);
     const npcs=CHARACTERS.filter(info=>!info.requiresSprite||images[info.spriteId||info.id]).map(info=>{const model=spriteFor(info.spriteId||info.id,6.8*info.scale);model.place(info.x,info.z);scene.add(model.group);return {...info,model,moving:false}});
-    catWriting=createForestCatWriting({THREE,scene,walkHeight});
     let playerX=START.x,playerZ=START.z,yaw=START.yaw,targetYaw=yaw,pitch=.37,targetPitch=pitch,clock=0,last=performance.now(),frames=0,frameTime=0,lastPerf=last,checkMonth=0;
     const canWalk=(x,z)=>isWalkable(x,z,.85)&&!field?.blocked(x,z,.85);
     const npcMotion=createForestNpcMotion(npcs,canWalk);
@@ -362,7 +361,7 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
       clock+=dt;animationId=requestAnimationFrame(tick);
     }
     let lastMonth=debug?.month||monthInJapan();
-    cleanupWorld=()=>{catWriting?.dispose();catWriting=null;world.dispose()};
+    cleanupWorld=()=>world.dispose();
     if(debug?.onReady)debug.onReady({
       setView({x,z,yaw:angle=0,pitch:vertical=.37}){playerX=x;playerZ=z;yaw=targetYaw=angle;pitch=targetPitch=vertical;player.place(x,z);moveCamera(1,true)},
       setMonth(month){if(MONTHS[month])world.setMonth(month)},

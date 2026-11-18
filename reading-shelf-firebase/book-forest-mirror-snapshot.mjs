@@ -82,7 +82,15 @@ export function parseForestBookshelfMirror(rows,{syncAt,now=Date.now(),
     const record=records.get(event.bookId+':'+event.sourceId);
     return normalizeRecentForestReflection(event,record,{id:record?.id||''});
   }).filter(Boolean);
-  return {books,reflections,snapshotAt:parseTime(syncAt),
+  const readIds=new Set(books.filter(book=>book.status==='read').map(book=>book.id));
+  const archiveReflections=[];
+  for(const [key,record] of records){
+    const bookId=key.split(':')[0];
+    if(!readIds.has(bookId))continue;
+    const review=normalizeRecentForestReflection({bookId},record,{id:record.id});
+    if(review)archiveReflections.push(review);
+  }
+  return {books,reflections,archiveReflections,snapshotAt:parseTime(syncAt),
     bookCount:books.length,readCount:books.filter(b=>b.status==='read').length,
     reflectionCount:reflections.length};
 }

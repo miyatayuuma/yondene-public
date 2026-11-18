@@ -127,6 +127,15 @@ test('foraging guard distinguishes unidentified plants, refusals and ordinary kn
   for(const line of ['食べないで観察しよう','食べていいかわからない','むやみに食べるのは危ないよ','持ってきたパンを食べよう'])
     assert.equal(unsafeForestForaging({text:line,choices:['見ている','先へ進む']},context),false,line);
   assert.equal(unsafeForestForaging({text:'焼いたパンがおいしいよ。',choices:['食べよう','とっておく']}),false);
+  const writing={text:'（葉っぱに文字を書きこんだ。）',mark:{surface:'leaf',word:'おいしいものをさがそう。'}};
+  const forest={situation:{place:'本の森'}};
+  assert.equal(unsafeForestForaging(writing,forest),false);
+  assert.equal(unsafeForestForaging({
+    text:'（ねこは森でひろった葉に書いて見せた。）',
+    mark:{surface:'leaf',word:'このははたべられるよ。'},choices:['食べてみる','見るだけ']
+  },forest),true);
+  assert.equal(unsafeForestForaging({...writing,choices:['知らない木の実をたべよう','見る']},forest),true);
+
 });
 
 
@@ -207,4 +216,71 @@ test('twins keep the first meeting available after no generated greeting was dis
   assert.deepEqual(run.trace.map(t=>t.prompt.context.sourceKind),['meet','meet','meet']);
   assert.equal(run.frames[0].result.conversationComplete,true);
   assert.equal(run.progress.visits.twins,1);
+});
+
+test('registered names, written cat replies and the remaining reply count survive both validators',async()=>{
+  const run=await runForestConversationScenario({...defaults,
+    visits:[{characterId:'hachibee',choices:[0,0]},{characterId:'cat',choices:[0,0]}],
+    transport:async(_, {prompt})=>{
+      const {closing,npc,mode}=prompt;
+      if(npc.id==='cat')return {response:JSON.stringify({
+        text:mode==='opening'?'（ねこは紙に書いて見せた。）':'（ねこはとなりにすわった。）',
+        mark:mode==='opening'?{surface:'note',word:'この木の上を見て。'}:null,
+        choices:closing?[]:['いっしょに見る','ここですわる']})};
+      return {response:JSON.stringify({
+        text:closing?'ほら、切り株のかげに丸い石があったぞ。':mode==='opening'
+          ?'切り株のかげに、何かあるぞ。':'葉っぱをどけると、丸いものが見えるぞ。',
+        choices:closing?[]:['ハチビーはどう思う？','一緒に見てみよう']})};
+    }});
+  assert.deepEqual(run.trace.map(t=>t.prompt.context.repliesLeft),[2,1,0,2,1,0]);
+  assert.equal(run.trace[0].prompt.npc.displayName,'ハチベエ');
+  assert.equal(run.trace[3].prompt.context.npcDisplayNames.hachibee,'ハチベエ');
+  assert.equal(run.frames[0].result.choices[0].label,'ハチベエはどう思う？');
+  assert.equal(run.trace[1].prompt.context.chosenLabel,'ハチベエはどう思う？');
+  assert.equal(run.frames[2].result.conversationComplete,true);
+  assert.equal(run.frames[3].result.mark.word,'この木の上を見て。');
+  assert.equal(run.trace[4].prompt.context.recentTurns[0].written,'この木の上を見て。');
+  assert.equal(run.frames[4].result.mark,undefined);
+  assert.ok(run.trace.every(step=>step.validation==='accepted'));
+  assert.throws(()=>readCompletion({response:JSON.stringify({text:'（ねこは葉に文字を書いて見せた。）',
+    mark:null,choices:['見る','待つ']})},{characterId:'cat'}),/Invalid silent cat action/);
+  const names=readCompletion({response:JSON.stringify({text:'ハチビーは見たかな。',
+    choices:['ハチビーヌはどう思う？','ハチビーはどう思う？']})},{characterId:'jiji'});
+  assert.deepEqual(names.choices,['ハチビーヌはどう思う？','ハチベエはどう思う？']);
+  assert.equal(names.text,'ハチベエは見たかな。');
+});
+
+test('related old reflections span multiple books and NPCs, and never continue after withdrawal',async()=>{
+  const old={id:'older',bookId:book.id,quote:'架空の合成感想',attribution:'parent-summary',
+    createdAt:now-40*86400000};
+  const otherBook={id:'other-read',title:'別の架空本',status:'read'};
+  const other={...old,id:'other-older',bookId:otherBook.id,createdAt:old.createdAt-1};
+  let records=[old,other];
+  const scopes=[];
+  const run=await runForestConversationScenario({...defaults,
+    getBooks:()=>[book,otherBook],getCatalog:()=>[memory,{...memory,id:'story-two',bookId:otherBook.id}],
+    getArchivedReflections:async(ids,before)=>{
+      scopes.push(ids);
+      return records.filter(r=>ids.includes(r.bookId)&&r.createdAt<before);
+    },
+    getCurrentReflection:async(bookId,id)=>records.find(r=>r.bookId===bookId&&r.id===id)||null,
+    visits:[
+      {characterId:'kiki'},{characterId:'kiki'},{characterId:'jiji'},
+      {characterId:'king'},{characterId:'jiji',choices:[0]}],
+    onStep:({visit,turn})=>{
+      if(visit===4&&turn===0)records=[];
+    }
+  });
+  const reviewPrompts=run.trace.filter(t=>t.prompt.context.readerReflection);
+  assert.ok(reviewPrompts.length>=2);
+  assert.ok(reviewPrompts.every(t=>t.prompt.context.readerReflection.kind==='reading-memory'));
+  assert.ok(reviewPrompts.every(t=>t.prompt.context.readerReflection.attribution==='parent-summary'));
+  assert.ok(reviewPrompts.every(t=>!JSON.stringify(t.prompt).includes('sourceReflectionId')));
+  assert.ok(scopes.every(ids=>ids.length<=2));
+  const openings=reviewPrompts.filter(t=>t.prompt.mode==='opening');
+  assert.ok(openings.some(t=>t.prompt.npc.id==='jiji'));
+  assert.ok(new Set(openings.map(t=>t.prompt.context.readerReflection.bookTitle)).size>1);
+  assert.equal(run.trace.at(-1).prompt.mode,'opening','withdrawal prevents another model call');
+  assert.equal(run.frames.at(-1).result.conversationComplete,true);
+  assert.doesNotMatch(JSON.stringify(run.storage),/架空の合成感想/);
 });

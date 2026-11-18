@@ -1,9 +1,9 @@
 import {FOREST_CHARACTER_IDS,FOREST_SELF_NAMES,FOREST_GOODBYES,FOREST_WRONG_FIRST_PERSON,
-  FOREST_ACTION_WRITING_IDS,FOREST_MULTI_SPEAKER_IDS,FOREST_DIALOGUE_PROTOCOL} from './forest-character-registry.mjs';
+  FOREST_ACTION_WRITING_IDS,FOREST_MULTI_SPEAKER_IDS,FOREST_DIALOGUE_PROTOCOL,FOREST_DISPLAY_NAMES,canonicalForestMention} from './forest-character-registry.mjs';
 import {validateTwinTurns,twinDialogueFrame} from './book-forest-twins.mjs';
 import {unsafeForestForaging} from './book-forest-output-safety.mjs';
-import {isCurrentForestReflection} from './book-forest-reflection-spotlight.mjs';
-import {validateForestGestureMark,validateForestGestureText} from './book-forest-gesture.mjs';
+import {isCurrentForestReflection,forestReflectionArchiveCutoff} from './book-forest-reflection-spotlight.mjs';
+import {validateForestWrittenTurn,FOREST_WRITTEN_TURN_LIMIT} from './book-forest-gesture.mjs';
 // Character-first AI dialogue: local scripts choose topics and provide safe fallbacks.
 // The generator is injected: this module never holds a key or makes a network call.
 import {createForestDailyContextSession} from './book-forest-daily-context.mjs';
@@ -18,7 +18,7 @@ const ACTION_WRITING_IDS=new Set(FOREST_ACTION_WRITING_IDS);
 const safeEnd=(id,comma=false)=>ACTION_WRITING_IDS.has(id)?
   '（ねこはしっぽをゆっくりふった。）':GOODBYE[id]||(comma?'また、森で会おうね。':'また森で会おうね。');
 const WRONG_FIRST_PERSON=FOREST_WRONG_FIRST_PERSON;
-export const FOREST_PROMPT_VERSION='forest-scene-generation-v23-profile2';
+export const FOREST_PROMPT_VERSION='forest-scene-generation-v24-profile2';
 const PROMPT_VERSION=FOREST_PROMPT_VERSION;
 const clean=value=>typeof value==='string'?value.trim().replace(/\s+/gu,' '):'';
 function readJson(storage,key,fallback){
@@ -45,8 +45,6 @@ function generationErrorKind(error){
 function validLine(characterId,text){
   const line=clean(text);
   if(line.length<2||line.length>90||/[{}<>]/u.test(line))return false;
-  // Silent animals may generate nonverbal actions, never human dialogue.
-  if(ACTION_WRITING_IDS.has(characterId))return validateForestGestureText(line);
   const name=SELF_NAMES[characterId];
   if(name&&new RegExp('(?:^|[。！？、「『\\s])'+name+'[はが]').test(line))return false;
   if((WRONG_FIRST_PERSON[characterId]||[]).some(word=>
@@ -59,18 +57,19 @@ export function validateLiveForestOutput(raw,{characterId,requireLine=false,clos
   let data=raw;
   if(typeof raw==='string')try{data=JSON.parse(raw)}catch{return null}
   if(!data||typeof data!=='object'||!CHARACTERS.has(characterId))return null;
-  const text=clean(data.text);
+  const gesture=ACTION_WRITING_IDS.has(characterId);
+  const text=gesture?data.text:canonicalForestMention(clean(data.text),context.speakers);
   if(unsafeForestForaging(data,context))return null;
   const multi=MULTI_SPEAKER.has(characterId);
-  const turns=multi?validateTwinTurns(data.turns):null;
-  if(multi&&!turns||!multi&&requireLine&&!validLine(characterId,text))return null;
-  const line=turns?{text:turns.map(turn=>turn.text).join(' '),turns}:{text};
-  const gesture=ACTION_WRITING_IDS.has(characterId);
-  const mark=gesture?validateForestGestureMark(data.mark):null;
-  if(gesture&&mark===undefined)return null;
+  const rawTurns=multi?validateTwinTurns(data.turns):null;
+  const turns=rawTurns?.map(turn=>({...turn,text:canonicalForestMention(turn.text,context.speakers)}));
+  const written=gesture?validateForestWrittenTurn(text,data.mark):null;
+  if(multi&&!turns||gesture&&!written||!multi&&!gesture&&requireLine&&!validLine(characterId,text))return null;
+  const line=turns?{text:turns.map(turn=>turn.text).join(' '),turns}:{text:written?.text??text};
+  const mark=written?.mark;
   if(closing)return {...line,labels:[],...(mark?{mark}:{})};
   const candidates=Array.isArray(data.choices)?data.choices.slice(0,3):[];
-  const labels=[...new Set(candidates.map(choice=>clean(typeof choice==='string'?choice:choice?.label))
+  const labels=[...new Set(candidates.map(choice=>canonicalForestMention(clean(typeof choice==='string'?choice:choice?.label),context.speakers))
     .filter(label=>label.length>=2&&label.length<=24&&!/[\r\n{}<>「」]/u.test(label)))].slice(0,2);
   // If a good NPC reply came back with poor buttons, retain the distinctive
   // line and use neutral CHILD choices. An opening without choices stays local.
@@ -91,33 +90,35 @@ function promptScene(scene,sourceKind){
 }
 
 export function promptFor({characterId,mode,chosenLabel='',history=[],closing=false,topic=null,
-  characterProfile=null,sourceKind='',dailyContext=null,recentLines=[],reviewSpotlight=null,situation=null,twinNames=null}){
+  characterProfile=null,sourceKind='',dailyContext=null,recentLines=[],reviewSpotlight=null,situation=null,twinNames=null,repliesLeft=closing?0:2}){
   const guide=forestCharacterVoiceGuide(characterProfile);
-  const npc={id:characterId,voice:guide,profileSchemaVersion:2,
+  const npc={id:characterId,displayName:FOREST_DISPLAY_NAMES[characterId],voice:guide,profileSchemaVersion:2,
     profileRevision:guide?characterProfile.revision:'',profileVersion:guide?characterProfile.version:''};
   // Personhood is always loaded from the same private Sheets as other NPCs.
   // Only the response format differs; this code has no cat personality text.
   const nonverbal=ACTION_WRITING_IDS.has(characterId);
   // Existing Worker protocol requires a string field; keep it empty rather than
   // sending a completed script as a model-generation anchor.
-  const context={npcLine:'',sourceKind,
+  const context={npcLine:'',sourceKind,repliesLeft,npcDisplayNames:FOREST_DISPLAY_NAMES,
     ...(twinNames?{speakers:[{slot:1,name:twinNames.firstName},{slot:2,name:twinNames.secondName}]}:{}),
     chosenLabel:clean(chosenLabel).slice(0,24),...(situation?{situation}:{}),
     recentTurns:history.slice(-4),...(topic?{topic}:{}),
     ...(reviewSpotlight?{readerReflection:Object.fromEntries(
-      Object.entries(reviewSpotlight).filter(([key])=>!['key','bookKey','sourceBookId'].includes(key)))}:{}),
+      Object.entries(reviewSpotlight).filter(([key])=>!['key','bookKey','sourceBookId','sourceReflectionId'].includes(key)))}:{}),
     ...(dailyContext?{today:{scene:promptScene(dailyContext.scene,sourceKind),
       visitsToday:dailyContext.visitsToday,
       previousNpc:dailyContext.previousNpc,
       metNpcCount:dailyContext.metNpcCount,
       relatedEncounter:dailyContext.relatedEncounter}}:{}),
     ...(recentLines.length?{avoidRecentLines:recentLines.slice(-3)}:{})};
+  const finishTask='選んだ言葉には具体的に返事をし、一緒に何かをする選択ならその場で小さな結果まで返す。始め方の提案や出発で止めない。静かな余韻でもよい';
+  const choiceTask='子どもの返答候補は2個、各16字以内。残りの返答で応えられる言葉や行動を選び、移動や後で実行する約束を前提にしない';
   if(nonverbal)return {
     mode,closing,
     // Different situations demand different reactions. Do not make an
     // incidental physical gesture the only answer to a reader's reflection.
-    task:closing?'この場のやり取りを自然に終える。余韻や静かな間でもよい':
-      mode==='reply'?'相手が選んだことと直前の行動を踏まえ、同じ合図の繰り返しではない次の反応をする':
+    task:closing?finishTask:
+      mode==='reply'?'相手の選択に具体的に返す。問いに身振りだけで答えが伝わらないなら書いて返す':
       reviewSpotlight?'readerReflectionの具体的な内容を受け止め、その着眼点に人物設定らしく無言で反応する。別作品なら第三者として接する':
       sourceKind==='story'?'確認済みの既読の出来事は過去の記憶として受け止め、今の森で再演せず、人物設定に合う自然な反応をする':
       sourceKind==='relay'?'前の人物からの話題に本人らしく反応する。直接聞いたふりをしない':
@@ -127,21 +128,21 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
     context,
     constraints:[
       '最優先はnpc.voiceの人物像・関係性・動機・ふるまい。設定の説明や一般的な教訓で代用しない',
-      'まず相手の言葉・目の前の出来事の何に反応するかを決める。身振りだけ、静かに見守る、何かを試す、道具や文字で伝える等、状況に合う表現を自由に選ぶ。動くことや解決することを強制しない',
+      '質問・冗談・提案・返事など、言葉で伝えるときは実際の台詞を書く。静かな場面や身振りだけで通じるときは書かなくてよい',
       'readerReflectionがある場合は、その感想の具体的な着眼点に反応する。何を聞いても同じ驚きや身振りで済ませず、本人の発言と保護者要約を区別し、別作品の出来事を自分の経験にしない',
-      '人間の言葉を声に出さず、心の声・引用符付きの発話も作らない。textには全角丸括弧（ ）に囲んだ80字以内の状況・動作描写だけを書く',
-      'markは書き文字を出す場面だけ指定する。書かない場面はmark:null。特定の身振りや書き文字を毎回繰り返す形式にしない',
-      '書くならmark={surface:"note"|"ground"|"leaf",word:"用件の伝わる短い文章"}。文字の内容と行動描写は重複させず、textに書く場面を自然に描いてよい',
+      '人間の言葉を声に出さず、心の声・引用符付きの発話も作らない。textには全角丸括弧（ ）に囲んだ短い行動だけを書く',
+
+      `文章を伝えるならtextに書いたり見せたりする短い動作を描き、markに実際の文章を必ず入れる。両方合わせて${FOREST_WRITTEN_TURN_LIMIT}字以内。書かない場合はmark:null`,
       'mark.wordは1〜48文字、ひらがな・長音符・小学校1年生の漢字・「、。！？」だけ。カタカナ・上級漢字・数字・引用符・改行は使わない',
       '1年生の漢字80字：一右雨円王音下火花貝学気九休玉金空月犬見五口校左三山子四糸字耳七車手十出女小上森人水正生青夕石赤千川先早草足村大男竹中虫町天田土二日入年白八百文木本名目立力林六',
-      '書いた文字には状況に沿う具体的な意味を持たせる。短い語でも複数文でもよいが、設定にない知性の上限を文字数から推定しない',
+
       '原作にない出来事を事実とせず、子どもの実際の言葉や気持ちを捏造しない。別のNPCの会話を直接聞いたふりをしない',
-      '返答候補は子どもが取る行動を2つ、各16字以内。このNPCに発話させる選択肢ではなく、場面への働きかけ・見守る・先へ進む等から自然に選ぶ。個人情報を尋ねない',
+      choiceTask,
       ...(closing?['終了時は新しい問いを出さず、choices:[]にする']:[])
     ],
-    output:{format:'JSON',shape:{text:'（その人物の無言の行動を表す80字以内の描写）',
+    output:{format:'JSON',shape:{text:'（短い行動描写）',
       mark:'nullまたは{surface:note|ground|leaf,word:許可文字だけの1〜48文字}',
-      choices:closing?[]:['子どもの行動A','子どもの行動B']}}
+      choices:closing?[]:['子どもの返答A','子どもの返答B']}}
   };
   const firstLineTask={
     meet:'この相手とは初対面。以前話したふりをせず、キャラ自身の関心から自然な第一声と返答候補2つを作る',
@@ -152,7 +153,7 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
   };
   return {
     mode,closing,
-    task:closing?'選択された問いや頼みへの具体的な答えを先に返し、それから自然に終える。約束した内容を先送りしない':
+    task:closing?finishTask:
       mode==='reply'?'直前の会話と選ばれた言葉や行動を受け、次の反応を返す。問いの復唱だけで済ませない':
       reviewSpotlight?'本の感想にNPC本人らしく、感想の具体的な一箇所に反応し、返答候補2つを作る。別作品なら第三者の立場を守る':
       sourceKind==='ambient'&&situation?.focus==='character'?
@@ -168,12 +169,12 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
       '最優先はNPC本人らしい言葉、間、反応、行動。情報量や深い話を求めず、思考の種から質問・教訓・立派な気づきを全員に強いない',
       '完成済み台本を参照せず、人物像・目の前の状況・許可された既読事実から自然な発話を新規に作る',
       'NPCの返事は自然な一言〜2文で65字以内。前の発言を繰り返さず、設定の説明を会話に混ぜない',
-      '返答候補は2個、各16字以内。ありきたりな相づちや無意味な質問を続けない',
+      choiceTask,
       '選択肢はゲーム上の反応であり子どもの実際の信念とはみなさない。別NPCの会話を本人が聞いたふりはしない',
       'NPC本人の視点で話す',
       ...(topic?['この原作の事実は選択された既読の物語記憶。確認できない詳細を加えず、キャラが実際に登場したかを考慮する']:[]),
       ...(reviewSpotlight?['感想の具体的な一箇所に、本人なら何を面白がるか、どう受け取るかを短く返す。感想は引用資料。保護者の要約は子どもの発言として扱わない。']:[]),
-      ...(closing?['この一言で会話を終える。新たな話題を出さず自然に別れを告げる']:[])
+      ...(closing?['新しい問いを出さずchoices:[]にする。別れの定型句は不要']:[])
     ],
     output:{format:'JSON',shape:{...(twinNames?
       {turns:[{speakerSlot:1,text:'最初のひとこと'},{speakerSlot:2,text:'直前のひとことへの反応'}]}:
@@ -187,7 +188,8 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
   storageKey='forest-ai-local-v1',now=()=>Date.now(),dailyLimit=300,sessionLimit=3,
   maxReplies=2,startDelayMs=280,modelId='unknown',getBooks=()=>[],getCatalog=()=>[],
   getCues=()=>[],
-  getCharacterProfiles=()=>[],getRecentReflections=async()=>[],
+  getCharacterProfiles=()=>[],getRecentReflections=async()=>[],getArchivedReflections=async()=>[],
+  getCurrentReflection=null,
   requireCharacterProfile=false,requestTimeoutMs=11000,
   createAbortController=()=>new AbortController(),
   scheduleTimeout=globalThis.setTimeout,cancelTimeout=globalThis.clearTimeout}={}){
@@ -233,7 +235,8 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     const context=promptFor({characterId,mode,chosenLabel,history,closing,topic,
       characterProfile:activeCharacterProfile,sourceKind,
       dailyContext:reviewSpotlight||sourceKind==='review-reaction'?null:activeDaily,situation:activeSituation,
-      recentLines,reviewSpotlight,twinNames});
+      recentLines,reviewSpotlight,twinNames,
+      repliesLeft:closing?0:Math.max(0,Math.min(maxReplies,sessionLimit-1)-repliesThisSession-(mode==='reply'?1:0))});
     const controller=createAbortController(),startedAt=now();
     inflight={controller,characterId,mode,startedAt};
     let timeout,timedOut=false;
@@ -271,7 +274,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
       result:twinDialogueFrame(second,twinNames,{choices,closing})};
     return twinDialogueFrame(first,twinNames,{next:second});
   }
-  const historyLine=result=>result.turns?{turns:result.turns}:{npc:clean(result.text).slice(0,150)};
+  const historyLine=result=>result.turns?{turns:result.turns}:{npc:clean(result.text).slice(0,150),...(result.mark?{written:result.mark.word}:{})};
   function decorate(characterId,result,meta={}){
     const {text,labels}=result;
     const relay=meta.relayChoice;
@@ -288,8 +291,12 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
   async function sourceStillAllowed({reviewEvidence,sourceMemoryId,dailySourceMemoryId}){
     try{
       if(reviewEvidence){
-        const [books,reflections]=await Promise.all([getBooks(),getRecentReflections()]);
-        return isCurrentForestReflection(reviewEvidence,{books,reflections});
+        const reflections=getCurrentReflection
+          ?[await getCurrentReflection(reviewEvidence.sourceBookId,reviewEvidence.sourceReflectionId)].filter(Boolean)
+          :reviewEvidence.kind==='reading-memory'
+            ?await getArchivedReflections([reviewEvidence.sourceBookId],forestReflectionArchiveCutoff(now()))
+            :await getRecentReflections();
+        return isCurrentForestReflection(reviewEvidence,{books:await getBooks(),reflections});
       }
       const memoryId=sourceMemoryId||dailySourceMemoryId;
       if(memoryId)return unlockedStoryMemories(await getBooks(),await getCatalog())
@@ -354,6 +361,19 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
         spotlight=reviewSession.choose({characterId,books,catalog,cues,reflections});
       }catch{spotlight=null}
     }
+    if(!spotlight&&(canReact||original?.sourceKind==='story'&&
+      (!requireCharacterProfile||activeCharacterProfile))){
+      try{
+        const input={characterId,books,catalog,cues,sourceMemoryId:original.sourceMemoryId};
+        const archiveBooks=reviewSession.archiveBooks(input);
+        if(archiveBooks.length){
+          const reflections=await getArchivedReflections(archiveBooks.map(book=>book.id),
+            forestReflectionArchiveCutoff(now()));
+          spotlight=reviewSession.choose({...input,reflections,archiveBooks});
+        }
+      }catch{spotlight=null}
+      if(closed||generation!==epoch)return null;
+    }
     if(original&&identity?.characterId){
       try{
         // The base director owns story vs ambient priority. Ambient generation
@@ -397,7 +417,9 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     const result=await request(characterId,mode,
       spotlight?'最近の本の感想を聞いた。':original.text,'',false,topic,
       sourceKind,spotlight);
+    const allowed=!spotlight||!getCurrentReflection||await sourceStillAllowed({reviewEvidence:spotlight});
     if(closed||generation!==epoch)return null;
+    if(!allowed)return finish(characterId);
     if(!result){
       record({event:'script-fallback',characterId,reason:'generation-unavailable',
         sourceKind,promptVersion:PROMPT_VERSION});
@@ -418,8 +440,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
       ...(result.mark?{mark:result.mark}:{}),sourceKind,
       sourceMemoryId:spotlight?'':original.sourceMemoryId||'',
       relayChoice,
-      ...(spotlight?{reviewSpotlightKey:spotlight.key,
-        reviewSpotlightBookKey:spotlight.bookKey,reviewEvidence:spotlight}:{}),
+      ...(spotlight?{reviewSpotlightKey:spotlight.key,reviewEvidence:spotlight}:{}),
       ...(!spotlight&&sourceKind==='ambient'&&source?.evidence==='reviewed'?
         {dailySourceMemoryId:source.memoryId}:{})});
   }
@@ -468,12 +489,14 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     history.push({playerChoice:label});history=history.slice(-4);
     record({event:'selected-offered-choice',characterId,
       ...(['review-reaction','reflection'].includes(current.sourceKind)?{}:{label})});
-    const closing=repliesThisSession+1>=maxReplies||
+    const closing=repliesThisSession+1>=maxReplies||sessionCount+1>=sessionLimit||
       /^(?:またね|ばいばい|バイバイ|帰る|かえる|おしまい|また今度)[。！!]*$/u.test(label);
     const topic=activeTopic;
     const generated=await request(characterId,'reply',current.text,label,closing,topic,
       current.sourceKind,current.reviewEvidence||null);
+    const stillAllowed=!current.reviewEvidence||!getCurrentReflection||await sourceStillAllowed(current);
     if(closed||generation!==epoch)return null;
+    if(!stillAllowed)return finish(characterId);
     if(!generated){
       // These are newly generated CHILD choices. They do not identify an
       // authored continuation: switching to another script would discard the
@@ -497,7 +520,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
       sourceMemoryId:current.sourceMemoryId,
       dailySourceMemoryId:current.dailySourceMemoryId,
       reviewSpotlightKey:current.reviewSpotlightKey,
-      reviewSpotlightBookKey:current.reviewSpotlightBookKey,reviewEvidence:current.reviewEvidence});
+      reviewEvidence:current.reviewEvidence});
   }
   return {
     start,select,
@@ -514,11 +537,10 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
       }
       if(pending?.reviewSpotlightKey&&pending.characterId===identity?.characterId&&
         (result?.text===pending.text||result?.mode==='twins'&&!result.autoNext)){
-        reviewSession.displayed(identity.characterId,{key:pending.reviewSpotlightKey,
-          bookKey:pending.reviewSpotlightBookKey});
+        reviewSession.displayed(identity.characterId,pending.reviewEvidence);
         pending.reviewSpotlightKey='';
         record({event:'reflection-reaction-displayed',characterId:identity.characterId,
-          promptVersion:PROMPT_VERSION});
+          reflectionKind:pending.reviewEvidence?.kind||'recent',promptVersion:PROMPT_VERSION});
       }
       if(pending?.sourceKind!=='ambient')return;
       const scene=activeDaily?.scene;

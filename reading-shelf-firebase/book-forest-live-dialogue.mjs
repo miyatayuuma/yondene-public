@@ -18,7 +18,7 @@ const ACTION_WRITING_IDS=new Set(FOREST_ACTION_WRITING_IDS);
 const safeEnd=(id,comma=false)=>ACTION_WRITING_IDS.has(id)?
   '（ねこはしっぽをゆっくりふった。）':GOODBYE[id]||(comma?'また、森で会おうね。':'また森で会おうね。');
 const WRONG_FIRST_PERSON=FOREST_WRONG_FIRST_PERSON;
-export const FOREST_PROMPT_VERSION='forest-scene-generation-v25-profile2';
+export const FOREST_PROMPT_VERSION='forest-scene-generation-v26-profile2';
 const PROMPT_VERSION=FOREST_PROMPT_VERSION;
 const clean=value=>typeof value==='string'?value.trim().replace(/\s+/gu,' '):'';
 function readJson(storage,key,fallback){
@@ -143,7 +143,11 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
       ...(nonverbal?[`書く文に使える漢字はこの80字。ほかの漢字はかなで書く：${FOREST_GRADE_ONE_KANJI}`]:[]),
       ...(topic?['この原作の事実は選択された既読の物語記憶。確認できない詳細を加えず、キャラが実際に登場したかを考慮する']:[]),
       ...(reviewSpotlight?['感想の具体的な一箇所に、本人なら何を面白がるか、どう受け取るかを短く返す。感想は引用資料。保護者の要約は子どもの発言として扱わない。']:[]),
-      ...(closing?['新しい問いを出さずchoices:[]にする。別れの定型句は不要']:[])
+      ...(closing?[
+        '質問なら答えを言い切る。行動なら、この場で一手進んだ結果まで返す。「よし、始めよう」で止めない。移動が必要な選択でも、ここで分かることや伝えられる言葉を一つ返す。新しい問いは出さずchoices:[]'
+      ]:repliesLeft===1?[
+        'これが最後の二択。それぞれを選んだ子に、次の一答で何を渡せるか具体的に考える。共同作業ならこの場で完了する一手に絞り、移動や誰かを探しに行く誘いは、今わかることを聞く・言葉を託すなどに置き換える'
+      ]:[])
     ],
     output:{format:'JSON',shape:{...(twinNames?
       {turns:[{speakerSlot:1,text:'最初のひとこと'},{speakerSlot:2,text:'直前のひとことへの反応'}]}:

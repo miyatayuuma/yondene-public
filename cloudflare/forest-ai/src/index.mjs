@@ -1,4 +1,4 @@
-import {forestEndingChoices,forestEndingNeedsReply} from '../../../reading-shelf-firebase/book-forest-ending.mjs';
+import {forestEndingChoices,forestEndingNeedsReply,forestUnsupportedAction,forestMisattributesReviewTitle} from '../../../reading-shelf-firebase/book-forest-ending.mjs';
 import {unsafeForestForaging} from '../../../reading-shelf-firebase/book-forest-output-safety.mjs';
 import {FOREST_AI_GENERATION_IDS,FOREST_ACTION_WRITING_IDS,FOREST_MULTI_SPEAKER_IDS,FOREST_ROSTER_REVISION,FOREST_DIALOGUE_PROTOCOL,canonicalForestMention} from '../../../reading-shelf-firebase/forest-character-registry.mjs';
 import {validateForestWrittenTurn} from '../../../reading-shelf-firebase/book-forest-gesture.mjs';
@@ -6,7 +6,7 @@ import {validateTwinTurns} from '../../../reading-shelf-firebase/book-forest-twi
 // よんでね 本の森: a small, owner-only proxy for the free Workers AI allowance.
 // No bookshelf data, Firebase private credentials, or Cloudflare API keys here.
 const MODEL='@cf/google/gemma-4-26b-a4b-it';
-export const FOREST_WORKER_VERSION='forest-dialogue-v30-profile2';
+export const FOREST_WORKER_VERSION='forest-dialogue-v31-profile2';
 const VERSION=FOREST_WORKER_VERSION;
 const JWKS_URL='https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com';
 const ORIGINS=new Set(['https://kodomo-reading-shelf-87f11.web.app',
@@ -117,6 +117,9 @@ export function readCompletion(result,{closing=false,mode='reply',characterId=''
   if(silent&&context.handoffTo&&written.delivery!=='written')throw Error('Invalid silent relay message');
   const lastChoices=!closing&&context.repliesLeft===1;
   const safetyInput=written?{...parsed,text:written.text}:parsed;
+  const lines=turns?turns.map(turn=>turn.text):[safetyInput?.text];
+  if(lines.some(line=>forestUnsupportedAction(line,context)||forestMisattributesReviewTitle(line,context)))
+    throw Error('Invalid model dialogue context');
   if(unsafeForestForaging(lastChoices?{...safetyInput,choices:[]}:safetyInput,context))
     throw Error('Invalid model unsafe-foraging');
   if(turns&&closing)return {turns,choices:[]};
@@ -141,7 +144,8 @@ export function readCompletion(result,{closing=false,mode='reply',characterId=''
   const choices=parsed.choices.map(choice=>canonicalForestMention(typeof choice==='string'?choice:choice?.label,context.speakers));
   if(choices.some(choice=>typeof choice!=='string'||choice.length<2||choice.length>24))
     throw Error('Invalid model choices');
-  return {...line,choices:choices.slice(0,2)};
+  return {...line,choices:choices.filter(label=>!forestUnsupportedAction(label,context)&&
+    !forestMisattributesReviewTitle(label,context)).slice(0,2)};
 }
 
 export function forestGenerationInput(prompt){
@@ -162,11 +166,12 @@ export function forestGenerationInput(prompt){
         '今日のsceneはevidence=reviewedなら読了済み原作の承認済み事実を含み、evidence=imaginedなら森の即興の出来事。'+
         '原作の記憶は過去のこと。資料にない体験を思い出として足さない。今の森で話題を広げるなら、想像は想像として伝える。'+
         '知らない木の実・きのこ・植物の食用性を断定せず、味見や摂取を選択肢にしない。安全な食事や食欲は表現してよい。見知らぬ実の場面では、見る・調べる・そのままにするなど次の行動を出す。'+
-        'readerReflectionがある場合は本の感想を受け止め、別作品の人物なら第三者の立場で反応する。'+
+        (prompt.context.readerReflection?
+          'readerReflection.bookTitleは書誌上の書名。quoteは読者の感想で、その中のかぎ括弧や仮の名前も感想の一部。書名に使うのはbookTitleだけ。題名を復唱せず、感想の具体的なところに、その人らしく反応する。別作品なら第三者の立場で話す。':'')+
         '原作に登場した・直接目撃したと偽らず、本人の気持ちを勝手に決めつけない。'+
         '保護者による要約を子どもの直接の発言として扱わず、感想の追記を要求しない。'+
         '別のNPCの会話内容を聞いたふりをせず、選択肢を子どもの信念とみなさない。'+
-        'relayMessageは子どもが今ここで届けた言葉。内容の一点に、その人物ならではの返事をする。'+
+        'relayMessageは子どもが今ここで届けた言葉。内容の一点に、その人物ならではの返事をする。返伝を引き受けない。アプリが用意する伝言ボタン以外で伝言を頼まない。'+
         (prompt.context.handoffTo?
           '今の選択は、子どもが話し手から伝言を預かる場面。話し手は今の話題から、届けてほしい言葉を自分で一つ決めて渡す。'+
           '「さっきの風が気持ちよかったって、会ったら伝えてね。」のように、伝言の本文を含める。子どもの伝言を預かったふりをしない。':'')+
@@ -187,7 +192,7 @@ export function forestGenerationInput(prompt){
           '最後の候補は{label,outcome}。outcomeは選択後に表示する実際の台詞。' +
           (multi?'各候補のspeakerSlotは話す一人の番号。':'')+
           '本文では一つ前の選択にまず返事をする。最後はその続きとして異なる二つの問いか反応を用意する。'+
-          '各outcomeはlabelの問いへの答え、遊びの結果、届ける言葉など、その場で子どもが受け取れる中身から書く。'+
+          'まず、今わかる事実、人物らしい見立てや感想から、言い切れるoutcomeを二つ考える。その答えを自然に引き出すlabelを後からつける。本文と同じ話題を保ち、これから決める・探す予定で終わらせない。'+
           '例「どこにかくれる？」→「木のうら。ぼうしが見えたら、すぐ見つかっちゃうね。」。outcomeで新しく質問したり、続きの操作を促したりしない。':
           'closing=trueでは選ばれた言葉にその場で応え、新しい質問を出さず、choicesは空配列。')},
         {role:'user',content:JSON.stringify(prompt)}],

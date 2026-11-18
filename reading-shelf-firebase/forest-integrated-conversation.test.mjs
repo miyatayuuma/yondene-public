@@ -336,3 +336,59 @@ test('related old reflections span multiple books and NPCs, and never continue a
   assert.equal(run.frames.at(-1).result.conversationComplete,true);
   assert.doesNotMatch(JSON.stringify(run.storage),/架空の合成感想/);
 });
+
+test('endings that defer the answer are omitted in both validators',()=>{
+  const options={characterId:'king',mode:'reply',requireLine:true,context:{repliesLeft:1}};
+  const answer={label:'どうやって見つける？',outcome:'葉っぱの下を見れば、赤いところがすぐ見えるよ。'};
+  const choices=[
+    {label:'どんな遊び？',outcome:'まずは、何を使うかきめなきゃね。'},
+    {label:'見つかったの？',outcome:'「葉の下には、何があるんだろう？」'},
+    answer
+  ];
+  const output={text:'赤いところが目印なんだ。',choices};
+  assert.deepEqual(readCompletion({response:JSON.stringify(output)},options).choices,[answer]);
+  assert.deepEqual(validateLiveForestOutput(output,options).endings,[answer]);
+  choices[1]={label:'友だちは？',outcome:'わたしが呼んでくるよ。'};
+  assert.deepEqual(readCompletion({response:JSON.stringify(output)},options).choices,[answer]);
+  assert.deepEqual(validateLiveForestOutput(output,options).endings,[answer]);
+});
+
+test('context checks distinguish quoted review phrases, actual titles and supported handoffs',()=>{
+  const options={characterId:'king',mode:'opening',requireLine:true,context:{
+    readerReflection:{bookTitle:'架空の本',quote:'「ルビー色の猫」っていう場所がよかった。'},
+    npcDisplayNames:{jiji:'ジジ'}
+  }};
+  const parse=output=>readCompletion({response:JSON.stringify(output)},options);
+  const output={text:'「ルビー色のねこ」という本は、おもしろそうだね。',choices:['どこが好き？','どう思う？']};
+  assert.throws(()=>parse(output),/dialogue context/);
+  assert.equal(validateLiveForestOutput(output,options),null);
+  output.text='もし赤い橋が主役なら、「ルビー色のねこ」という題名もいいね。';
+  assert.equal(parse(output).text,output.text);
+  output.text='「架空の本」の赤い橋か。夕日に染まったらきれいだろうな。';
+  output.choices[0]='ジジに言ってね';
+  assert.deepEqual(parse(output).choices,['どう思う？']);
+  assert.deepEqual(validateLiveForestOutput(output,options).labels,['どう思う？']);
+  output.text='どうだったか聞かせて。気が向いたら言ってね。';
+  assert.equal(parse(output).text,output.text);
+  output.text='ジジに伝えておくよ。';
+  assert.throws(()=>parse(output),/dialogue context/);
+  assert.equal(validateLiveForestOutput(output,options),null);
+  options.context.handoffTo='jiji';
+  output.text='夕日がきれいだったって、ジジに伝えてね。';
+  assert.equal(parse(output).text,output.text);
+  assert.equal(validateLiveForestOutput(output,options).text,output.text);
+});
+
+test('foraging warnings survive while a following unsafe suggestion is rejected',()=>{
+  const options={characterId:'king',mode:'opening',requireLine:true,context:{
+    scene:{focus:'名前のわからない赤い実が落ちている。'}
+  }};
+  const output={text:'赤い実は、まだ食べないほうがいいかもしれないね。',
+    choices:['どうして？','見るだけにする']};
+  const parse=()=>readCompletion({response:JSON.stringify(output)},options);
+  assert.equal(parse().text,output.text);
+  assert.equal(validateLiveForestOutput(output,options).text,output.text);
+  output.text='名前のわからない赤い実は食べないほうがいいけど、ひと口だけ味見してみよう。';
+  assert.throws(parse,/unsafe-foraging/);
+  assert.equal(validateLiveForestOutput(output,options),null);
+});

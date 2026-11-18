@@ -1,7 +1,7 @@
 import {FOREST_CHARACTER_IDS,FOREST_SELF_NAMES,FOREST_GOODBYES,FOREST_WRONG_FIRST_PERSON,
   FOREST_ACTION_WRITING_IDS,FOREST_MULTI_SPEAKER_IDS,FOREST_DIALOGUE_PROTOCOL,FOREST_DISPLAY_NAMES,canonicalForestMention} from './forest-character-registry.mjs';
 import {validateTwinTurns,twinDialogueFrame} from './book-forest-twins.mjs';
-import {forestEndingChoices,forestEndingNeedsReply} from './book-forest-ending.mjs';
+import {forestEndingChoices,forestEndingNeedsReply,forestUnsupportedAction,forestMisattributesReviewTitle} from './book-forest-ending.mjs';
 import {unsafeForestForaging} from './book-forest-output-safety.mjs';
 import {isCurrentForestReflection,forestReflectionArchiveCutoff} from './book-forest-reflection-spotlight.mjs';
 import {validateForestWrittenTurn} from './book-forest-gesture.mjs';
@@ -31,7 +31,7 @@ function ambientFocus(characterId,visitNumber){
 const safeEnd=(id,comma=false)=>ACTION_WRITING_IDS.has(id)?
   '（ねこはしっぽをゆっくりふった。）':GOODBYE[id]||(comma?'また、森で会おうね。':'また森で会おうね。');
 const WRONG_FIRST_PERSON=FOREST_WRONG_FIRST_PERSON;
-export const FOREST_PROMPT_VERSION='forest-scene-generation-v33-profile2';
+export const FOREST_PROMPT_VERSION='forest-scene-generation-v34-profile2';
 const PROMPT_VERSION=FOREST_PROMPT_VERSION;
 const clean=value=>typeof value==='string'?value.trim().replace(/\s+/gu,' '):'';
 function readJson(storage,key,fallback){
@@ -79,6 +79,8 @@ export function validateLiveForestOutput(raw,{characterId,requireLine=false,clos
   if(multi&&!turns||gesture&&(!written||context.handoffTo&&written.delivery!=='written')||!multi&&!gesture&&requireLine&&!validLine(characterId,text))return null;
   const lastChoices=!closing&&context.repliesLeft===1;
   const safetyInput=written?{...data,text:written.text}:data;
+  const lines=turns?turns.map(turn=>turn.text):[safetyInput.text];
+  if(lines.some(line=>forestUnsupportedAction(line,context)||forestMisattributesReviewTitle(line,context)))return null;
   if(unsafeForestForaging(lastChoices?{...safetyInput,choices:[]}:safetyInput,context))return null;
   const line=turns?{text:turns.map(turn=>turn.text).join(' '),turns}:written||{text};
   if(closing)return {...line,labels:[]};
@@ -92,12 +94,13 @@ export function validateLiveForestOutput(raw,{characterId,requireLine=false,clos
   const byLabel=new Map();
   for(const choice of candidates){
     const label=canonicalForestMention(clean(typeof choice==='string'?choice:choice?.label),context.speakers);
-    if(label.length<2||label.length>24||/[\r\n{}<>「」]/u.test(label)||byLabel.has(label))continue;
+    if(label.length<2||label.length>24||/[\r\n{}<>「」]/u.test(label)||byLabel.has(label)||
+      forestUnsupportedAction(label,context)||forestMisattributesReviewTitle(label,context))continue;
     byLabel.set(label,true);
   }
   const labels=[...byLabel.keys()].slice(0,2);
   // Keep a valid NPC line playable if the model returned unusable buttons.
-  if(labels.length<2){
+  if(!labels.length||!requireLine&&labels.length<2){
     if(!requireLine)return null;
     return {...line,labels:gesture?['もうすこしみる','またね']:['もう少し聞く','またね']};
   }

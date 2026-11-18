@@ -50,7 +50,7 @@ test('generates contextual reply choices, then a character reply only after a ch
   const log=JSON.parse(storage.getItem('forest-ai-local-v1:log'));
   assert.deepEqual(log.map(x=>x.event),['generated-opening','selected-offered-choice','generated-reply']);
   assert.equal(log[0].text,first.text,'export can reconstruct the initial line');
-  assert.equal(log[0].promptVersion,'forest-scene-generation-v33-profile2');
+  assert.equal(log[0].promptVersion,'forest-scene-generation-v34-profile2');
   assert.equal(log[1].label,'風の音を聞く');
   director.end();
 });
@@ -149,7 +149,7 @@ test('bad LLM output is rejected, preserving approved fallback and avoiding fabr
     {characterId:'cat',requireLine:true}),null);
   assert.deepEqual(validateLiveForestOutput({text:'今日は森を歩くね。',choices:['どうして？','どうして？']},
     {characterId:'kiki',requireLine:true}),
-    {text:'今日は森を歩くね。',labels:['もう少し聞く','またね']});
+    {text:'今日は森を歩くね。',labels:['どうして？']});
   assert.equal(validateLiveForestOutput({text:'ふふ、そうね。わたしも気になるわ。',choices:['どうして？','見に行こう']},
     {characterId:'jiji',requireLine:true}),null,'Jiji must not become a generic female guide');
   assert.equal(validateLiveForestOutput({text:'ぼくはおなかがすいたよ。',choices:['何食べる？','さがそう']},

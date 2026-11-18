@@ -104,15 +104,16 @@ export function readCompletion(result,{closing=false,mode='reply',characterId=''
   content=content.trim().replace(/^```(?:json)?\s*/iu,'').replace(/\s*```$/u,'');
   let parsed;
   try{parsed=JSON.parse(content)}catch{throw Error('Invalid model JSON')}
-  if(unsafeForestForaging(parsed,context))throw Error('Invalid model unsafe-foraging');
   const multi=MULTI_SPEAKER.has(characterId);
   const validatedTurns=multi?validateTwinTurns(parsed?.turns):null;
   const turns=validatedTurns?.map(turn=>({...turn,text:canonicalForestMention(turn.text,context.speakers)}));
   if(multi&&!turns)throw Error('Invalid model speaker turns');
-  if(turns&&closing)return {turns,choices:[]};
   const silent=ACTION_WRITING_IDS.has(characterId);
   const written=silent?validateForestWrittenTurn(parsed?.text,parsed?.delivery):null;
   if(silent&&!written)throw Error('Invalid silent cat action');
+  if(unsafeForestForaging(written?{...parsed,text:written.text}:parsed,context))
+    throw Error('Invalid model unsafe-foraging');
+  if(turns&&closing)return {turns,choices:[]};
   const text=written?.text??canonicalForestMention(parsed?.text,context.speakers);
   if(closing){
     if(!written&&(typeof parsed?.text!=='string'||parsed.text.length>90))throw Error('Invalid closing line');

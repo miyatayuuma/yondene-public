@@ -59,12 +59,12 @@ export function validateLiveForestOutput(raw,{characterId,requireLine=false,clos
   if(!data||typeof data!=='object'||!CHARACTERS.has(characterId))return null;
   const gesture=ACTION_WRITING_IDS.has(characterId);
   const text=gesture?data.text:canonicalForestMention(clean(data.text),context.speakers);
-  if(unsafeForestForaging(data,context))return null;
   const multi=MULTI_SPEAKER.has(characterId);
   const rawTurns=multi?validateTwinTurns(data.turns):null;
   const turns=rawTurns?.map(turn=>({...turn,text:canonicalForestMention(turn.text,context.speakers)}));
   const written=gesture?validateForestWrittenTurn(text,data.delivery):null;
   if(multi&&!turns||gesture&&!written||!multi&&!gesture&&requireLine&&!validLine(characterId,text))return null;
+  if(unsafeForestForaging(written?{...data,text:written.text}:data,context))return null;
   const line=turns?{text:turns.map(turn=>turn.text).join(' '),turns}:written||{text};
   if(closing)return {...line,labels:[]};
   const candidates=Array.isArray(data.choices)?data.choices.slice(0,3):[];

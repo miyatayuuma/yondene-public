@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {validateLiveForestOutput} from './book-forest-live-dialogue.mjs';
 import {runForestConversationScenario,scenarioStorage} from '../scripts/forest-conversation-scenario.mjs';
 import {profileFixture} from './forest-profile-fixture.mjs';
 import {unsafeForestForaging} from './book-forest-output-safety.mjs';
@@ -135,6 +136,18 @@ test('foraging guard distinguishes unidentified plants, refusals and ordinary kn
     text:'このはっぱはたべられるよ。',delivery:'written',choices:['たべてみる','見るだけ']
   },forest),true);
   assert.equal(unsafeForestForaging({...writing,choices:['知らない木の実をたべよう','見る']},forest),true);
+
+  // A discarded leaf-writing direction cannot turn reassurance about a story
+  // into a claim that the leaf is safe to eat.
+  const reassure={text:'（はっぱに文字をかく）\nおしろがなくなっても、だいじょうぶだよ。',
+    delivery:'written',choices:['どうして？','よかった']};
+  const options={characterId:'cat',mode:'opening',context:forest,requireLine:true};
+  const completion=payload=>readCompletion({response:JSON.stringify(payload)},options);
+  assert.equal(completion(reassure).text,'おしろがなくなっても、だいじょうぶだよ。');
+  assert.equal(validateLiveForestOutput(reassure,options).delivery,'written');
+  const unsafe={...reassure,text:'（はっぱに文字をかく）\nこのはっぱはたべられるよ。'};
+  assert.throws(()=>completion(unsafe),/unsafe-foraging/);
+  assert.equal(validateLiveForestOutput(unsafe,options),null);
 
 });
 

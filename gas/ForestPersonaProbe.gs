@@ -1708,12 +1708,12 @@ var ForestPersonaProbe = (() => {
     if (!data || typeof data !== "object" || !CHARACTERS2.has(characterId)) return null;
     const gesture = ACTION_WRITING_IDS2.has(characterId);
     const text = gesture ? data.text : canonicalForestMention(clean3(data.text), context.speakers);
-    if (unsafeForestForaging(data, context)) return null;
     const multi = MULTI_SPEAKER.has(characterId);
     const rawTurns = multi ? validateTwinTurns(data.turns) : null;
     const turns = rawTurns?.map((turn) => ({ ...turn, text: canonicalForestMention(turn.text, context.speakers) }));
     const written = gesture ? validateForestWrittenTurn(text, data.delivery) : null;
     if (multi && !turns || gesture && !written || !multi && !gesture && requireLine && !validLine2(characterId, text)) return null;
+    if (unsafeForestForaging(written ? { ...data, text: written.text } : data, context)) return null;
     const line = turns ? { text: turns.map((turn) => turn.text).join(" "), turns } : written || { text };
     if (closing) return { ...line, labels: [] };
     const candidates = Array.isArray(data.choices) ? data.choices.slice(0, 3) : [];
@@ -2429,15 +2429,16 @@ var ForestPersonaProbe = (() => {
     } catch {
       throw Error("Invalid model JSON");
     }
-    if (unsafeForestForaging(parsed, context)) throw Error("Invalid model unsafe-foraging");
     const multi = MULTI_SPEAKER2.has(characterId);
     const validatedTurns = multi ? validateTwinTurns(parsed?.turns) : null;
     const turns = validatedTurns?.map((turn) => ({ ...turn, text: canonicalForestMention(turn.text, context.speakers) }));
     if (multi && !turns) throw Error("Invalid model speaker turns");
-    if (turns && closing) return { turns, choices: [] };
     const silent = ACTION_WRITING_IDS3.has(characterId);
     const written = silent ? validateForestWrittenTurn(parsed?.text, parsed?.delivery) : null;
     if (silent && !written) throw Error("Invalid silent cat action");
+    if (unsafeForestForaging(written ? { ...parsed, text: written.text } : parsed, context))
+      throw Error("Invalid model unsafe-foraging");
+    if (turns && closing) return { turns, choices: [] };
     const text = written?.text ?? canonicalForestMention(parsed?.text, context.speakers);
     if (closing) {
       if (!written && (typeof parsed?.text !== "string" || parsed.text.length > 90)) throw Error("Invalid closing line");

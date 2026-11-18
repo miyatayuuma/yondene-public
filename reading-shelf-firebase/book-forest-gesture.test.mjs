@@ -10,9 +10,11 @@ test('written dialogue accepts katakana names, spaces and the 80 grade-one kanji
     ...FOREST_GRADE_ONE_KANJI]){
     assert.deepEqual(validateForestWrittenTurn(line,'written'),{text:line,delivery:'written'});
   }
-  for(const line of ['Hello','猫','読','道','１２３','', '　！？', 'あ'.repeat(66),'あ\nい']){
+  for(const line of ['Hello','猫','読','道','１２３','', '　！？', 'あ'.repeat(66),'あ'.repeat(101)]){
     assert.equal(validateForestWrittenTurn(line,'written'),null,line);
   }
+  assert.deepEqual(validateForestWrittenTurn('雨だね。\n木の下で休もう。','written'),
+    {text:'雨だね。 木の下で休もう。',delivery:'written'});
 });
 
 test('gestures permit brief natural narration without speech, thoughts or writing-only narration',()=>{

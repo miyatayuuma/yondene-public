@@ -141,6 +141,32 @@ function readMirror(spreadsheet,props){
   const last=labels.find(row=>row[0]==='前回成功')?.[1];
   return parseForestBookshelfMirror(docs.getDataRange().getDisplayValues(),{syncAt:last});
 }
+// Preview a private edit to the canonical profile with the same row parser.
+export function previewForestProfile(rows,raw){
+  let edit;
+  try{edit=JSON.parse(raw)}catch{throw Error('INVALID_PROFILE_PREVIEW')}
+  if(!edit||typeof edit.npc!=='string'||typeof edit.version!=='string'||
+    !edit.fields||Array.isArray(edit.fields)||typeof edit.fields!=='object')
+    throw Error('INVALID_PROFILE_PREVIEW');
+  const columns=['NPC ID','項目','内容','設定版'].map(name=>rows[0].indexOf(name));
+  if(columns.some(index=>index<0))throw Error('INVALID_PROFILE_PREVIEW');
+  const [npc,field,text,version]=columns;
+  const applied=new Set();
+  const patched=rows.map((row,index)=>{
+    if(index===0||row[npc]!==edit.npc)return row;
+    const next=[...row];
+    next[version]=edit.version;
+    if(Object.prototype.hasOwnProperty.call(edit.fields,row[field])){
+      next[text]=edit.fields[row[field]];
+      if(typeof next[text]!=='string'||!next[text].trim())throw Error('INVALID_PROFILE_PREVIEW');
+      applied.add(row[field]);
+    }
+    return next;
+  });
+  if(!applied.size||applied.size!==Object.keys(edit.fields).length)
+    throw Error('INVALID_PROFILE_PREVIEW');
+  return patched;
+}
 function getPrevious(rows,id){
   const list=rows.filter(row=>row[0]===id);
   if(list.length!==1||list[0][17]!=='PASS')throw Error('PREVIOUS_RESULT_MISSING');
@@ -176,7 +202,7 @@ export async function probeConversation(personRows,sourceRows,characterId,{snaps
   catalog=[],cues=[],twinNames=[],twinScenes=[],storage,choices=[0,0],transport,now=()=>Date.now()}={}){
   const profiles=parseForestCharacterProfiles(personRows,parseForestProfileSources(sourceRows));
   if(!profiles.some(p=>p.id===characterId))throw Error('MISSING_PROFILE');
-  return runForestConversationScenario({visits:[{characterId,choices}],transport,
+  return runForestConversationScenario({visits:[{characterId,choices}],transport,allowUnavailableChoice:true,
     now,storage:scenarioStorage(storage||{}),getBooks:()=>snapshot.books,
     getCatalog:()=>catalog,getCues:()=>cues,getCharacterProfiles:()=>profiles,
     getTwinNames:()=>twinNames,getTwinScenes:()=>twinScenes,
@@ -195,7 +221,7 @@ export async function probeConversation(personRows,sourceRows,characterId,{snaps
  * never export/log it or add it to public code. Only the private results Sheet
  * persists the exact prompt for reproducible testing.
  */
-export async function processQueue(){
+export async function processQueue({maxCases=3,oneIntegrated=true}={}){
   const lock=LockService.getScriptLock();if(!lock.tryLock(1000))return;
   try{
     const ss=SpreadsheetApp.getActiveSpreadsheet();
@@ -211,7 +237,7 @@ export async function processQueue(){
     for(const row of rows)counts[row[0]]=(counts[row[0]]||0)+1;
     const results=out.getDataRange().getDisplayValues().slice(1),
       existing=new Set(results.map(r=>r[0]));
-    // Use the Workers AI usage day and keep the per-day cap.
+    // Count actual requests by Workers AI usage day. The provider handles quota.
     const today=Utilities.formatDate(new Date(),'UTC','yyyy-MM-dd');
     const key='YONDENE_GEMMA_TEST_ATTEMPTS_UTC_'+today;
     let attempts=Number(props.getProperty(key)||0),done=0,mirror=null;
@@ -222,7 +248,7 @@ export async function processQueue(){
     const cues=parseForestDialogueRows(cuesSheet?.getDataRange().getDisplayValues()||[]);
     const originalPeople=person.getDataRange().getDisplayValues(),
       originalSources=source.getDataRange().getDisplayValues();
-    for(let i=0;i<rows.length&&done<3;i++){
+    for(let i=0;i<rows.length&&done<maxCases;i++){
       const [id,npc,scene,utterance,state,,,,modeCell,bookId,previousId,choice,caseId,issue]=rows[i];
       if(state!=='PENDING')continue;
       const mode=norm(modeCell)||'synthetic';
@@ -235,16 +261,21 @@ export async function processQueue(){
       }
       if(existing.has(id)){mark('APPLIED','ALREADY_RECORDED');continue;}
       const integrated=mode.startsWith('integrated-');
-      const replayOpening=integrated&&caseId==='replay-opening';
+      const caseKey=norm(caseId);
+      const usePreview=integrated&&caseKey.startsWith('profile-preview:');
+      const scenario=usePreview?caseKey.slice('profile-preview:'.length):caseKey;
+      const replayOpening=integrated&&scenario==='replay-opening';
+      const fixtureReflection=mode==='integrated-mirror'&&scenario==='fictional-reflection';
+      if(fixtureReflection&&(!bookId||!utterance)){mark('ERROR','INVALID_INPUT');continue;}
       let selectedChoices;
       if(integrated){
         try{selectedChoices=choice?JSON.parse(choice):[0,0]}catch{}
         if(!Array.isArray(selectedChoices)||selectedChoices.length>2||
-          selectedChoices.some(c=>!Number.isInteger(c)||c<0||c>1)||
+          selectedChoices.some(c=>c!=='relay'&&c!==0&&c!==1)||
           replayOpening&&(!previousId||selectedChoices.length!==2)){
           mark('ERROR','INVALID_CHOICE');continue;
         }
-        if(done!==0)break;
+        if(oneIntegrated&&done!==0)break;
       }
       mark('RUNNING','');SpreadsheetApp.flush();done++;
       let prepared;
@@ -270,8 +301,21 @@ export async function processQueue(){
               }
             }catch{throw Error('PREVIOUS_INPUT_INVALID')}
           }
-          const snapshot=mode==='integrated-mirror'?mirror:{books:[],reflections:[]};
-          const conversation=await probeConversation(originalPeople,originalSources,npc,{
+          let snapshot=mode==='integrated-mirror'?mirror:{books:[],reflections:[]};
+          if(bookId){
+            const books=snapshot.books.filter(book=>book.id===bookId&&book.status==='read');
+            if(!books.length)throw Error('BOOK_NOT_READ');
+            snapshot={...snapshot,books};
+          }
+          if(fixtureReflection){
+            // The book and its approved facts remain real. The reader words
+            // are explicitly fictional and never written to the bookshelf.
+            snapshot={...snapshot,reflections:[{id:'fixture-'+id,bookId,
+              quote:utterance,attribution:'verbatim',createdAt:Date.now()}],archiveReflections:[]};
+          }
+          const people=usePreview?previewForestProfile(originalPeople,
+            ss.getSheetByName('Gemma検証設定')?.getRange(27,2).getDisplayValue()):originalPeople;
+          const conversation=await probeConversation(people,originalSources,npc,{
             snapshot,catalog,cues,storage:prior,choices:selectedChoices,
             ...(npc==='twins'?{
               twinNames:parseTwinNameRows(ss.getSheetByName('ふたご名前')?.getDataRange().getDisplayValues()||[]),
@@ -299,21 +343,29 @@ export async function processQueue(){
               if(envelope?.success===false)throw Error('Model provider error');
               return envelope.result;
             }});
-          done+=2;
-          const valid=conversation.trace.length>0&&conversation.trace.every(t=>t.validation==='accepted');
+          if(oneIntegrated)done=maxCases;
+          const valid=conversation.trace.length>0&&conversation.trace.every(t=>t.validation==='accepted')&&
+            conversation.frames.at(-1)?.result?.conversationComplete===true&&
+            !conversation.selectionErrors.some(error=>error.selection==='relay')&&
+            (!fixtureReflection||conversation.summary.turns[0]?.sourceKind==='review-reaction');
           const compact={...conversation,...(replay?{replayedOpeningId:previousId}:{}),storage:compactProbeStorage(conversation.storage),
             trace:conversation.trace.map(({prompt,...rest})=>rest)};
           const saved=JSON.stringify({conversation:compact});
           if(saved.length>48000)throw Error('TRACE_TOO_LARGE');
-          out.appendRow([safeText(id),npc,npc,safeText(scene),safeText(utterance),
+          const savedRow=[safeText(id),npc,npc,safeText(scene),safeText(utterance),
             safeText(JSON.stringify(conversation.frames.map(f=>f.result))),MODEL,
             conversation.trace[0]?.prompt.npc.profileVersion||'', '',
             conversation.summary.promptVersion,new Date(),'','','','品質評価未実施',
             safeText(saved),new Date(),valid?'PASS':'FAIL',mode,mirror?.snapshotAt?new Date(mirror.snapshotAt):'',
-            '', '',mode==='integrated-synthetic'?'SYNTHETIC':'READ_ONLY_MIRROR',
+            safeText(bookId||''), '',fixtureReflection?'MIRROR_WITH_FICTIONAL_REFLECTION':
+              mode==='integrated-synthetic'?'SYNTHETIC':'READ_ONLY_MIRROR',
             safeText(previousId||''),safeText(caseId||''),safeText(issue||''),
-            conversation.trace.filter(t=>t.prompt.mode==='reply').length,'']);
-          existing.add(id);mark(valid?'APPLIED':'ERROR',valid?'':'OUTPUT_VALIDATION');
+            conversation.trace.filter(t=>t.prompt.mode==='reply').length,''];
+          out.appendRow(savedRow);
+          results.push(savedRow);
+          existing.add(id);
+          mark(valid?'APPLIED':'ERROR',valid?'':conversation.trace.find(t=>t.failure)?.failure||
+            'CONVERSATION_INCOMPLETE');
           continue;
         }
         const previous=mode==='continuation'?getPrevious(results,previousId):null;
@@ -322,7 +374,7 @@ export async function processQueue(){
           bookId,previous,previousId,choice,now:Date.now()});
       }catch(error){
         const code=String(error?.message||'');
-        mark('ERROR',/^(?:MIRROR_[A-Z_]+|BOOK_NOT_READ|READ_REVOKED|REFLECTION_REVOKED|NO_ELIGIBLE_REFLECTION|NO_VERIFIED_STORY|INVALID_CHOICE|PREVIOUS_[A-Z_]+|REFLECTION_IDENTITY|INVALID_CONTINUATION|MAX_REPLIES|TRACE_TOO_LARGE)$/u.test(code)?
+        mark('ERROR',/^(?:MIRROR_[A-Z_]+|BOOK_NOT_READ|READ_REVOKED|REFLECTION_REVOKED|NO_ELIGIBLE_REFLECTION|NO_VERIFIED_STORY|INVALID_CHOICE|INVALID_PROFILE_PREVIEW|PREVIOUS_[A-Z_]+|REFLECTION_IDENTITY|INVALID_CONTINUATION|MAX_REPLIES|TRACE_TOO_LARGE)$/u.test(code)?
           code:'PROFILE_CONTRACT');
         continue;
       }

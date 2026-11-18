@@ -16,10 +16,22 @@ const MULTI_SPEAKER=new Set(FOREST_MULTI_SPEAKER_IDS);
 const SELF_NAMES=FOREST_SELF_NAMES;
 const GOODBYE=FOREST_GOODBYES;
 const ACTION_WRITING_IDS=new Set(FOREST_ACTION_WRITING_IDS);
+const FOREST_AMBIENT_FOCUS=[
+  '葉や枝が風で鳴る音',
+  '木もれ日で地面の色が変わること',
+  '森で足もとの小さな変化に気づくこと',
+  '相手がいると見え方が変わる、いつもの景色',
+  '夕方の森で音や色が変わること',
+  '足を止めると気づく、森の小さな不思議'
+];
+function ambientFocus(characterId,visitNumber){
+  const offset=[...characterId].reduce((sum,ch)=>sum+ch.charCodeAt(0),0);
+  return FOREST_AMBIENT_FOCUS[(offset+visitNumber-1)%FOREST_AMBIENT_FOCUS.length];
+}
 const safeEnd=(id,comma=false)=>ACTION_WRITING_IDS.has(id)?
   '（ねこはしっぽをゆっくりふった。）':GOODBYE[id]||(comma?'また、森で会おうね。':'また森で会おうね。');
 const WRONG_FIRST_PERSON=FOREST_WRONG_FIRST_PERSON;
-export const FOREST_PROMPT_VERSION='forest-scene-generation-v27.3-profile2';
+export const FOREST_PROMPT_VERSION='forest-scene-generation-v30-profile2';
 const PROMPT_VERSION=FOREST_PROMPT_VERSION;
 const clean=value=>typeof value==='string'?value.trim().replace(/\s+/gu,' '):'';
 function readJson(storage,key,fallback){
@@ -64,7 +76,7 @@ export function validateLiveForestOutput(raw,{characterId,requireLine=false,clos
   const rawTurns=multi?validateTwinTurns(data.turns):null;
   const turns=rawTurns?.map(turn=>({...turn,text:canonicalForestMention(turn.text,context.speakers)}));
   const written=gesture?validateForestWrittenTurn(text,data.delivery):null;
-  if(multi&&!turns||gesture&&!written||!multi&&!gesture&&requireLine&&!validLine(characterId,text))return null;
+  if(multi&&!turns||gesture&&(!written||context.handoffTo&&written.delivery!=='written')||!multi&&!gesture&&requireLine&&!validLine(characterId,text))return null;
   const lastChoices=!closing&&context.repliesLeft===1;
   const safetyInput=written?{...data,text:written.text}:data;
   if(unsafeForestForaging(lastChoices?{...safetyInput,choices:[]}:safetyInput,context))return null;
@@ -102,7 +114,7 @@ function promptScene(scene,sourceKind){
 }
 
 export function promptFor({characterId,mode,chosenLabel='',history=[],closing=false,topic=null,
-  characterProfile=null,sourceKind='',dailyContext=null,recentLines=[],reviewSpotlight=null,situation=null,twinNames=null,repliesLeft=closing?0:2,handoffTo=''}){
+  characterProfile=null,sourceKind='',dailyContext=null,recentLines=[],reviewSpotlight=null,situation=null,twinNames=null,repliesLeft=closing?0:2,handoffTo='',relayMessage=''}){
   const guide=forestCharacterVoiceGuide(characterProfile);
   const npc={id:characterId,displayName:FOREST_DISPLAY_NAMES[characterId],voice:guide,profileSchemaVersion:2,
     profileRevision:guide?characterProfile.revision:'',profileVersion:guide?characterProfile.version:''};
@@ -111,9 +123,14 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
   const nonverbal=ACTION_WRITING_IDS.has(characterId);
   // Existing Worker protocol requires a string field; keep it empty rather than
   // sending a completed script as a model-generation anchor.
+  const visit=situation?.visitNumber;
+  const focus=!reviewSpotlight&&!topic&&['meet','ambient'].includes(sourceKind)&&Number.isSafeInteger(visit)&&visit>0
+    ?ambientFocus(characterId,visit):'';
   const context={npcLine:'',sourceKind,repliesLeft,npcDisplayNames:FOREST_DISPLAY_NAMES,
+    ...(focus?{ambientFocus:focus}:{}),
     ...(twinNames?{speakers:[{slot:1,name:twinNames.firstName},{slot:2,name:twinNames.secondName}]}:{}),
     ...(handoffTo?{handoffTo:FOREST_DISPLAY_NAMES[handoffTo]}:{}),
+    ...(sourceKind==='relay'&&relayMessage?{relayMessage}:{}),
     chosenLabel:clean(chosenLabel).slice(0,24),...(situation?{situation}:{}),
     recentTurns:history.slice(-4),...(topic?{topic}:{}),
     ...(reviewSpotlight?{readerReflection:Object.fromEntries(
@@ -127,13 +144,14 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
   const endingShape={label:'子どもの質問や言葉',outcome:'NPCがその質問に今ここで返す具体的な答え',
     ...(twinNames?{speakerSlot:1}:{}),...(nonverbal?{delivery:'written'}:{})};
   const finishTask=handoffTo?
-    '選択を受けて、相手に会ったときに渡せる言葉をここで伝える。相手はまだ同席していない':
+    '子どもに、相手へ届けてほしい言葉を一つ渡す。何を伝えるか本文に含める。相手はまだ同席していない':
     '選ばれた問いや行動に具体的に応え、この返事だけでひと区切りつける';
   const firstLineTask={
     meet:'この相手とは初対面。以前話したふりをせず、キャラ自身の関心から自然な第一声と返答候補2つを作る',
     story:'このキャラが関わる確認済みの物語を過去の記憶として振り返り、本人らしい第一声と返答候補2つを作る。今の森で原作の場面が進行中であるように再演しない',
     reflection:'台帳が示す読書感想を取り上げ、原文と保護者の要約を区別しながら本人らしく反応する',
-    relay:'前のキャラからの話題の引き継ぎ。会話を直接聞いたふりをせず、自然な第一声と返答候補2つを作る',
+    relay:relayMessage?'子どもが届けた伝言の具体的な中身に、その人物の立場から答え、返答候補2つを作る':
+      '前のキャラからの話題の引き継ぎ。会話を直接聞いたふりをせず、自然な第一声と返答候補2つを作る',
     ambient:'キャラ固有の関心や森の身近な出来事から、毎回異なる第一声と返答候補2つを作る'
   };
   return {
@@ -142,7 +160,7 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
       mode==='reply'?(repliesLeft===1?'直前の会話への反応は言い切る。最後は子どもの二つの問いと、NPCがすぐ返せる具体的な答えを組にする':'直前の会話と選ばれた言葉や行動を受け、次の反応を返す。問いの復唱だけで済ませない'):
       reviewSpotlight?'本の感想にNPC本人らしく、感想の具体的な一箇所に反応し、返答候補2つを作る。別作品なら第三者の立場を守る':
       sourceKind==='ambient'&&situation?.focus==='character'?
-        '人物設定の関心・普段の行動から、本人らしい雑談や冗談と返答候補2つを作る':
+        '森の話題を人物設定にある関心や普段の行動に結び付け、本人らしい雑談や冗談と返答候補2つを作る':
       firstLineTask[sourceKind]||firstLineTask.ambient,
     npc,
     context,
@@ -226,7 +244,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     const context=promptFor({characterId,mode,chosenLabel,history,closing,topic,
       characterProfile:activeCharacterProfile,sourceKind,
       dailyContext:reviewSpotlight||sourceKind==='review-reaction'?null:activeDaily,situation:activeSituation,
-      recentLines,reviewSpotlight,twinNames,handoffTo,
+      recentLines,reviewSpotlight,twinNames,handoffTo,relayMessage:activeOriginal?.relayMessage,
       repliesLeft:closing?0:Math.max(0,Math.min(maxReplies,sessionLimit-1)-repliesThisSession-(mode==='reply'?1:0))});
     const controller=createAbortController(),startedAt=now();
     inflight={controller,characterId,mode,startedAt};
@@ -478,6 +496,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
         ...(current.sourceKind==='reflection'?{}:{text:generated.text}),
         closing:true,mode:'relay',modelId,promptVersion:PROMPT_VERSION,
         elapsedMs:generated.elapsedMs,turn:1});
+      base.setRelayMessage?.({from:characterId,to:current.relayChoice.relayTo,text:generated.text});
       return present(generated,[],true,current);
     }
     history.push({playerChoice:label});history=history.slice(-4);

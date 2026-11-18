@@ -1,4 +1,4 @@
-import {FOREST_CHARACTER_IDS,FOREST_SELF_NAMES,FOREST_AI_GENERATION_IDS,FOREST_RELATIONS,forestMemoryBelongsToCharacter} from './forest-character-registry.mjs';
+import {FOREST_CHARACTER_IDS,FOREST_SELF_NAMES,FOREST_AI_GENERATION_IDS,FOREST_RELATIONS,FOREST_DISPLAY_NAMES,forestMemoryBelongsToCharacter} from './forest-character-registry.mjs';
 import {unlockedStoryMemories} from './book-forest-story-memory.mjs';
 import {createTwinConversationDirector,validateTwinNamePairs} from './book-forest-twins.mjs';
 
@@ -11,6 +11,7 @@ const MAX_CUES=600,MAX_SEEN=100,MAX_TEXT=230;
 const SELF_NAMES=FOREST_SELF_NAMES;
 const validId=value=>typeof value==='string'&&/^[a-zA-Z0-9_-]{1,100}$/.test(value);
 const normalizeText=value=>typeof value==='string'?value.trim().replace(/\s+/gu,' '):'';
+const relayText=value=>typeof value==='string'&&value.length<=150&&!/[{}<>]/u.test(value)?normalizeText(value):'';
 const numbers=(value,min,max)=>Number.isSafeInteger(value)&&value>=min&&value<=max?value:min;
 const unique=list=>[...new Set(list)];
 
@@ -72,7 +73,8 @@ function parseState(raw){
         CHARACTERS.has(e?.npc)&&KINDS.has(e.kind)&&(!e.memoryId||validId(e.memoryId))).slice(-24),
       readInitialized:value.readInitialized===true,twinPairId:validId(value.twinPairId)?value.twinPairId:null,pendingRelay:
         CHARACTERS.has(relay?.to)&&CHARACTERS.has(relay?.from)?{from:relay.from,to:relay.to,
-          memoryId:validId(relay.memoryId)?relay.memoryId:null}:null};
+          memoryId:validId(relay.memoryId)?relay.memoryId:null,
+          ...(relayText(relay.message)?{message:relayText(relay.message)}:{})}:null};
   }catch{return emptyState()}
 }
 
@@ -142,19 +144,19 @@ export function createForestDialogueDirector({getBooks=()=>[],getCatalog=()=>[],
     if(generation&&FOREST_AI_GENERATION_IDS.includes(characterId)){
       const visit=state.visits[characterId]||0,last=state.lastKinds[characterId];
       const options=[];
-      const add=(kind,score,memory=null)=>{
+      const add=(kind,score,memory=null,relayMessage='')=>{
         const fallback=approved.find(cue=>cue.characterId===characterId&&cue.kind===kind&&
           (kind==='story'?cue.memoryId===memory?.id:!cue.bookId&&!cue.memoryId)&&
           (kind!=='relay'||cue.fromCharacterId===state.pendingRelay?.from)&&
           !cue.text.includes('{reflection}')&&!cue.text.includes('{memory}'));
         const related=(FOREST_RELATIONS[characterId]||[]).find(id=>id!==characterId);
         const relay=related&&kind!=='meet'&&kind!=='relay'?{
-          id:'scene-relay',label:'友だちにも会う',relayTo:related}:null;
+          id:'scene-relay',label:FOREST_DISPLAY_NAMES[related]+'への伝言を聞く',relayTo:related}:null;
         const cue={id:'scene-'+characterId+'-'+kind,characterId,kind,
           text:fallback?.text||(characterId==='cat'?
             '（ねこは前足で地面をちょんとたたいた。）':'（森の風に、そっと耳をすませている。）'),
           choices:[{id:'another-topic',label:'ほかの話も聞く'},...(relay?[relay]:[])]};
-        options.push({cue,memory,index:options.length,score,
+        options.push({cue,memory,relayMessage,index:options.length,score,
           situation:{place:'本の森',presentNpcIds:characterId==='twins'?['twins','twins_second']:[characterId],
             firstEncounter:visit===0,visitNumber:visit+1,
             focus:kind==='ambient'?(visit%2?'character':'forest'):kind,
@@ -163,8 +165,12 @@ export function createForestDialogueDirector({getBooks=()=>[],getCatalog=()=>[],
       };
       if(!visit)add('meet',200);
       if(state.pendingRelay?.to===characterId){
-        const memory=memoryById.get(state.pendingRelay.memoryId);
-        add('relay',180,memory&&forestMemoryBelongsToCharacter(memory,characterId)?memory:null);
+        const {memoryId,message}=state.pendingRelay;
+        const memory=memoryById.get(memoryId);
+        // A relay may contain a detail from a read book. Drop that message if
+        // the book is no longer unlocked when the recipient is visited.
+        add('relay',220,memory&&forestMemoryBelongsToCharacter(memory,characterId)?memory:null,
+          !memoryId||memory?message:'');
       }
       add('ambient',70);
       for(const memory of memories.filter(item=>forestMemoryBelongsToCharacter(item,characterId))){
@@ -234,7 +240,7 @@ export function createForestDialogueDirector({getBooks=()=>[],getCatalog=()=>[],
       String(a.memory?.id||a.review?.id||'').localeCompare(String(b.memory?.id||b.review?.id||'')));
   }
   function render(option){
-    const {cue,memory,review,voiceCue,relayTargets,situation}=option;
+    const {cue,memory,review,voiceCue,relayTargets,situation,relayMessage}=option;
     let text=normalizeText(cue.text);
     if(cue.kind==='story'&&!memory)return null;
     if(cue.kind==='relay'){
@@ -252,7 +258,7 @@ export function createForestDialogueDirector({getBooks=()=>[],getCatalog=()=>[],
         ...(choice.relayTo?{relayTo:choice.relayTo}:{})}));
     if(!choices.length)choices.push({id:'another-topic',label:'ほかの話も聞く'});
     return {text,choices,sourceKind:cue.kind,...(situation?{situation}:{}),
-      ...(memory?.id?{sourceMemoryId:memory.id}:{})};
+      ...(memory?.id?{sourceMemoryId:memory.id}:{}),...(relayMessage?{relayMessage}:{})};
   }
   function selectOption(option,characterId){
     const response=render(option);if(!response)return null;
@@ -290,6 +296,12 @@ export function createForestDialogueDirector({getBooks=()=>[],getCatalog=()=>[],
       'いまは、森をいっしょに歩いてみよう。',choices:[]};
   }
   return {
+    setRelayMessage({from,to,text}){
+      const relay=state.pendingRelay,message=relayText(text);
+      if(!message||relay?.from!==from||relay.to!==to)return;
+      relay.message=message;
+      persist();
+    },
     async start({characterId,preferredMemoryId='',generation=false}={}){
       if(!CHARACTERS.has(characterId))return {text:'また、森で会おうね。',choices:[]};
       active=null;

@@ -201,3 +201,28 @@ test('daily conversation alternates with story instead of repeating the same syn
   assert.match(two.text,/森の風/);
   assert.match(three.text,/余も一度/);
 });
+
+
+test('a handoff carries the message to the first recipient visit, once and while its book is read',async()=>{
+  for(const read of [true,false]){
+    const books=[{id:'book-1',status:'read'}];
+    const {director,cache}=setup({books});
+    const opening=await director.start({characterId:'king',generation:true});
+    director.onDisplayed(opening,{characterId:'king'});
+    const next=await director.start({characterId:'king',generation:true});
+    assert.equal(next.sourceKind,'story');
+    const handoff=next.choices.find(choice=>choice.relayTo==='cat');
+    assert.ok(handoff);
+    await director.select({characterId:'king',choiceId:handoff.id});
+    director.setRelayMessage({from:'king',to:'cat',text:'舟をうかべたことを伝えておくれ。'});
+    if(!read)books[0].status='unread';
+    const {director:reopened}=setup({books,cache});
+    const relay=await reopened.start({characterId:'cat',generation:true});
+    assert.equal(relay.sourceKind,'relay');
+    assert.equal(relay.relayMessage,read?'舟をうかべたことを伝えておくれ。':undefined);
+    reopened.onDisplayed(relay,{characterId:'cat'});
+    const revisit=await reopened.start({characterId:'cat',generation:true});
+    assert.notEqual(revisit.sourceKind,'relay');
+    assert.equal(revisit.relayMessage,undefined);
+  }
+});

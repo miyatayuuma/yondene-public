@@ -7,9 +7,11 @@ export const FOREST_GRADE_ONE_KANJI=
   '町天田土二日入年白八百文木本名目立力林六';
 const GRADE_ONE_SET=new Set([...FOREST_GRADE_ONE_KANJI]);
 export const FOREST_WRITTEN_TURN_LIMIT=65;
+const WRITTEN_LAYOUT_LIMIT=100;
 const WRITTEN_CHARACTER=/^[\p{Script=Hiragana}\p{Script=Katakana}ー・、。！？「」『』!? 　]$/u;
 export function validForestWrittenGlyphs(value){
-  return typeof value==='string'&&value.length<=FOREST_WRITTEN_TURN_LIMIT&&
+  return typeof value==='string'&&value.length<=WRITTEN_LAYOUT_LIMIT&&
+    value.replace(/[ 　]/gu,'').length<=FOREST_WRITTEN_TURN_LIMIT&&
     [...value].some(char=>/[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(char)||GRADE_ONE_SET.has(char))&&
     [...value].every(char=>WRITTEN_CHARACTER.test(char)||GRADE_ONE_SET.has(char));
 }
@@ -20,7 +22,8 @@ const INNER_VOICE=/心の(?:中|声)|頭の中|胸の内|内心|ひそかに(?:�
 // Bare greetings are spoken utterances, even when written inside parentheses.
 // Do not classify a short *action* as speech just because it has no explicit cat subject.
 const BARE_GREETING=/^（(?:こんにちは|こんばんは|おはよう(?:ございます)?|ありがとう(?:ございます)?|さようなら|おやすみ(?:なさい)?|どうも|はい|いいえ|おーい|ごめん(?:なさい)?)[！!？?。、]*）$/u;
-const WRITING_ACTION=/書(?:い|き|く|け|こ)|か(?:い|き|く)[^。]{0,8}(?:見せ|みせ|差し出|さしだ)|(?:紙|地面|落ち葉|葉っぱ|はっぱ|おちば|字|文字)に[^。]{0,12}か(?:いた|き|く)|(?:地面|じめん)をなぞ/u;
+const WRITING_ACTION=/書(?:い|き|く|け|こ)|か(?:い|き|く)[^。]{0,8}(?:見せ|みせ|差し出|さしだ)|(?:紙|地面|落ち葉|葉っぱ|はっぱ|おちば|字|文字)に[^。]{0,12}か(?:いた|き|く)|(?:地面|じめん)をなぞ|(?:もじ|文字|めも|メモ)を(?:かく|かいた|かいて|かき)/u;
+const WRITTEN_STAGE_DIRECTION=/^(?:[（(]|(?:ねこは)?(?:.*[、])?(?:もじ|文字|めも|メモ)を(?:かく|かいた|書く|書いた)(?:[。！!]|$))/u;
 const PARENTHETICAL_ACTION=/^（[^（）\n\r]+）$/u;
 
 function validGesture(text){
@@ -34,8 +37,9 @@ export function validateForestWrittenTurn(rawText,delivery){
   if(delivery==='written'){
     // Gemma sometimes prefixes a written reply with an extra silent stage direction.
     const annotated=/^(?:（([^（）\r\n]+)）|\(([^()\r\n]+)\))[ 　]*\r?\n([\s\S]+)$/u.exec(text);
-    const body=annotated&&validGesture('（'+(annotated[1]??annotated[2])+'）')?annotated[3].trim():text;
-    if(validForestWrittenGlyphs(body))return {text:body,delivery};
+    const message=annotated&&validGesture('（'+(annotated[1]??annotated[2])+'）')?annotated[3].trim():text;
+    const body=message.replace(/[ 　]*\r?\n[\r\n 　]*/gu,' ');
+    if(!WRITTEN_STAGE_DIRECTION.test(body)&&validForestWrittenGlyphs(body))return {text:body,delivery};
   }
   if(delivery==='gesture'){
     const action=text.replace(/^\(([^()（）\r\n]+)\)$/u,'（$1）');

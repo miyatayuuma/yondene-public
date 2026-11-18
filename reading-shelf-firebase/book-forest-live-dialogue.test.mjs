@@ -50,7 +50,7 @@ test('generates contextual reply choices, then a character reply only after a ch
   const log=JSON.parse(storage.getItem('forest-ai-local-v1:log'));
   assert.deepEqual(log.map(x=>x.event),['generated-opening','selected-offered-choice','generated-reply']);
   assert.equal(log[0].text,first.text,'export can reconstruct the initial line');
-  assert.equal(log[0].promptVersion,'forest-scene-generation-v27.3-profile2');
+  assert.equal(log[0].promptVersion,'forest-scene-generation-v30-profile2');
   assert.equal(log[1].label,'風の音を聞く');
   director.end();
 });
@@ -781,4 +781,26 @@ test('an automatic timeout is diagnosed, whereas player cancellation is not a mo
   const events=JSON.parse(storage.getItem('forest-ai-local-v1:log'));
   assert.ok(events.some(event=>event.event==='generation-failed'&&event.reason==='timeout'));
   assert.ok(events.some(event=>event.event==='script-fallback'&&event.reason==='generation-unavailable'));
+});
+
+
+test('cat writing applies the grade-one budget to text rather than reading spaces',()=>{
+  const message='しろい 花が さいているね。木の 下は すずしいよ。水の 音も きこえるし、小さな 虫も いる。雨が ふったら 木の 下で 休もうね。';
+  assert.ok(message.length>65);
+  assert.ok(message.replaceAll(' ','').length<=65);
+  const data={text:message,delivery:'written',choices:['花は なにいろ？','音を ききたい']};
+  const options={characterId:'cat',requireLine:true};
+  assert.equal(validateLiveForestOutput(data,options)?.text,message);
+  assert.equal(validateLiveForestOutput({...data,text:'お城を おぼえているよ。'},options),null);
+  assert.equal(validateLiveForestOutput({...data,delivery:'gesture',text:'（はっぱに もじを かく。）'},options),null);
+  assert.equal(validateLiveForestOutput({...data,text:'おしろを おぼえているよ。'},options)?.text,
+    'おしろを おぼえているよ。');
+});
+
+test('closing choices keep an immediate answer and remove the invitation to move',()=>{
+  const result=validateLiveForestOutput({text:'木のうらならぼうしも見えないね。',choices:[
+    {label:'どこがいい？',outcome:'大きな石のかげ。小さくなれば見つかりにくいよ。'},
+    {label:'その先は？',outcome:'木が見えるよ。じゃあ、いこう。'}
+  ]},{characterId:'king',requireLine:true,context:{repliesLeft:1}});
+  assert.deepEqual(result.labels,['どこがいい？']);
 });

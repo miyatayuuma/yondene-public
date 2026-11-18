@@ -46,7 +46,9 @@ function stack({books=[],catalog=[],reflections=[],cues=[],fail=false,limits={}}
       assert.ok(prompt.constraints.length<=12,'retain the existing Worker input cap');
       prompts.push(prompt);
       if(fail)throw Error('fixture unavailable');
-      return {response:JSON.stringify({text:prompt.mode==='reply'?'木の実をさがしてみよう。':'あの木の実、まんまるだね。',
+      const text=prompt.context.handoffTo?'木の実がまんまるだったって伝えてね。':
+        prompt.mode==='reply'?'木の実をさがしてみよう。':'あの木の実、まんまるだね。';
+      return {response:JSON.stringify({text,
         choices:prompt.closing?[]:prompt.context.repliesLeft===1?
           [{label:'いっしょに見る',outcome:'ほら、足もとに丸い木の実が見えるよ。'},
             {label:'ここで待つ',outcome:'ここなら葉の音がよく聞こえるね。'}]:['いっしょに見る','ここで待つ']})};
@@ -137,14 +139,15 @@ test('new IDs retain relation choice, relay and previous encounter without indiv
   assert.equal(s.base.getProgress().nextNpc,ids[1]);
   await s.visit(ids[1]);
   const context=s.prompts.at(-1).context;
-  assert.equal(context.sourceKind,'meet');
+  assert.equal(context.sourceKind,'relay');
+  assert.equal(context.relayMessage,'木の実がまんまるだったって伝えてね。');
   assert.equal(context.today.relatedEncounter.npc,ids[0]);
   assert.equal(context.situation.firstEncounter,true);
-  await s.visit(ids[1]);
-  assert.equal(s.prompts.at(-1).context.sourceKind,'relay');
-  assert.equal(s.prompts.at(-1).context.situation.fromNpc,ids[0]);
-  assert.equal(s.prompts.at(-1).context.situation.firstEncounter,false);
+  assert.equal(context.situation.fromNpc,ids[0]);
   assert.equal(s.base.getProgress().nextNpc,null);
+  await s.visit(ids[1]);
+  assert.equal(s.prompts.at(-1).context.sourceKind,'ambient');
+  assert.equal(s.prompts.at(-1).context.relayMessage,undefined);
 });
 
 test('outage, quota and missing profile fail safely without scripts or invented story/reader facts',async()=>{

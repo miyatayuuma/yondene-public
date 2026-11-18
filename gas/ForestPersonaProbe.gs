@@ -1631,18 +1631,22 @@ var ForestPersonaProbe = (() => {
   var FORBIDDEN_SPEECH = /[「」『』]|しゃべ|おしゃべり|話しかけ|話し(?:た|て|出)|話す|言っ|言う|声を出|ささや|つぶや|よびかけ|呼びかけ/iu;
   var INNER_VOICE = /心の(?:中|声)|頭の中|胸の内|内心|ひそかに(?:思|考)|と(?:思った|思う|思い|考えた|考える)/iu;
   var BARE_GREETING = /^（(?:こんにちは|こんばんは|おはよう(?:ございます)?|ありがとう(?:ございます)?|さようなら|おやすみ(?:なさい)?|どうも|はい|いいえ|おーい|ごめん(?:なさい)?)[！!？?。、]*）$/u;
-  var WRITING_ACTION = /書(?:い|き|く|け|こ)|か(?:い|き|く)[^。]{0,8}(?:見せ|みせ|差し出|さしだ)|(?:紙|地面|落ち葉|葉っぱ|はっぱ|おちば|字|文字)に[^。]{0,12}か(?:いた|き)|(?:地面|じめん)をなぞ/u;
+  var WRITING_ACTION = /書(?:い|き|く|け|こ)|か(?:い|き|く)[^。]{0,8}(?:見せ|みせ|差し出|さしだ)|(?:紙|地面|落ち葉|葉っぱ|はっぱ|おちば|字|文字)に[^。]{0,12}か(?:いた|き|く)|(?:地面|じめん)をなぞ/u;
   var PARENTHETICAL_ACTION = /^（[^（）\n\r]+）$/u;
   function validGesture(text) {
-    return text.length <= FOREST_WRITTEN_TURN_LIMIT && PARENTHETICAL_ACTION.test(text) && !FORBIDDEN_SPEECH.test(text) && !INNER_VOICE.test(text) && !BARE_GREETING.test(text) && !WRITING_ACTION.test(text.replace(/[ 　]/gu, "")) && !/[{}<>]/u.test(text);
+    return text.length <= FOREST_WRITTEN_TURN_LIMIT && PARENTHETICAL_ACTION.test(text) && !FORBIDDEN_SPEECH.test(text) && !INNER_VOICE.test(text) && !BARE_GREETING.test(text) && !/[{}<>]/u.test(text);
   }
   function validateForestWrittenTurn(rawText, delivery) {
     if (typeof rawText !== "string") return null;
     const text = rawText.normalize("NFC").trim();
-    if (delivery === "written" && validForestWrittenGlyphs(text)) return { text, delivery };
+    if (delivery === "written") {
+      const annotated = /^(?:（([^（）\r\n]+)）|\(([^()\r\n]+)\))[ 　]*\r?\n([\s\S]+)$/u.exec(text);
+      const body = annotated && validGesture("\uFF08" + (annotated[1] ?? annotated[2]) + "\uFF09") ? annotated[3].trim() : text;
+      if (validForestWrittenGlyphs(body)) return { text: body, delivery };
+    }
     if (delivery === "gesture") {
       const action = text.replace(/^\(([^()（）\r\n]+)\)$/u, "\uFF08$1\uFF09");
-      if (validGesture(action)) return { text: action, delivery };
+      if (validGesture(action) && !WRITING_ACTION.test(action.replace(/[ 　]/gu, ""))) return { text: action, delivery };
     }
     return null;
   }
@@ -2419,7 +2423,7 @@ var ForestPersonaProbe = (() => {
     if (silent && !written) throw Error("Invalid silent cat action");
     const text = written?.text ?? canonicalForestMention(parsed?.text, context.speakers);
     if (closing) {
-      if (typeof parsed?.text !== "string" || parsed.text.length > 90) throw Error("Invalid closing line");
+      if (!written && (typeof parsed?.text !== "string" || parsed.text.length > 90)) throw Error("Invalid closing line");
       return { text, choices: [], ...written ? { delivery: written.delivery } : {} };
     }
     if (!Array.isArray(parsed?.choices) || parsed.choices.length < 2 || parsed.choices.length > 3)
@@ -2429,7 +2433,7 @@ var ForestPersonaProbe = (() => {
       throw Error("Invalid model choices");
     if (!multi && mode === "opening" && (typeof parsed.text !== "string" || !parsed.text.trim()))
       throw Error("Opening line required");
-    if (parsed.text !== void 0 && (typeof parsed.text !== "string" || parsed.text.length > 90))
+    if (!written && parsed.text !== void 0 && (typeof parsed.text !== "string" || parsed.text.length > 90))
       throw Error("Invalid model text");
     return {
       choices: choices.slice(0, 2),

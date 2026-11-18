@@ -82,7 +82,8 @@ test('a second AI reply ends the encounter naturally without requesting or showi
     assert.equal(result.choices.length,i===1?0:2);
   }
   assert.equal(result.conversationComplete,true);
-  assert.ok(prompts[2].constraints.some(text=>text.includes('別れの定型句は不要')));
+  assert.ok(prompts[1].constraints.some(text=>text.includes('これが最後の二択')));
+  assert.ok(prompts[2].constraints.some(text=>text.includes('この場で一手進んだ結果')));
   assert.equal(prompts.length,3,'one opening generation and two replies');
   assert.equal(director.getProgress().aiRepliesThisSession,2);
   await director.select({...identity,choiceId:'old-choice'});

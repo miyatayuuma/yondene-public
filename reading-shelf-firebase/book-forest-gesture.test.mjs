@@ -28,3 +28,10 @@ test('gestures permit brief natural narration without speech, thoughts or writin
   }
   assert.equal(validateForestWrittenTurn('こっちだよ。',undefined),null);
 });
+
+test('an optional silent annotation cannot displace or weaken validation of the written reply',()=>{
+  const text='おしろのことは、わすれられない おもいでだね。';
+  assert.deepEqual(validateForestWrittenTurn('（はっぱに字を書く） \n '+text,'written'),{text,delivery:'written'});
+  assert.equal(validateForestWrittenTurn('（「やあ」と声を出した）\n'+text,'written'),null);
+  assert.equal(validateForestWrittenTurn('（葉っぱに字を書く）\n完成したよ。','written'),null);
+});

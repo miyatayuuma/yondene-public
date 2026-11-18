@@ -224,7 +224,7 @@ test('registered names, written cat replies and the remaining reply count surviv
     transport:async(_, {prompt})=>{
       const {closing,npc,mode}=prompt;
       if(npc.id==='cat')return {response:JSON.stringify({
-        text:mode==='opening'?'キキと ジジが見つけた木だよ。 どこに小さなとりがいるか、下からそっと見てみよう。':closing?'（ねこはとなりにすわった。）':'あの白い花の上だよ。とりもこちらを見ているね。',
+        text:mode==='opening'?'（そっと紙を出して書いた。）\nキキと ジジが見つけた木だよ。 どこに小さなとりがいるか、下からそっと見てみよう。':closing?'（ねこはとなりにすわった。）':'あの白い花の上だよ。とりもこちらを見ているね。',
         delivery:closing?'gesture':'written',
         choices:closing?[]:['いっしょに見る','ここですわる']})};
       return {response:JSON.stringify({
@@ -239,6 +239,7 @@ test('registered names, written cat replies and the remaining reply count surviv
   assert.equal(run.trace[1].prompt.context.chosenLabel,'ハチベエはどう思う？');
   assert.equal(run.frames[2].result.conversationComplete,true);
   assert.equal(run.frames[3].result.delivery,'written');
+  assert.match(run.frames[3].result.text,/^キキと ジジ/u);
   assert.deepEqual(run.trace[4].prompt.context.recentTurns[0],{
     npc:run.frames[3].result.text,delivery:'written'});
   assert.equal(run.frames[4].result.delivery,'written');

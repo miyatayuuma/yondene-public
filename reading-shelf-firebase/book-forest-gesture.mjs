@@ -20,22 +20,26 @@ const INNER_VOICE=/心の(?:中|声)|頭の中|胸の内|内心|ひそかに(?:�
 // Bare greetings are spoken utterances, even when written inside parentheses.
 // Do not classify a short *action* as speech just because it has no explicit cat subject.
 const BARE_GREETING=/^（(?:こんにちは|こんばんは|おはよう(?:ございます)?|ありがとう(?:ございます)?|さようなら|おやすみ(?:なさい)?|どうも|はい|いいえ|おーい|ごめん(?:なさい)?)[！!？?。、]*）$/u;
-const WRITING_ACTION=/書(?:い|き|く|け|こ)|か(?:い|き|く)[^。]{0,8}(?:見せ|みせ|差し出|さしだ)|(?:紙|地面|落ち葉|葉っぱ|はっぱ|おちば|字|文字)に[^。]{0,12}か(?:いた|き)|(?:地面|じめん)をなぞ/u;
+const WRITING_ACTION=/書(?:い|き|く|け|こ)|か(?:い|き|く)[^。]{0,8}(?:見せ|みせ|差し出|さしだ)|(?:紙|地面|落ち葉|葉っぱ|はっぱ|おちば|字|文字)に[^。]{0,12}か(?:いた|き|く)|(?:地面|じめん)をなぞ/u;
 const PARENTHETICAL_ACTION=/^（[^（）\n\r]+）$/u;
 
 function validGesture(text){
   return text.length<=FOREST_WRITTEN_TURN_LIMIT&&PARENTHETICAL_ACTION.test(text)&&
-    !FORBIDDEN_SPEECH.test(text)&&!INNER_VOICE.test(text)&&!BARE_GREETING.test(text)&&
-    !WRITING_ACTION.test(text.replace(/[ 　]/gu,''))&&!/[{}<>]/u.test(text);
+    !FORBIDDEN_SPEECH.test(text)&&!INNER_VOICE.test(text)&&!BARE_GREETING.test(text)&&!/[{}<>]/u.test(text);
 }
 
 export function validateForestWrittenTurn(rawText,delivery){
   if(typeof rawText!=='string')return null;
   const text=rawText.normalize('NFC').trim();
-  if(delivery==='written'&&validForestWrittenGlyphs(text))return {text,delivery};
+  if(delivery==='written'){
+    // Gemma sometimes prefixes a written reply with an extra silent stage direction.
+    const annotated=/^(?:（([^（）\r\n]+)）|\(([^()\r\n]+)\))[ 　]*\r?\n([\s\S]+)$/u.exec(text);
+    const body=annotated&&validGesture('（'+(annotated[1]??annotated[2])+'）')?annotated[3].trim():text;
+    if(validForestWrittenGlyphs(body))return {text:body,delivery};
+  }
   if(delivery==='gesture'){
     const action=text.replace(/^\(([^()（）\r\n]+)\)$/u,'（$1）');
-    if(validGesture(action))return {text:action,delivery};
+    if(validGesture(action)&&!WRITING_ACTION.test(action.replace(/[ 　]/gu,'')))return {text:action,delivery};
   }
   return null;
 }

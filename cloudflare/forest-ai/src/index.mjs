@@ -115,7 +115,7 @@ export function readCompletion(result,{closing=false,mode='reply',characterId=''
   if(silent&&!written)throw Error('Invalid silent cat action');
   const text=written?.text??canonicalForestMention(parsed?.text,context.speakers);
   if(closing){
-    if(typeof parsed?.text!=='string'||parsed.text.length>90)throw Error('Invalid closing line');
+    if(!written&&(typeof parsed?.text!=='string'||parsed.text.length>90))throw Error('Invalid closing line');
     return {text,choices:[],...(written?{delivery:written.delivery}:{})};
   }
   if(!Array.isArray(parsed?.choices)||parsed.choices.length<2||parsed.choices.length>3)
@@ -125,7 +125,7 @@ export function readCompletion(result,{closing=false,mode='reply',characterId=''
     throw Error('Invalid model choices');
   if(!multi&&mode==='opening'&&(typeof parsed.text!=='string'||!parsed.text.trim()))
     throw Error('Opening line required');
-  if(parsed.text!==undefined&&(typeof parsed.text!=='string'||parsed.text.length>90))
+  if(!written&&parsed.text!==undefined&&(typeof parsed.text!=='string'||parsed.text.length>90))
     throw Error('Invalid model text');
   // Gemma may supply a third button despite the requested two. Keep its valid
   // NPC line and normalize the UI-only choices instead of discarding the turn.

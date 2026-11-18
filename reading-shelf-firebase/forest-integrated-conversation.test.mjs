@@ -156,6 +156,10 @@ test('foraging guard distinguishes unidentified plants, refusals and ordinary kn
   const writing={text:'おいしいものをさがそう。',delivery:'written'};
   const forest={situation:{place:'本の森'}};
   assert.equal(unsafeForestForaging(writing,forest),false);
+  assert.equal(unsafeForestForaging({text:'あの ときのことを おもいだしたよ。',
+    choices:['おいしい ものを たべよう','おしごとを さがそう']},forest),false);
+  assert.equal(unsafeForestForaging({text:'しらない きのこが あったよ。',
+    choices:['すこし たべよう','見るだけ']},forest),true);
   assert.equal(unsafeForestForaging({text:'（葉っぱに字を書いた。）',choices:['おいしいものをさがそう？']},forest),false);
   assert.equal(unsafeForestForaging({
     text:'このはっぱはたべられるよ。',delivery:'written',choices:['たべてみる','見るだけ']

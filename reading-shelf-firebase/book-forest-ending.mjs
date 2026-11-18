@@ -7,13 +7,14 @@ import {unsafeForestForaging} from './book-forest-output-safety.mjs';
 // depends on context and is checked on real conversations.
 // A movement invitation with a comma or a sentence break before the verb
 // still promises a next action. A description of a possible location is fine.
-const openInvitation=/(?:^|[、。！？!?])(?:さあ[、]?|じゃあ[、]?)?(?:いこう|行こう|はじめよう|始めよう|ついておいで)(?:ね|よ|ぜ|ぞ|か)?[。！？!?]*$/u;
+const openInvitation=/(?:^|[、]|へ|まで|に|ついて)(?:いこう|行こう|いきましょう|行きましょう|はじめよう|始めよう|おいで)(?:ね|よ|ぜ|ぞ|か)?$/u;
 const unfinished=/[？?][。！!]*$|(?:おしえて|教えて|かくる|ましょう|てみよう|ついてこい|(?:みせ|見せ)てあげる)(?:ね|よ|か|ぜ|ぞ|な)?[。！!]*$|(?:準備(?:を)?(?:する|しよう)|じゅんび(?:を)?(?:する|しよう)|(?:まで|へ|に)(?:行こう|いこう)|(?:始め|はじめ)(?:よう|る)|(?:今度|こんど)(?:やろう|しよう))(?:ね|よ|か|ぜ|ぞ|な)?[。！!]*$/u;
 
 export function forestEndingNeedsReply(text){
   if(typeof text!=='string')return false;
   const compact=text.replace(/[ 　]/gu,'');
-  return unfinished.test(compact)||openInvitation.test(compact);
+  return unfinished.test(compact)||compact.split(/[。！？!?]/u)
+    .some(sentence=>openInvitation.test(sentence));
 }
 
 export function forestEndingChoices(choices,{context={},silent=false,multi=false,line='',validLine=()=>true}={}){

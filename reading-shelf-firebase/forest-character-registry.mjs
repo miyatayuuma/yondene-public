@@ -138,7 +138,7 @@ export function canonicalForestMention(text,speakers=[]){
   return text.replace(/(?<![ァ-ヿー])ハチビー(?![ァ-ヿー])/gu,FOREST_DISPLAY_NAMES.hachibee);
 }
 
-export const FOREST_DIALOGUE_PROTOCOL='scene-dialogue-v27-profile2';
+export const FOREST_DIALOGUE_PROTOCOL='scene-dialogue-v28-profile2';
 
 export function forestMemoryBelongsToCharacter(memory,characterId){
   const names=FOREST_ACTOR_NAMES[characterId]||[];

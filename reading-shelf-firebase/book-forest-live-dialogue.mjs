@@ -31,7 +31,7 @@ function ambientFocus(characterId,visitNumber){
 const safeEnd=(id,comma=false)=>ACTION_WRITING_IDS.has(id)?
   '（ねこはしっぽをゆっくりふった。）':GOODBYE[id]||(comma?'また、森で会おうね。':'また森で会おうね。');
 const WRONG_FIRST_PERSON=FOREST_WRONG_FIRST_PERSON;
-export const FOREST_PROMPT_VERSION='forest-scene-generation-v30-profile2';
+export const FOREST_PROMPT_VERSION='forest-scene-generation-v31-profile2';
 const PROMPT_VERSION=FOREST_PROMPT_VERSION;
 const clean=value=>typeof value==='string'?value.trim().replace(/\s+/gu,' '):'';
 function readJson(storage,key,fallback){
@@ -184,7 +184,7 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
     ],
     output:{format:'JSON',shape:{...(twinNames?
       {turns:[{speakerSlot:1,text:'最初のひとこと'},{speakerSlot:2,text:'直前のひとことへの反応'}]}:
-      {text:mode==='choices'?'省略':'NPCの返答（65字以内）',
+      {text:mode==='choices'?'省略':nonverbal?'かなを基本にした、相手への短いメッセージ本文':'NPCの返答（65字以内）',
         ...(nonverbal&&mode!=='choices'?{delivery:'written'}:{})}),
       choices:closing?[]:repliesLeft===1?
         [endingShape,{...endingShape,...(twinNames?{speakerSlot:2}:{})}]:

@@ -50,7 +50,7 @@ test('generates contextual reply choices, then a character reply only after a ch
   const log=JSON.parse(storage.getItem('forest-ai-local-v1:log'));
   assert.deepEqual(log.map(x=>x.event),['generated-opening','selected-offered-choice','generated-reply']);
   assert.equal(log[0].text,first.text,'export can reconstruct the initial line');
-  assert.equal(log[0].promptVersion,'forest-scene-generation-v30-profile2');
+  assert.equal(log[0].promptVersion,'forest-scene-generation-v31-profile2');
   assert.equal(log[1].label,'風の音を聞く');
   director.end();
 });
@@ -800,7 +800,7 @@ test('cat writing applies the grade-one budget to text rather than reading space
 test('closing choices keep an immediate answer and remove the invitation to move',()=>{
   const result=validateLiveForestOutput({text:'木のうらならぼうしも見えないね。',choices:[
     {label:'どこがいい？',outcome:'大きな石のかげ。小さくなれば見つかりにくいよ。'},
-    {label:'その先は？',outcome:'木が見えるよ。じゃあ、いこう。'}
+    {label:'その先は？',outcome:'王さまと いっしょに いこう。わくわくするね。'}
   ]},{characterId:'king',requireLine:true,context:{repliesLeft:1}});
   assert.deepEqual(result.labels,['どこがいい？']);
 });

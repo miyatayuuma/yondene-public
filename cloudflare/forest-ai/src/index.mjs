@@ -6,7 +6,7 @@ import {validateTwinTurns} from '../../../reading-shelf-firebase/book-forest-twi
 // よんでね 本の森: a small, owner-only proxy for the free Workers AI allowance.
 // No bookshelf data, Firebase private credentials, or Cloudflare API keys here.
 const MODEL='@cf/google/gemma-4-26b-a4b-it';
-export const FOREST_WORKER_VERSION='forest-dialogue-v27-profile2';
+export const FOREST_WORKER_VERSION='forest-dialogue-v28-profile2';
 const VERSION=FOREST_WORKER_VERSION;
 const JWKS_URL='https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com';
 const ORIGINS=new Set(['https://kodomo-reading-shelf-87f11.web.app',
@@ -153,14 +153,14 @@ export function forestGenerationInput(prompt){
         '子どもの個人情報を質問しない。物語にない出来事を断定しない。'+
         '日本語で人物らしい短い会話を作る。'+
         (actionWriting?
-          'このNPCは声や心の声を使わず、ふつうは文字で会話する。{"delivery":"written","text":"雨がふったら 木の下で休もう。"}。textは相手へのメッセージ本文だけ。かっこ書き、文字を書く場面、書く場所や道具は要らない。人物資料の「身振り」「筆記」は人物像の参考。書く言葉の内容は他の人物と同じように考え、表記はかなを基本にする。人名・書名・資料の言葉も、一覧にない漢字は読みをかなに直す（城→しろ、友達→ともだち）。本文と最後のoutcomeは、目安50字で同じ規則。ひと目で意味が分かる身振りだけのときはdelivery:"gesture"、textは（うなずく）のような動きだけ。':'')+
+          'このNPCは声や心の声を使わず、ふつうは文字で会話する。{"delivery":"written","text":"雨がふったら 木の下で休もう。"}。textは相手へのメッセージ本文だけ。かっこ書き、文字を書く場面、書く場所や道具は要らない。人物資料の「身振り」「筆記」は人物像の参考。書く言葉の内容は他の人物と同じように考え、表記はかなを基本にする。本文と最後のoutcomeは、読みやすく区切ったひらがなを基本に、名前のカタカナは使ってよい。書名・資料の言葉もかなに直す。漢字を使うなら一覧から選ぶ。ひと目で意味が分かる身振りだけのときはdelivery:"gesture"、textは（うなずく）のような動きだけ。':'')+
         '生成する発話と選択肢の人名は、IDから推測せずcontext.npcDisplayNamesまたはcontext.speakersの表示名を使う。'+
         '人物像はnpc.voiceの非公開台帳由来の設定に従い、設定を説明するだけの文にしない。出力の書式はこの指示に従う。'+
         '各項目の根拠区分・監修状態・適用範囲と本文中の留保を守る。二次資料は原作本文ではない。'+
         '編集解釈・ゲーム演出・暫定採用は演技の手掛かりであり、原作の確定事実として語らない。'+
         'situationのplaceが今いる場所、presentNpcIdsが同席を確認できる人物。relatedNpcIdsは関係性で、今そばにいる証拠ではない。'+
         '今日のsceneはevidence=reviewedなら読了済み原作の承認済み事実を含み、evidence=imaginedなら森の即興の出来事。'+
-        '原作の記憶は過去の物語であり、今日この森で起きた事実に置き換えない。森での想像や提案は区別する。'+
+        '原作の記憶は過去のこと。資料にない体験を思い出として足さない。今の森で話題を広げるなら、想像は想像として伝える。'+
         '知らない木の実・きのこ・植物の食用性を断定せず、味見や摂取を選択肢にしない。安全な食事や食欲は表現してよい。見知らぬ実の場面では、見る・調べる・そのままにするなど次の行動を出す。'+
         'readerReflectionがある場合は本の感想を受け止め、別作品の人物なら第三者の立場で反応する。'+
         '原作に登場した・直接目撃したと偽らず、本人の気持ちを勝手に決めつけない。'+
@@ -182,7 +182,7 @@ export function forestGenerationInput(prompt){
         '現在の場面はsituation.placeに留める。会話だけで楽しめる発見や冗談を選ぶ。移動、合流、物の受け渡し、ゲーム操作は約束しない。よその場所は想像や思い出として話す。'+
         '第一声にcontext.ambientFocusがあれば、それを会話のきっかけにする。同じ景色でも、何を面白がるかは人物によって変わる。avoidRecentLinesに出た用事や物を繰り返さない。'+
         '共通の選択肢は言葉だけで応じられる内容にする。移動が必要な誘いより、その場で答えを聞ける問いや感想を出す。'+
-        '選択肢は今の話への子どもの言葉や行動を2つ。context.repliesLeftは選択後に返答できる回数。'+
+        '選択肢は今の話への子どもの言葉を二つ。context.repliesLeftは選択後に返答できる回数。'+
         (lastChoices?
           '最後の候補は{label,outcome}。outcomeは選択後に表示する実際の台詞。' +
           (multi?'各候補のspeakerSlotは話す一人の番号。':'')+
@@ -191,7 +191,7 @@ export function forestGenerationInput(prompt){
           '例「どこにかくれる？」→「木のうら。ぼうしが見えたら、すぐ見つかっちゃうね。」。outcomeで新しく質問したり、続きの操作を促したりしない。':
           'closing=trueでは選ばれた言葉にその場で応え、新しい質問を出さず、choicesは空配列。')},
         {role:'user',content:JSON.stringify(prompt)}],
-      max_completion_tokens:320,temperature:.75,
+      max_completion_tokens:320,temperature:actionWriting?.55:.75,
       chat_template_kwargs:{enable_thinking:false}};
 }
 

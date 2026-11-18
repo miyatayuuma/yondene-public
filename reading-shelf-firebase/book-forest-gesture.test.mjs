@@ -57,6 +57,8 @@ test('writing is paired with visible dialogue and shares one length budget',()=>
   const mark={surface:'note',word:'王さま、きょうはどこへいくの？'};
   assert.deepEqual(validateForestWrittenTurn(action,mark),{text:action,mark});
   assert.equal(validateForestWrittenTurn(action,null),null);
+  assert.deepEqual(validateForestWrittenTurn('(ねこは紙に書いて、こちらへ見せた。)',mark),{text:action,mark});
+  assert.equal(validateForestWrittenTurn('(心の中で王さまに返事をした。)',null),null);
   assert.equal(validateForestWrittenTurn('（ねこは葉っぱにちいさくかいた。）',null),null);
   const resting='（ねこは王さまのとなりにすわった。）';
   assert.deepEqual(validateForestWrittenTurn(resting,null),{text:resting,mark:null});

@@ -47,8 +47,10 @@ export function validateForestGestureText(raw){
 }
 
 export function validateForestWrittenTurn(rawText,rawMark){
-  if(!validateForestGestureText(rawText))return null;
-  const text=rawText.trim(),mark=validateForestGestureMark(rawMark);
+  if(typeof rawText!=='string')return null;
+  const text=rawText.trim().replace(/^\(([^()（）\r\n]+)\)$/u,'（$1）');
+  if(!validateForestGestureText(text))return null;
+  const mark=validateForestGestureMark(rawMark);
   if(mark===undefined||Boolean(mark)!==WRITING_ACTION.test(text)||
     text.length+(mark?.word.length||0)>FOREST_WRITTEN_TURN_LIMIT)return null;
   return {text,mark};

@@ -1645,8 +1645,10 @@ var ForestPersonaProbe = (() => {
     return text.length >= 8 && text.length <= FOREST_WRITTEN_TURN_LIMIT && PARENTHETICAL_ACTION.test(text) && !FORBIDDEN_SPEECH.test(text) && !INNER_VOICE.test(text) && !BARE_GREETING.test(text) && !/[{}<>]/u.test(text);
   }
   function validateForestWrittenTurn(rawText, rawMark) {
-    if (!validateForestGestureText(rawText)) return null;
-    const text = rawText.trim(), mark = validateForestGestureMark(rawMark);
+    if (typeof rawText !== "string") return null;
+    const text = rawText.trim().replace(/^\(([^()（）\r\n]+)\)$/u, "\uFF08$1\uFF09");
+    if (!validateForestGestureText(text)) return null;
+    const mark = validateForestGestureMark(rawMark);
     if (mark === void 0 || Boolean(mark) !== WRITING_ACTION.test(text) || text.length + (mark?.word.length || 0) > FOREST_WRITTEN_TURN_LIMIT) return null;
     return { text, mark };
   }

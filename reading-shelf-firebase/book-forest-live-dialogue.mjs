@@ -118,7 +118,7 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
     // Different situations demand different reactions. Do not make an
     // incidental physical gesture the only answer to a reader's reflection.
     task:closing?finishTask:
-      mode==='reply'?'相手の選択に、場に合う具体的な返答や行動を返す。前の文字や身振りを繰り返さない':
+      mode==='reply'?'相手の選択に具体的に返す。問いに身振りだけで答えが伝わらないなら書いて返す':
       reviewSpotlight?'readerReflectionの具体的な内容を受け止め、その着眼点に人物設定らしく無言で反応する。別作品なら第三者として接する':
       sourceKind==='story'?'確認済みの既読の出来事は過去の記憶として受け止め、今の森で再演せず、人物設定に合う自然な反応をする':
       sourceKind==='relay'?'前の人物からの話題に本人らしく反応する。直接聞いたふりをしない':
@@ -128,7 +128,7 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
     context,
     constraints:[
       '最優先はnpc.voiceの人物像・関係性・動機・ふるまい。設定の説明や一般的な教訓で代用しない',
-      '質問・冗談・提案・返事など、言葉で伝えたいときは実際の台詞として書く。静かに過ごす場面では身振りだけでよい',
+      '質問・冗談・提案・返事など、言葉で伝えるときは実際の台詞を書く。静かな場面や身振りだけで通じるときは書かなくてよい',
       'readerReflectionがある場合は、その感想の具体的な着眼点に反応する。何を聞いても同じ驚きや身振りで済ませず、本人の発言と保護者要約を区別し、別作品の出来事を自分の経験にしない',
       '人間の言葉を声に出さず、心の声・引用符付きの発話も作らない。textには全角丸括弧（ ）に囲んだ短い行動だけを書く',
 
@@ -440,8 +440,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
       ...(result.mark?{mark:result.mark}:{}),sourceKind,
       sourceMemoryId:spotlight?'':original.sourceMemoryId||'',
       relayChoice,
-      ...(spotlight?{reviewSpotlightKey:spotlight.key,
-        reviewSpotlightBookKey:spotlight.bookKey,reviewEvidence:spotlight}:{}),
+      ...(spotlight?{reviewSpotlightKey:spotlight.key,reviewEvidence:spotlight}:{}),
       ...(!spotlight&&sourceKind==='ambient'&&source?.evidence==='reviewed'?
         {dailySourceMemoryId:source.memoryId}:{})});
   }
@@ -521,7 +520,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
       sourceMemoryId:current.sourceMemoryId,
       dailySourceMemoryId:current.dailySourceMemoryId,
       reviewSpotlightKey:current.reviewSpotlightKey,
-      reviewSpotlightBookKey:current.reviewSpotlightBookKey,reviewEvidence:current.reviewEvidence});
+      reviewEvidence:current.reviewEvidence});
   }
   return {
     start,select,

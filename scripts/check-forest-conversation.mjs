@@ -73,6 +73,11 @@ const result=await runForestConversationScenario({visits,transport,storage:scena
   now:()=>data.clock,getBooks:()=>data.books,getCatalog:()=>data.catalog||[],getCues:()=>data.cues||[],
   getTwinNames:()=>data.twinNames||[],getTwinScenes:()=>data.twinScenes||[],
   getCharacterProfiles:()=>data.characterProfiles,getRecentReflections:async()=>data.reflections||[],
+  getArchivedReflections:async(ids,before)=>ids.flatMap(id=>
+    (data.archiveReflections||[]).filter(r=>r.bookId===id&&r.createdAt<before)
+      .sort((a,b)=>b.createdAt-a.createdAt).slice(0,3)),
+  getCurrentReflection:async(bookId,id)=>[...(data.reflections||[]),...(data.archiveReflections||[])]
+    .find(record=>record.bookId===bookId&&record.id===id)||null,
   getReflections:async bookId=>(data.reflections||[]).filter(r=>r.bookId===bookId),
   implementation:{...base,...live,...worker,versions}});
 const storyReplies=result.trace.filter(t=>t.prompt.mode==='reply'&&t.prompt.context.sourceKind==='story');

@@ -604,8 +604,8 @@ test('nonverbal NPC chooses reactions by context, with writing optional and no h
   assert.match(reply.task,/相手の選択/u);
   assert.match(closing.task,/具体的な返事/u);
   assert.notEqual(reflection.task,casual.task);
-  assert.ok(reflection.constraints.some(line=>/書かない場面はmark:null/.test(line)));
-  assert.ok(reflection.constraints.some(line=>/動くことや解決することを強制しない/.test(line)));
+  assert.ok(reflection.constraints.some(line=>/書かない場合はmark:null/.test(line)));
+  assert.ok(reflection.constraints.some(line=>/身振りだけで通じるとき/.test(line)));
   assert.ok(reflection.constraints.some(line=>/帰属|本人の発言/.test(line)));
   assert.equal(reflection.context.readerReflection.quote,review.quote);
   assert.equal(reflection.context.readerReflection.attribution,'verbatim');

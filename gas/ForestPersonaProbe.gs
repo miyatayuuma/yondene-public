@@ -236,7 +236,7 @@ var ForestPersonaProbe = (() => {
     roster.map(({ id, name }) => [id, name])
   ));
   function canonicalForestMention(text, speakers = []) {
-    if (typeof text !== "string" || speakers.some((speaker) => speaker.name.includes("\u30CF\u30C1\u30D3\u30FC"))) return text;
+    if (typeof text !== "string" || Array.isArray(speakers) && speakers.some((speaker) => speaker?.name?.includes?.("\u30CF\u30C1\u30D3\u30FC"))) return text;
     return text.replace(/(?<![ァ-ヿー])ハチビー(?![ァ-ヿー])/gu, FOREST_DISPLAY_NAMES.hachibee);
   }
   var FOREST_DIALOGUE_PROTOCOL = "scene-dialogue-v24-profile2";
@@ -1596,6 +1596,7 @@ var ForestPersonaProbe = (() => {
   var unknown = /(?:知らない|しらない|未知|見たこと(?:が)?ない|名前.{0,8}(?:わから|不明)|正体.{0,8}(?:わから|不明)|何の|なんの|未確認|拾った|ひろった|見つけた|みつけた|道ばた)/u;
   var consumption = /(?:食べ|たべ|味見|あじみ|口に|ひと[口くち]|おいし|美味|うまそう|食用|安全|だいじょうぶ|大丈夫)/u;
   var refusal = /(?:食べ|たべ)(?:ないで|ちゃ(?:だめ|ダメ)|ては(?:だめ|いけ)|るの(?:は|を)やめ|ずに|ません)|(?:味見|あじみ)(?:しない|はしない)|(?:食べ|たべ)(?:られるか|ていいか|てよいか|られるとは).{0,16}(?:わから|知ら|不明|限ら|かぎら)|(?:食べ|たべ)(?:るの|ること|たら|ると).{0,8}(?:危な|危険|だめ|ダメ)|(?:食べ|たべ)ない$|(?:安全|大丈夫|だいじょうぶ).{0,4}(?:とは|か).{0,8}(?:わから|言え|いえ)/u;
+  var writingSurface = /(?:落ち葉|葉っぱ|はっぱ|おちば|葉)(?=(?:のうら|の裏|の上)?に[^。！？）」\x22]{0,24}(?:書[いきく]|か[いきく]))/gu;
   var knownFood = /(?:パン|ぱん|おにぎり|弁当|べんとう|サンドイッチ|おやつ|クッキー|ケーキ|スープ)/u;
   function unsafeForestForaging(output, context = {}) {
     const background = JSON.stringify({
@@ -1606,7 +1607,7 @@ var ForestPersonaProbe = (() => {
       chosenLabel: context.chosenLabel
     });
     const utterances = Array.isArray(output?.turns) ? output.turns.map((turn) => turn?.text) : [];
-    const subject = background + " " + [output?.text, ...utterances].join(" ");
+    const subject = (background + " " + [output?.text, ...utterances].join(" ")).replace(writingSurface, "");
     const wild = /(?:本の森|森の|林|野生|道ばた|拾|ひろ|生え|なっている)/u;
     const riskyBackground = plant.test(subject) && (unknown.test(subject) || wild.test(subject));
     const lines = [output?.text, ...utterances, output?.mark?.word, ...Array.isArray(output?.choices) ? output.choices.map((x) => typeof x === "string" ? x : x?.label) : []];
@@ -1792,12 +1793,12 @@ var ForestPersonaProbe = (() => {
       closing,
       // Different situations demand different reactions. Do not make an
       // incidental physical gesture the only answer to a reader's reflection.
-      task: closing ? finishTask : mode === "reply" ? "\u76F8\u624B\u306E\u9078\u629E\u306B\u3001\u5834\u306B\u5408\u3046\u5177\u4F53\u7684\u306A\u8FD4\u7B54\u3084\u884C\u52D5\u3092\u8FD4\u3059\u3002\u524D\u306E\u6587\u5B57\u3084\u8EAB\u632F\u308A\u3092\u7E70\u308A\u8FD4\u3055\u306A\u3044" : reviewSpotlight ? "readerReflection\u306E\u5177\u4F53\u7684\u306A\u5185\u5BB9\u3092\u53D7\u3051\u6B62\u3081\u3001\u305D\u306E\u7740\u773C\u70B9\u306B\u4EBA\u7269\u8A2D\u5B9A\u3089\u3057\u304F\u7121\u8A00\u3067\u53CD\u5FDC\u3059\u308B\u3002\u5225\u4F5C\u54C1\u306A\u3089\u7B2C\u4E09\u8005\u3068\u3057\u3066\u63A5\u3059\u308B" : sourceKind === "story" ? "\u78BA\u8A8D\u6E08\u307F\u306E\u65E2\u8AAD\u306E\u51FA\u6765\u4E8B\u306F\u904E\u53BB\u306E\u8A18\u61B6\u3068\u3057\u3066\u53D7\u3051\u6B62\u3081\u3001\u4ECA\u306E\u68EE\u3067\u518D\u6F14\u305B\u305A\u3001\u4EBA\u7269\u8A2D\u5B9A\u306B\u5408\u3046\u81EA\u7136\u306A\u53CD\u5FDC\u3092\u3059\u308B" : sourceKind === "relay" ? "\u524D\u306E\u4EBA\u7269\u304B\u3089\u306E\u8A71\u984C\u306B\u672C\u4EBA\u3089\u3057\u304F\u53CD\u5FDC\u3059\u308B\u3002\u76F4\u63A5\u805E\u3044\u305F\u3075\u308A\u3092\u3057\u306A\u3044" : sourceKind === "meet" ? "\u521D\u5BFE\u9762\u306E\u76F8\u624B\u306B\u3001\u4EBA\u7269\u8A2D\u5B9A\u306B\u5408\u3046\u7121\u8A00\u306E\u521D\u3081\u306E\u53CD\u5FDC\u3092\u3059\u308B" : "\u3053\u306E\u5834\u9762\u306E\u610F\u5473\u3068\u4EBA\u7269\u8A2D\u5B9A\u306B\u5408\u3046\u81EA\u7136\u306A\u53CD\u5FDC\u3092\u3059\u308B",
+      task: closing ? finishTask : mode === "reply" ? "\u76F8\u624B\u306E\u9078\u629E\u306B\u5177\u4F53\u7684\u306B\u8FD4\u3059\u3002\u554F\u3044\u306B\u8EAB\u632F\u308A\u3060\u3051\u3067\u7B54\u3048\u304C\u4F1D\u308F\u3089\u306A\u3044\u306A\u3089\u66F8\u3044\u3066\u8FD4\u3059" : reviewSpotlight ? "readerReflection\u306E\u5177\u4F53\u7684\u306A\u5185\u5BB9\u3092\u53D7\u3051\u6B62\u3081\u3001\u305D\u306E\u7740\u773C\u70B9\u306B\u4EBA\u7269\u8A2D\u5B9A\u3089\u3057\u304F\u7121\u8A00\u3067\u53CD\u5FDC\u3059\u308B\u3002\u5225\u4F5C\u54C1\u306A\u3089\u7B2C\u4E09\u8005\u3068\u3057\u3066\u63A5\u3059\u308B" : sourceKind === "story" ? "\u78BA\u8A8D\u6E08\u307F\u306E\u65E2\u8AAD\u306E\u51FA\u6765\u4E8B\u306F\u904E\u53BB\u306E\u8A18\u61B6\u3068\u3057\u3066\u53D7\u3051\u6B62\u3081\u3001\u4ECA\u306E\u68EE\u3067\u518D\u6F14\u305B\u305A\u3001\u4EBA\u7269\u8A2D\u5B9A\u306B\u5408\u3046\u81EA\u7136\u306A\u53CD\u5FDC\u3092\u3059\u308B" : sourceKind === "relay" ? "\u524D\u306E\u4EBA\u7269\u304B\u3089\u306E\u8A71\u984C\u306B\u672C\u4EBA\u3089\u3057\u304F\u53CD\u5FDC\u3059\u308B\u3002\u76F4\u63A5\u805E\u3044\u305F\u3075\u308A\u3092\u3057\u306A\u3044" : sourceKind === "meet" ? "\u521D\u5BFE\u9762\u306E\u76F8\u624B\u306B\u3001\u4EBA\u7269\u8A2D\u5B9A\u306B\u5408\u3046\u7121\u8A00\u306E\u521D\u3081\u306E\u53CD\u5FDC\u3092\u3059\u308B" : "\u3053\u306E\u5834\u9762\u306E\u610F\u5473\u3068\u4EBA\u7269\u8A2D\u5B9A\u306B\u5408\u3046\u81EA\u7136\u306A\u53CD\u5FDC\u3092\u3059\u308B",
       npc,
       context,
       constraints: [
         "\u6700\u512A\u5148\u306Fnpc.voice\u306E\u4EBA\u7269\u50CF\u30FB\u95A2\u4FC2\u6027\u30FB\u52D5\u6A5F\u30FB\u3075\u308B\u307E\u3044\u3002\u8A2D\u5B9A\u306E\u8AAC\u660E\u3084\u4E00\u822C\u7684\u306A\u6559\u8A13\u3067\u4EE3\u7528\u3057\u306A\u3044",
-        "\u8CEA\u554F\u30FB\u5197\u8AC7\u30FB\u63D0\u6848\u30FB\u8FD4\u4E8B\u306A\u3069\u3001\u8A00\u8449\u3067\u4F1D\u3048\u305F\u3044\u3068\u304D\u306F\u5B9F\u969B\u306E\u53F0\u8A5E\u3068\u3057\u3066\u66F8\u304F\u3002\u9759\u304B\u306B\u904E\u3054\u3059\u5834\u9762\u3067\u306F\u8EAB\u632F\u308A\u3060\u3051\u3067\u3088\u3044",
+        "\u8CEA\u554F\u30FB\u5197\u8AC7\u30FB\u63D0\u6848\u30FB\u8FD4\u4E8B\u306A\u3069\u3001\u8A00\u8449\u3067\u4F1D\u3048\u308B\u3068\u304D\u306F\u5B9F\u969B\u306E\u53F0\u8A5E\u3092\u66F8\u304F\u3002\u9759\u304B\u306A\u5834\u9762\u3084\u8EAB\u632F\u308A\u3060\u3051\u3067\u901A\u3058\u308B\u3068\u304D\u306F\u66F8\u304B\u306A\u304F\u3066\u3088\u3044",
         "readerReflection\u304C\u3042\u308B\u5834\u5408\u306F\u3001\u305D\u306E\u611F\u60F3\u306E\u5177\u4F53\u7684\u306A\u7740\u773C\u70B9\u306B\u53CD\u5FDC\u3059\u308B\u3002\u4F55\u3092\u805E\u3044\u3066\u3082\u540C\u3058\u9A5A\u304D\u3084\u8EAB\u632F\u308A\u3067\u6E08\u307E\u305B\u305A\u3001\u672C\u4EBA\u306E\u767A\u8A00\u3068\u4FDD\u8B77\u8005\u8981\u7D04\u3092\u533A\u5225\u3057\u3001\u5225\u4F5C\u54C1\u306E\u51FA\u6765\u4E8B\u3092\u81EA\u5206\u306E\u7D4C\u9A13\u306B\u3057\u306A\u3044",
         "\u4EBA\u9593\u306E\u8A00\u8449\u3092\u58F0\u306B\u51FA\u3055\u305A\u3001\u5FC3\u306E\u58F0\u30FB\u5F15\u7528\u7B26\u4ED8\u304D\u306E\u767A\u8A71\u3082\u4F5C\u3089\u306A\u3044\u3002text\u306B\u306F\u5168\u89D2\u4E38\u62EC\u5F27\uFF08 \uFF09\u306B\u56F2\u3093\u3060\u77ED\u3044\u884C\u52D5\u3060\u3051\u3092\u66F8\u304F",
         `\u66F8\u304F\u306A\u3089text\u306B\u77ED\u304F\u66F8\u304F\u52D5\u4F5C\u3092\u63CF\u304D\u3001mark\u306B\u5B9F\u969B\u306E\u6587\u7AE0\u3092\u5FC5\u305A\u5165\u308C\u308B\u3002\u4E21\u65B9\u5408\u308F\u305B\u3066${FOREST_WRITTEN_TURN_LIMIT}\u5B57\u4EE5\u5185\u3002\u66F8\u304B\u306A\u3044\u5834\u5408\u306Fmark:null`,
@@ -2209,11 +2210,7 @@ var ForestPersonaProbe = (() => {
         sourceKind,
         sourceMemoryId: spotlight ? "" : original.sourceMemoryId || "",
         relayChoice,
-        ...spotlight ? {
-          reviewSpotlightKey: spotlight.key,
-          reviewSpotlightBookKey: spotlight.bookKey,
-          reviewEvidence: spotlight
-        } : {},
+        ...spotlight ? { reviewSpotlightKey: spotlight.key, reviewEvidence: spotlight } : {},
         ...!spotlight && sourceKind === "ambient" && source?.evidence === "reviewed" ? { dailySourceMemoryId: source.memoryId } : {}
       });
     }
@@ -2329,7 +2326,6 @@ var ForestPersonaProbe = (() => {
         sourceMemoryId: current.sourceMemoryId,
         dailySourceMemoryId: current.dailySourceMemoryId,
         reviewSpotlightKey: current.reviewSpotlightKey,
-        reviewSpotlightBookKey: current.reviewSpotlightBookKey,
         reviewEvidence: current.reviewEvidence
       });
     }

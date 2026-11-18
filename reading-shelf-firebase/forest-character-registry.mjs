@@ -134,7 +134,7 @@ export const FOREST_DISPLAY_NAMES=Object.freeze(Object.fromEntries(
 export function canonicalForestMention(text,speakers=[]){
   // This one observed misspelling is a whole katakana token. Saved names
   // take precedence, including names that happen to contain that token.
-  if(typeof text!=='string'||speakers.some(speaker=>speaker.name.includes('ハチビー')))return text;
+  if(typeof text!=='string'||(Array.isArray(speakers)&&speakers.some(speaker=>speaker?.name?.includes?.('ハチビー'))))return text;
   return text.replace(/(?<![ァ-ヿー])ハチビー(?![ァ-ヿー])/gu,FOREST_DISPLAY_NAMES.hachibee);
 }
 

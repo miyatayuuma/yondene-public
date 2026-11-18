@@ -20,7 +20,7 @@ test('every field survives source -> normalized profile -> actual Worker model i
     fetchImpl:async(url,options)=>handleRequest(new Request(url,{...options,
       headers:{...options.headers,Origin:'https://kodomo-reading-shelf-87f11.web.app'}}),{
       OWNER_UID:'fixture-owner',FIREBASE_PROJECT_ID:'kodomo-reading-shelf-87f11',AI:{run:async(_,data)=>{
-        captured.push(data);return {response:JSON.stringify({text:'（ねこは木の下で道具をならべる。）',mark:null,choices:['いっしょに見る','またね']})};}}
+        captured.push(data);return {response:JSON.stringify({text:'（ねこは木の下で道具をならべる。）',delivery:'gesture',choices:['いっしょに見る','またね']})};}}
     },{verifyToken:async()=>'fixture-owner'})});
   const prompt=promptFor({characterId:'cat',mode:'opening',characterProfile:profile,sourceKind:'ambient'});
   const result=await generate(prompt);

@@ -5,6 +5,9 @@ import {mountBookForest} from './book-forest.mjs';
 
 class Element {
   constructor(tag){this.tagName=tag;this.children=[];this.style={};this.attributes={};this.dataset={};this.listeners={};this.className='';this.hidden=false;this.clientWidth=412;this.clientHeight=915;this.textContent='';}
+  get textContent(){return this.children.map(node=>node.textContent).join('')+this._textContent}
+  set textContent(text){this.children=[];this._textContent=text}
+  prepend(...nodes){this.children.unshift(...nodes)}
   append(...nodes){this.children.push(...nodes)} replaceChildren(...nodes){this.children=nodes}
   remove(){this.removed=true} setAttribute(k,v){this.attributes[k]=v} focus(){} setPointerCapture(){}
   addEventListener(k,fn){(this.listeners[k]??=[]).push(fn)}
@@ -276,11 +279,9 @@ test('cat shows written dialogue in the bubble without speaking or a 3D mark',as
   const ready=new Promise(resolve=>{
     mountBookForest({familyId:'silent-cat-writing',privateSprites:{images},
       dialogue:{
-        start:async()=>({text:'（ねこはまえあしでじめんをなぞった。）',
-          mark:{surface:'ground',word:'こっち'},
+        start:async()=>({text:'こっちだよ。木の下を見て。',delivery:'written',
           choices:[{id:'cat-more',label:'みてみる'}]}),
-        select:async()=>({text:'（ねこはおちばにちいさくかいた。）',
-          mark:{surface:'leaf',word:'またね'},choices:[],conversationComplete:true}),
+        select:async()=>({text:'（ねこはしっぽをふった。）',delivery:'gesture',choices:[],conversationComplete:true}),
         end(){}
       },
       debug:{avatar:'player_cat',month:4,createScene:async()=>world,
@@ -293,12 +294,14 @@ test('cat shows written dialogue in the bubble without speaking or a 3D mark',as
   assert.equal(talk.hidden,false);
   talk.click();await Promise.resolve();await Promise.resolve();
   assert.equal(find(env.document.body,'bookForestMessage').dataset.voiceEnabled,'false');
-  assert.match(find(env.document.body,'bookForestMessage').textContent,/\nこっち$/u);
+  assert.equal(find(env.document.body,'bookForestWritingNote').textContent,'（ねこは字を書いて見せた。）');
+  assert.match(find(env.document.body,'bookForestMessage').textContent,/こっちだよ。木の下を見て。$/u);
   assert.equal(world.scene.children.filter(object=>object.name==='forest-cat-writing').length,0);
   assert.equal(speech.calls.length,0);
   const response=find(env.document.body,'bookForestReplies').children[0];
   response.click();await Promise.resolve();await Promise.resolve();
-  assert.match(find(env.document.body,'bookForestMessage').textContent,/\nまたね$/u);
+  assert.equal(find(env.document.body,'bookForestWritingNote'),undefined);
+  assert.equal(find(env.document.body,'bookForestMessage').textContent,'（ねこはしっぽをふった。）');
   assert.equal(world.scene.children.filter(object=>object.name==='forest-cat-writing').length,0);
   assert.equal(speech.calls.length,0);
   find(env.document.body,'bookForestDismiss').click();

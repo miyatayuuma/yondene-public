@@ -17,7 +17,7 @@ const raw=({prompt})=>({response:JSON.stringify({
   text:prompt.npc.id==='cat'?'（ねこはとなりにすわった。）':
     prompt.closing?'続きはまた会ったときにね。':prompt.mode==='reply'?
       'あの曲がり角まで見に行こう。':'向こうの道が気になるな。',
-  ...(prompt.npc.id==='cat'?{mark:null}:{}),
+  ...(prompt.npc.id==='cat'?{delivery:'gesture'}:{}),
   choices:prompt.closing?[]:['いっしょに見る','ここで待つ']})});
 const defaults={now:()=>now,getCharacterProfiles:()=>profiles,
   getBooks:()=>[book],getCatalog:()=>[memory],transport:async(input,args)=>raw(args)};
@@ -127,12 +127,12 @@ test('foraging guard distinguishes unidentified plants, refusals and ordinary kn
   for(const line of ['食べないで観察しよう','食べていいかわからない','むやみに食べるのは危ないよ','持ってきたパンを食べよう'])
     assert.equal(unsafeForestForaging({text:line,choices:['見ている','先へ進む']},context),false,line);
   assert.equal(unsafeForestForaging({text:'焼いたパンがおいしいよ。',choices:['食べよう','とっておく']}),false);
-  const writing={text:'（葉っぱに文字を書きこんだ。）',mark:{surface:'leaf',word:'おいしいものをさがそう。'}};
+  const writing={text:'おいしいものをさがそう。',delivery:'written'};
   const forest={situation:{place:'本の森'}};
   assert.equal(unsafeForestForaging(writing,forest),false);
+  assert.equal(unsafeForestForaging({text:'（葉っぱに字を書いた。）',choices:['おいしいものをさがそう？']},forest),false);
   assert.equal(unsafeForestForaging({
-    text:'（ねこは森でひろった葉に書いて見せた。）',
-    mark:{surface:'leaf',word:'このははたべられるよ。'},choices:['食べてみる','見るだけ']
+    text:'このはっぱはたべられるよ。',delivery:'written',choices:['たべてみる','見るだけ']
   },forest),true);
   assert.equal(unsafeForestForaging({...writing,choices:['知らない木の実をたべよう','見る']},forest),true);
 
@@ -224,8 +224,8 @@ test('registered names, written cat replies and the remaining reply count surviv
     transport:async(_, {prompt})=>{
       const {closing,npc,mode}=prompt;
       if(npc.id==='cat')return {response:JSON.stringify({
-        text:mode==='opening'?'（ねこは紙に書いて見せた。）':'（ねこはとなりにすわった。）',
-        mark:mode==='opening'?{surface:'note',word:'この木の上を見て。'}:null,
+        text:mode==='opening'?'キキと ジジが見つけた木だよ。 どこに小さなとりがいるか、下からそっと見てみよう。':closing?'（ねこはとなりにすわった。）':'あの白い花の上だよ。とりもこちらを見ているね。',
+        delivery:closing?'gesture':'written',
         choices:closing?[]:['いっしょに見る','ここですわる']})};
       return {response:JSON.stringify({
         text:closing?'ほら、切り株のかげに丸い石があったぞ。':mode==='opening'
@@ -238,12 +238,15 @@ test('registered names, written cat replies and the remaining reply count surviv
   assert.equal(run.frames[0].result.choices[0].label,'ハチベエはどう思う？');
   assert.equal(run.trace[1].prompt.context.chosenLabel,'ハチベエはどう思う？');
   assert.equal(run.frames[2].result.conversationComplete,true);
-  assert.equal(run.frames[3].result.mark.word,'この木の上を見て。');
-  assert.equal(run.trace[4].prompt.context.recentTurns[0].written,'この木の上を見て。');
-  assert.equal(run.frames[4].result.mark,undefined);
+  assert.equal(run.frames[3].result.delivery,'written');
+  assert.deepEqual(run.trace[4].prompt.context.recentTurns[0],{
+    npc:run.frames[3].result.text,delivery:'written'});
+  assert.equal(run.frames[4].result.delivery,'written');
+  assert.equal(run.frames[5].result.delivery,'gesture');
+  assert.equal(run.frames[5].result.conversationComplete,true);
   assert.ok(run.trace.every(step=>step.validation==='accepted'));
   assert.throws(()=>readCompletion({response:JSON.stringify({text:'（ねこは葉に文字を書いて見せた。）',
-    mark:null,choices:['見る','待つ']})},{characterId:'cat'}),/Invalid silent cat action/);
+    delivery:'gesture',choices:['見る','待つ']})},{characterId:'cat'}),/Invalid silent cat action/);
   const names=readCompletion({response:JSON.stringify({text:'ハチビーは見たかな。',
     choices:['ハチビーヌはどう思う？','ハチビーはどう思う？']})},{characterId:'jiji'});
   assert.deepEqual(names.choices,['ハチビーヌはどう思う？','ハチベエはどう思う？']);

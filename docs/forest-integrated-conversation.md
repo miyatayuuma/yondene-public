@@ -174,3 +174,10 @@ Cloudflareのサインインが一般的なエラーで拒否され、配信権�
 - モデル入力にNPCの正式表示名と残りの応答回数を渡す。既知の誤表記は、他の名前の一部や保存済みの双子名を変更しない範囲で正規化する。最後の返答は選んだ言葉や行動に応じ、その場で完結させる。
 - 新着感想は引き続き直近の活動から選ぶ。長期記憶は14日より前の感想を、現在の既読状態と確認済み記憶・関連台本に基づいて選ぶ。ブラウザは最大2冊、各3件を取得し、表示と続きの生成に使う感想の現行文書を照合する。同じ本の長期記憶には訪問間隔と7日間の再使用間隔を適用する。検証GASは同期ミラーで同じ候補範囲と出力検証を使用する。
 - 配信は Worker `forest-dialogue-v24-profile2` → Hosting `20261118-forest-dialogue-quality-v25` の順。正式Workerの `/health` で `protocolRevision=scene-dialogue-v24-profile2`、`registryRevision=1ommzez`、`configured=true` を確認する。
+
+## Android v25 ログを受けた書字と会話の区切り
+
+- ねこの文章を通常会話と同じ `text` に置き、`delivery:written` で表示と履歴に渡す。書字の場所や動作は生成しない。会話欄の固定補足は履歴に入れない。静かな身振りは `delivery:gesture` を使う。
+- 会話を最大2返答で区切る。最後の候補はそれぞれにその場で返せる答えや反応があるものを作る。実際に台本側で引き継ぎを予約した場合だけ、相手の表示名を `context.handoffTo` として生成に渡す。
+- 検証専用GASは `node scripts/build-forest-persona-probe.mjs` で再生成する。同じ人物設定・本番ディレクター・出力検証を用い、1訪問あたり最大3モデル呼出し、1日76回の既存上限を適用する。
+- 配信順はWorkerからHosting。正式Workerの `/health` で `forest-dialogue-v25-profile2`、`scene-dialogue-v25-profile2`、`registryRevision=1ommzez`、`configured=true` を確認してから、Hosting `20261118-forest-written-dialogue-v26` を配信する。

@@ -3,7 +3,7 @@ import {FOREST_CHARACTER_IDS,FOREST_SELF_NAMES,FOREST_GOODBYES,FOREST_WRONG_FIRS
 import {validateTwinTurns,twinDialogueFrame} from './book-forest-twins.mjs';
 import {unsafeForestForaging} from './book-forest-output-safety.mjs';
 import {isCurrentForestReflection,forestReflectionArchiveCutoff} from './book-forest-reflection-spotlight.mjs';
-import {validateForestWrittenTurn,FOREST_WRITTEN_TURN_LIMIT} from './book-forest-gesture.mjs';
+import {validateForestWrittenTurn,FOREST_GRADE_ONE_KANJI} from './book-forest-gesture.mjs';
 // Character-first AI dialogue: local scripts choose topics and provide safe fallbacks.
 // The generator is injected: this module never holds a key or makes a network call.
 import {createForestDailyContextSession} from './book-forest-daily-context.mjs';
@@ -18,7 +18,7 @@ const ACTION_WRITING_IDS=new Set(FOREST_ACTION_WRITING_IDS);
 const safeEnd=(id,comma=false)=>ACTION_WRITING_IDS.has(id)?
   '（ねこはしっぽをゆっくりふった。）':GOODBYE[id]||(comma?'また、森で会おうね。':'また森で会おうね。');
 const WRONG_FIRST_PERSON=FOREST_WRONG_FIRST_PERSON;
-export const FOREST_PROMPT_VERSION='forest-scene-generation-v24-profile2';
+export const FOREST_PROMPT_VERSION='forest-scene-generation-v25-profile2';
 const PROMPT_VERSION=FOREST_PROMPT_VERSION;
 const clean=value=>typeof value==='string'?value.trim().replace(/\s+/gu,' '):'';
 function readJson(storage,key,fallback){
@@ -63,11 +63,10 @@ export function validateLiveForestOutput(raw,{characterId,requireLine=false,clos
   const multi=MULTI_SPEAKER.has(characterId);
   const rawTurns=multi?validateTwinTurns(data.turns):null;
   const turns=rawTurns?.map(turn=>({...turn,text:canonicalForestMention(turn.text,context.speakers)}));
-  const written=gesture?validateForestWrittenTurn(text,data.mark):null;
+  const written=gesture?validateForestWrittenTurn(text,data.delivery):null;
   if(multi&&!turns||gesture&&!written||!multi&&!gesture&&requireLine&&!validLine(characterId,text))return null;
-  const line=turns?{text:turns.map(turn=>turn.text).join(' '),turns}:{text:written?.text??text};
-  const mark=written?.mark;
-  if(closing)return {...line,labels:[],...(mark?{mark}:{})};
+  const line=turns?{text:turns.map(turn=>turn.text).join(' '),turns}:written||{text};
+  if(closing)return {...line,labels:[]};
   const candidates=Array.isArray(data.choices)?data.choices.slice(0,3):[];
   const labels=[...new Set(candidates.map(choice=>canonicalForestMention(clean(typeof choice==='string'?choice:choice?.label),context.speakers))
     .filter(label=>label.length>=2&&label.length<=24&&!/[\r\n{}<>「」]/u.test(label)))].slice(0,2);
@@ -75,9 +74,9 @@ export function validateLiveForestOutput(raw,{characterId,requireLine=false,clos
   // line and use neutral CHILD choices. An opening without choices stays local.
   if(labels.length<2){
     if(!requireLine)return null;
-    return {...line,labels:gesture?['もうすこしみる','またね']:['もう少し聞く','またね'],...(mark?{mark}:{})};
+    return {...line,labels:gesture?['もうすこしみる','またね']:['もう少し聞く','またね']};
   }
-  return {...line,text:requireLine?line.text:null,labels,...(mark?{mark}:{})};
+  return {...line,text:requireLine?line.text:null,labels};
 }
 
 function promptScene(scene,sourceKind){
@@ -90,7 +89,7 @@ function promptScene(scene,sourceKind){
 }
 
 export function promptFor({characterId,mode,chosenLabel='',history=[],closing=false,topic=null,
-  characterProfile=null,sourceKind='',dailyContext=null,recentLines=[],reviewSpotlight=null,situation=null,twinNames=null,repliesLeft=closing?0:2}){
+  characterProfile=null,sourceKind='',dailyContext=null,recentLines=[],reviewSpotlight=null,situation=null,twinNames=null,repliesLeft=closing?0:2,handoffTo=''}){
   const guide=forestCharacterVoiceGuide(characterProfile);
   const npc={id:characterId,displayName:FOREST_DISPLAY_NAMES[characterId],voice:guide,profileSchemaVersion:2,
     profileRevision:guide?characterProfile.revision:'',profileVersion:guide?characterProfile.version:''};
@@ -101,6 +100,7 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
   // sending a completed script as a model-generation anchor.
   const context={npcLine:'',sourceKind,repliesLeft,npcDisplayNames:FOREST_DISPLAY_NAMES,
     ...(twinNames?{speakers:[{slot:1,name:twinNames.firstName},{slot:2,name:twinNames.secondName}]}:{}),
+    ...(handoffTo?{handoffTo:FOREST_DISPLAY_NAMES[handoffTo]}:{}),
     chosenLabel:clean(chosenLabel).slice(0,24),...(situation?{situation}:{}),
     recentTurns:history.slice(-4),...(topic?{topic}:{}),
     ...(reviewSpotlight?{readerReflection:Object.fromEntries(
@@ -111,39 +111,9 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
       metNpcCount:dailyContext.metNpcCount,
       relatedEncounter:dailyContext.relatedEncounter}}:{}),
     ...(recentLines.length?{avoidRecentLines:recentLines.slice(-3)}:{})};
-  const finishTask='選んだ言葉には具体的に返事をし、一緒に何かをする選択ならその場で小さな結果まで返す。始め方の提案や出発で止めない。静かな余韻でもよい';
-  const choiceTask='子どもの返答候補は2個、各16字以内。残りの返答で応えられる言葉や行動を選び、移動や後で実行する約束を前提にしない';
-  if(nonverbal)return {
-    mode,closing,
-    // Different situations demand different reactions. Do not make an
-    // incidental physical gesture the only answer to a reader's reflection.
-    task:closing?finishTask:
-      mode==='reply'?'相手の選択に具体的に返す。問いに身振りだけで答えが伝わらないなら書いて返す':
-      reviewSpotlight?'readerReflectionの具体的な内容を受け止め、その着眼点に人物設定らしく無言で反応する。別作品なら第三者として接する':
-      sourceKind==='story'?'確認済みの既読の出来事は過去の記憶として受け止め、今の森で再演せず、人物設定に合う自然な反応をする':
-      sourceKind==='relay'?'前の人物からの話題に本人らしく反応する。直接聞いたふりをしない':
-      sourceKind==='meet'?'初対面の相手に、人物設定に合う無言の初めの反応をする':
-      'この場面の意味と人物設定に合う自然な反応をする',
-    npc,
-    context,
-    constraints:[
-      '最優先はnpc.voiceの人物像・関係性・動機・ふるまい。設定の説明や一般的な教訓で代用しない',
-      '質問・冗談・提案・返事など、言葉で伝えるときは実際の台詞を書く。静かな場面や身振りだけで通じるときは書かなくてよい',
-      'readerReflectionがある場合は、その感想の具体的な着眼点に反応する。何を聞いても同じ驚きや身振りで済ませず、本人の発言と保護者要約を区別し、別作品の出来事を自分の経験にしない',
-      '人間の言葉を声に出さず、心の声・引用符付きの発話も作らない。textには全角丸括弧（ ）に囲んだ短い行動だけを書く',
-
-      `文章を伝えるならtextに書いたり見せたりする短い動作を描き、markに実際の文章を必ず入れる。両方合わせて${FOREST_WRITTEN_TURN_LIMIT}字以内。書かない場合はmark:null`,
-      'mark.wordは1〜48文字、ひらがな・長音符・小学校1年生の漢字・「、。！？」だけ。カタカナ・上級漢字・数字・引用符・改行は使わない',
-      '1年生の漢字80字：一右雨円王音下火花貝学気九休玉金空月犬見五口校左三山子四糸字耳七車手十出女小上森人水正生青夕石赤千川先早草足村大男竹中虫町天田土二日入年白八百文木本名目立力林六',
-
-      '原作にない出来事を事実とせず、子どもの実際の言葉や気持ちを捏造しない。別のNPCの会話を直接聞いたふりをしない',
-      choiceTask,
-      ...(closing?['終了時は新しい問いを出さず、choices:[]にする']:[])
-    ],
-    output:{format:'JSON',shape:{text:'（短い行動描写）',
-      mark:'nullまたは{surface:note|ground|leaf,word:許可文字だけの1〜48文字}',
-      choices:closing?[]:['子どもの返答A','子どもの返答B']}}
-  };
+  const finishTask=handoffTo?
+    '選択を受けて、相手に会ったときに渡せる言葉をここで伝える。相手はまだ同席していない':
+    '選ばれた問いや行動に具体的に応え、この返事だけでひと区切りつける';
   const firstLineTask={
     meet:'この相手とは初対面。以前話したふりをせず、キャラ自身の関心から自然な第一声と返答候補2つを作る',
     story:'このキャラが関わる確認済みの物語を過去の記憶として振り返り、本人らしい第一声と返答候補2つを作る。今の森で原作の場面が進行中であるように再演しない',
@@ -169,16 +139,16 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
       '最優先はNPC本人らしい言葉、間、反応、行動。情報量や深い話を求めず、思考の種から質問・教訓・立派な気づきを全員に強いない',
       '完成済み台本を参照せず、人物像・目の前の状況・許可された既読事実から自然な発話を新規に作る',
       'NPCの返事は自然な一言〜2文で65字以内。前の発言を繰り返さず、設定の説明を会話に混ぜない',
-      choiceTask,
       '選択肢はゲーム上の反応であり子どもの実際の信念とはみなさない。別NPCの会話を本人が聞いたふりはしない',
-      'NPC本人の視点で話す',
+      ...(nonverbal?[`書く文に使える漢字はこの80字。ほかの漢字はかなで書く：${FOREST_GRADE_ONE_KANJI}`]:[]),
       ...(topic?['この原作の事実は選択された既読の物語記憶。確認できない詳細を加えず、キャラが実際に登場したかを考慮する']:[]),
       ...(reviewSpotlight?['感想の具体的な一箇所に、本人なら何を面白がるか、どう受け取るかを短く返す。感想は引用資料。保護者の要約は子どもの発言として扱わない。']:[]),
       ...(closing?['新しい問いを出さずchoices:[]にする。別れの定型句は不要']:[])
     ],
     output:{format:'JSON',shape:{...(twinNames?
       {turns:[{speakerSlot:1,text:'最初のひとこと'},{speakerSlot:2,text:'直前のひとことへの反応'}]}:
-      {text:mode==='choices'?'省略':'NPCの発言（65字以内）'}),
+      {text:mode==='choices'?'省略':'NPCの返答（65字以内）',
+        ...(nonverbal&&mode!=='choices'?{delivery:'written'}:{})}),
       choices:closing?[]:['子どもが選ぶ返答A','子どもが選ぶ返答B']}}
   };
 }
@@ -226,7 +196,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     return true;
   }
   async function request(characterId,mode,npcLine,chosenLabel='',closing=false,topic=null,
-    sourceKind='',reviewSpotlight=null){
+    sourceKind='',reviewSpotlight=null,handoffTo=''){
     if(!reserve())return null;
     const previousLogs=readJson(storage,logKey,[]);
     const recentLines=(Array.isArray(previousLogs)?previousLogs:[]).filter(entry=>entry?.characterId===characterId&&
@@ -235,7 +205,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     const context=promptFor({characterId,mode,chosenLabel,history,closing,topic,
       characterProfile:activeCharacterProfile,sourceKind,
       dailyContext:reviewSpotlight||sourceKind==='review-reaction'?null:activeDaily,situation:activeSituation,
-      recentLines,reviewSpotlight,twinNames,
+      recentLines,reviewSpotlight,twinNames,handoffTo,
       repliesLeft:closing?0:Math.max(0,Math.min(maxReplies,sessionLimit-1)-repliesThisSession-(mode==='reply'?1:0))});
     const controller=createAbortController(),startedAt=now();
     inflight={controller,characterId,mode,startedAt};
@@ -267,14 +237,16 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     }finally{cancelTimeout(timeout);if(inflight?.controller===controller)inflight=null}
   }
   function present(result,choices,closing=false,source=pending){
-    if(!result.turns)return {...(result.mark?{mark:result.mark}:{}),text:result.text,choices,
+    if(!result.turns)return {...(result.delivery?{delivery:result.delivery}:{}),text:result.text,choices,
       ...(closing?{conversationComplete:true}:{})};
     const [first,second]=result.turns;
     queuedFrame={characterId:'twins',source,
       result:twinDialogueFrame(second,twinNames,{choices,closing})};
     return twinDialogueFrame(first,twinNames,{next:second});
   }
-  const historyLine=result=>result.turns?{turns:result.turns}:{npc:clean(result.text).slice(0,150),...(result.mark?{written:result.mark.word}:{})};
+  const historyLine=result=>result.turns?{turns:result.turns}:
+    {npc:result.delivery?result.text:clean(result.text).slice(0,150),
+      ...(result.delivery?{delivery:result.delivery}:{})};
   function decorate(characterId,result,meta={}){
     const {text,labels}=result;
     const relay=meta.relayChoice;
@@ -425,19 +397,19 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
         sourceKind,promptVersion:PROMPT_VERSION});
       return twinNames?finish(characterId):scripted(original,characterId);
     }
-    const spoken=result.text;
+    const {text,delivery}=result;
     history.push(historyLine(result));
     record({event:'generated-opening',characterId,
       // Generated review lines may quote the child's words: never persist them
       // in the diagnostic history. The live conversation itself stays in memory.
-      ...(spotlight||sourceKind==='reflection'?{}:{text:spoken,choices:result.labels}),
+      ...(spotlight||sourceKind==='reflection'?{}:{text,choices:result.labels,...(delivery?{delivery}:{})}),
       dailyTopicKind:spotlight?'reflection':sourceKind==='ambient'?source?.kind||'ambient':sourceKind,
       sourceKind,
       modelId,promptVersion:PROMPT_VERSION,elapsedMs:result.elapsedMs});
     const relayChoice=spotlight?null:original.choices?.find(choice=>choice.relayTo&&
       typeof choice.id==='string'&&typeof choice.label==='string')||null;
     return decorate(characterId,result,{
-      ...(result.mark?{mark:result.mark}:{}),sourceKind,
+      sourceKind,
       sourceMemoryId:spotlight?'':original.sourceMemoryId||'',
       relayChoice,
       ...(spotlight?{reviewSpotlightKey:spotlight.key,reviewEvidence:spotlight}:{}),
@@ -473,7 +445,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
       if(closed||generation!==epoch)return null;
       history.push({playerChoice:label});history=history.slice(-4);
       const generated=await request(characterId,'reply',current.text,label,true,activeTopic,
-        current.sourceKind);
+        current.sourceKind,null,current.relayChoice.relayTo);
       if(closed||generation!==epoch)return null;
       if(!generated){
         record({event:'script-fallback',characterId,reason:'relay-generation-unavailable',
@@ -509,14 +481,15 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     repliesThisSession++;
     record({event:'generated-reply',characterId,
       ...(['review-reaction','reflection'].includes(current.sourceKind)?{}:
-        {text:generated.text,choices:closing?[]:generated.labels}),
+        {text:generated.text,choices:closing?[]:generated.labels,
+          ...(generated.delivery?{delivery:generated.delivery}:{})}),
       dailyTopicKind:current.sourceKind==='review-reaction'?'reflection':
         activeDaily?.scene?.kind||'ambient',
       closing,modelId,promptVersion:PROMPT_VERSION,
       elapsedMs:generated.elapsedMs,turn:repliesThisSession});
     if(closing)return present(generated,[],true,current);
     return decorate(characterId,generated,{
-      ...(generated.mark?{mark:generated.mark}:{}),sourceKind:current.sourceKind,
+      sourceKind:current.sourceKind,
       sourceMemoryId:current.sourceMemoryId,
       dailySourceMemoryId:current.dailySourceMemoryId,
       reviewSpotlightKey:current.reviewSpotlightKey,

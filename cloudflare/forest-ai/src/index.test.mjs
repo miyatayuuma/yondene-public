@@ -145,9 +145,9 @@ test('Health reports all supported generators, including non-speaking cat',async
   const response=await handleRequest(request('/health',{method:'GET'}),{
     OWNER_UID:ownerUid,AI:{run:async()=>({})}});
   assert.equal(response.status,200);
-  assert.equal(response.headers.get('X-Forest-AI-Version'),'forest-dialogue-v24-profile2');
+  assert.equal(response.headers.get('X-Forest-AI-Version'),'forest-dialogue-v25-profile2');
   assert.deepEqual((({profileRevision,...rest})=>rest)(await response.json()),{
-    model:'@cf/google/gemma-4-26b-a4b-it',version:'forest-dialogue-v24-profile2',
+    model:'@cf/google/gemma-4-26b-a4b-it',version:'forest-dialogue-v25-profile2',
     registryRevision:FOREST_ROSTER_REVISION,protocolRevision:FOREST_DIALOGUE_PROTOCOL,
     supportedNpcCount:FOREST_AI_GENERATION_IDS.length,configured:true});
 });
@@ -179,52 +179,35 @@ test('all three Zukkoke NPC IDs are accepted as opening speakers by Worker',asyn
   assert.equal(calls,3);
 });
 
-test('silent cat generation accepts short hiragana ground/leaf writing, never dialogue',async()=>{
-  const messages=[],output=[
-    {text:'（ねこはまえあしでじめんをなぞった。）',mark:{surface:'ground',word:'こっち'},
-      choices:['みてみる','ついていく']},
-    {text:'（ねこはおちばにちいさくかいた。）',mark:{surface:'leaf',word:'またね'},
-      choices:[]}
-  ];
+test('Worker sends written dialogue and silent gestures through one dialogue contract',async()=>{
+  const messages=[],opening={text:'キキと ジジは木の下だよ。雨がふるまえに、あそこですこし休もう。',
+    delivery:'written',choices:['木の下で休もう','ここで雨を見る']};
+  const closing={text:'（ねこはうなずいた。）',delivery:'gesture',choices:[]};
+  const output=[opening,closing];
   const env={OWNER_UID:ownerUid,FIREBASE_PROJECT_ID:projectId,AI:{
-    async run(_model,request){messages.push(request.messages);return {choices:[{message:{
-      content:JSON.stringify(output.shift())}}]}}
+    async run(_model,request){messages.push(request.messages);return {response:JSON.stringify(output.shift())}}
   }};
-  const gesture={...prompt,mode:'opening',npc:{...profileMeta,id:'cat',voice:'非公開Sheetsにある架空の人物像・テスト用A',approvedExamples:[]},
-    context:{...prompt.context,sourceKind:'meet'},task:'ねこの行動を生成する'};
-  const res=await handleRequest(request('/dialogue',{body:{prompt:gesture}}),env,
-    {verifyToken:async()=>ownerUid});
-  assert.equal(res.status,200);
-  assert.deepEqual((({profileRevision,...rest})=>rest)(await res.json()),{text:'（ねこはまえあしでじめんをなぞった。）',
-    choices:['みてみる','ついていく'],mark:{surface:'ground',word:'こっち'}});
-  assert.match(messages[0][0].content,/非発話モード/);
-  assert.match(messages[0][1].content,/非公開Sheetsにある架空の人物像/);
-  assert.match(messages[0][0].content,/非公開台帳由来/);
-  assert.doesNotMatch(messages[0][0].content,/王さまの親友|家事・買い物/,
-    'Worker must not carry persona facts that belong in private Sheets');
-  assert.match(messages[0][1].content,/非公開Sheetsにある架空の人物像・テスト用A/);
-  const meaningful={...gesture,mode:'opening'};
-  const env2={...env,AI:{run:async()=>({choices:[{message:{content:JSON.stringify({
-    text:'（ねこは紙に書いて、そっとおいた。）',
-    mark:{surface:'note',word:'王さま、雨がふりそう。木の下で休もう。'},
-    choices:['みてみる','ついていく']
-  })}}]})}};
-  const note=await handleRequest(request('/dialogue',{body:{prompt:meaningful}}),env2,
-    {verifyToken:async()=>ownerUid});
-  assert.equal(note.status,200);
-  assert.equal((await note.json()).mark.surface,'note');
-  const end=await handleRequest(request('/dialogue',{body:{prompt:{...gesture,
-    mode:'reply',closing:true}}}),env,{verifyToken:async()=>ownerUid});
-  assert.equal(end.status,200);
-  assert.deepEqual((({profileRevision,...rest})=>rest)(await end.json()),{text:'（ねこはおちばにちいさくかいた。）',
-    choices:[],mark:{surface:'leaf',word:'またね'}});
+  const catPrompt={...prompt,mode:'opening',npc:{...profileMeta,id:'cat',voice:'非公開Sheetsの合成設定A'},
+    context:{...prompt.context,sourceKind:'meet',repliesLeft:1}};
+  for(const expected of [opening,closing]){
+    const ending=expected===closing;
+    const res=await handleRequest(request('/dialogue',{body:{prompt:{...catPrompt,
+      mode:ending?'reply':'opening',closing:ending}}}),env,{verifyToken:async()=>ownerUid});
+    assert.equal(res.status,200);
+    const {profileRevision,...rest}=await res.json();
+    assert.deepEqual(rest,expected);
+  }
+  assert.match(messages[0][0].content,/残り1回なら、候補ごとに次の一答で渡せる答えや反応/);
+  assert.match(messages[0][0].content,/声や心の声を使わず/);
+  assert.match(messages[0][1].content,/非公開Sheetsの合成設定A/);
+  assert.doesNotMatch(messages[0][0].content,/王さまの親友|家事・買い物/);
 });
 
 test('Worker rejects nonverbal speech and writing outside grade-one glyphs',async()=>{
   const invalid=[
-    {text:'ねこ「こんにちは！」',mark:{surface:'ground',word:'あい'},choices:['みる','あそぶ']},
-    {text:'（ねこは前足で文字を書いた。）',mark:{surface:'ground',word:'前の道に行こう'},choices:['みる','あそぶ']},
-    {text:'（ねこは声を出して話しかけた。）',mark:null,choices:['みる','あそぶ']}
+    {text:'ねこ「こんにちは！」',delivery:'gesture',choices:['みる','あそぶ']},
+    {text:'前の道に行こう',delivery:'written',choices:['みる','あそぶ']},
+    {text:'（ねこは声を出して話しかけた。）',delivery:'gesture',choices:['みる','あそぶ']}
   ];
   const env={OWNER_UID:ownerUid,FIREBASE_PROJECT_ID:projectId,AI:{
     run:async()=>({choices:[{message:{content:JSON.stringify(invalid.shift())}}]})}};

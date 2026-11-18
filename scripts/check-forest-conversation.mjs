@@ -61,7 +61,7 @@ async function transport(input,{prompt,signal}){
     choices:prompt.closing?[]:['いっしょに見る','ここで待つ']})};
   return {response:JSON.stringify({text:prompt.npc.id==='cat'?'（ねこはとなりにすわった。）':
     prompt.closing?'続きはまた会ったときにね。':prompt.mode==='reply'?'あの曲がり角まで見に行こう。':
-    '向こうの道が気になるな。',...(prompt.npc.id==='cat'?{mark:null}:{}),
+    '向こうの道が気になるな。',...(prompt.npc.id==='cat'&&prompt.output?.shape?.delivery?{delivery:'gesture'}:{}),
     choices:prompt.closing?[]:['いっしょに見る','ここで待つ']})};
 }
 const visits=data.visits||[...ids.map(characterId=>({characterId,choices:[]})),

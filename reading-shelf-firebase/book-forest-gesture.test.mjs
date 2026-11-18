@@ -1,69 +1,30 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {validateForestGestureMark,validateForestGestureText,validateForestWrittenTurn,FOREST_GRADE_ONE_KANJI} from './book-forest-gesture.mjs';
+import {validateForestWrittenTurn,FOREST_GRADE_ONE_KANJI,FOREST_WRITTEN_TURN_LIMIT} from './book-forest-gesture.mjs';
 
-test('written marks accept hiragana and all 80 grade-one kanji, but never higher grades',()=>{
-  assert.equal(FOREST_GRADE_ONE_KANJI.length,80);
-  assert.equal(new Set([...FOREST_GRADE_ONE_KANJI]).size,80);
-  for(const word of ['こっち','またね','おはよう','おーい','木','王さま、雨がふりそう。','森へいこう！']){
-    assert.deepEqual(validateForestGestureMark({surface:'ground',word}),{surface:'ground',word});
+test('written dialogue accepts katakana names, spaces and the 80 grade-one kanji',()=>{
+  assert.equal(new Set(FOREST_GRADE_ONE_KANJI).size,80);
+  const text='キキ、ジジ、ゾロリ、ハチベエ。 みんなで 木の下に すわったら、王さままで きたとおもって、ぼくはびっくりしたよ。';
+  assert.ok(text.length>48);
+  for(const line of [text,'王さま、雨がふりそう。','あ'.repeat(FOREST_WRITTEN_TURN_LIMIT),
+    ...FOREST_GRADE_ONE_KANJI]){
+    assert.deepEqual(validateForestWrittenTurn(line,'written'),{text:line,delivery:'written'});
   }
-  for(const word of ['Hello','猫','読','道','前','カタカナ','１２３','', 'あ'.repeat(49),'あ\nい','おうさま「おかえり」','！']){
-    assert.equal(validateForestGestureMark({surface:'ground',word}),undefined,word);
-  }
-  assert.equal(validateForestGestureMark({surface:'lake',word:'こっち'}),undefined);
-  assert.equal(validateForestGestureMark(null),null);
-  assert.equal(validateForestGestureMark({surface:'leaf',word:'またね'}).word,'またね');
-  assert.equal(validateForestGestureMark({surface:'note',word:'木の 上を　見て。'}).word,'木の上を見て。');
-  const note='おうさま、いそがなくていいよ。ひとつずつやればだいじょうぶ！';
-  assert.deepEqual(validateForestGestureMark({surface:'note',word:note}),
-    {surface:'note',word:note});
-  assert.equal(validateForestGestureMark({surface:'ground',word:'こんにちは！'}).word,'こんにちは！');
-  assert.equal(validateForestGestureText('（ねこはまえあしでじめんをなぞった。）'),true);
-  for(const value of ['こんにちは！','（ねこは「はい」としゃべった。）',
-    '（ねこは声を出して話しかけた。）','（ねこは言う。）',
-    '（ねこはあるく）<script>','（あ）']){
-    assert.equal(validateForestGestureText(value),false,value);
+  for(const line of ['Hello','猫','読','道','１２３','', '　！？', 'あ'.repeat(66),'あ\nい']){
+    assert.equal(validateForestWrittenTurn(line,'written'),null,line);
   }
 });
 
-test('nonverbal cat narration accepts varied subjects and omitted subjects, but never speech or inner voice',()=>{
-  const natural=[
-    '（紙の上に道順を書いて、王さまに差し出した。）',
-    '（小川のそばで立ち止まり、流れる葉をじっと見つめる。）',
-    '（王さまの落とした鍵を拾い、手の届く場所に置いた。）',
-    '（朝日が差す中、ねこは窓を開けて空気を入れ替えた。）',
-    '（ねこは小さな紙に道順を書き、机の上へ置いた。）'
-  ];
-  for(const text of natural)assert.equal(validateForestGestureText(text),true,text);
-  const invalid=[
-    '（こんにちは！）',
-    '（ねこは心の中で王さまに返事をした。）',
-    '（困ったな、と心の中で思った。）',
-    '（ねこは王さまに向かっておはようと言った。）',
-    '（足を止めて「こっちだよ」と呼びかけた。）',
-    '（ねこは頭の中で答えをつぶやいた。）',
-    '（道の上に（ひみつ）の印を残した。）',
-    '（紙の上に道順を書き、机に置いた。)<script>',
-    '（紙の上に道順を\n書いて差し出した。）',
-    '（紙の上に道順を書いて差し出した。）'.repeat(4)
-  ];
-  for(const text of invalid)assert.equal(validateForestGestureText(text),false,text);
-  assert.equal(validateForestGestureMark(null),null,'writing stays optional');
-});
-
-test('writing is paired with visible dialogue and shares one length budget',()=>{
-  const action='（ねこは紙に書いて、こちらへ見せた。）';
-  const mark={surface:'note',word:'王さま、きょうはどこへいくの？'};
-  assert.deepEqual(validateForestWrittenTurn(action,mark),{text:action,mark});
-  assert.equal(validateForestWrittenTurn(action,null),null);
-  assert.deepEqual(validateForestWrittenTurn('(ねこは紙に書いて、こちらへ見せた。)',mark),{text:action,mark});
-  assert.equal(validateForestWrittenTurn('(心の中で王さまに返事をした。)',null),null);
-  assert.equal(validateForestWrittenTurn('（ねこは葉っぱにちいさくかいた。）',null),null);
-  const resting='（ねこは王さまのとなりにすわった。）';
-  assert.deepEqual(validateForestWrittenTurn(resting,null),{text:resting,mark:null});
-  const showedNote='（ねこは折った紙をひらいて、こちらに見せた。）';
-  assert.deepEqual(validateForestWrittenTurn(showedNote,mark),{text:showedNote,mark});
-  assert.equal(validateForestWrittenTurn('（地面に文字を書こうとした。）',null),null);
-  assert.equal(validateForestWrittenTurn('（'+ 'あ'.repeat(64)+'と書いた。）',mark),null);
+test('gestures permit brief natural narration without speech, thoughts or writing-only narration',()=>{
+  for(const text of ['（うなずく）','（王さまの落とした鍵を拾った。）','（川の向こうをじっと見つめる。）']){
+    assert.deepEqual(validateForestWrittenTurn(text,'gesture'),{text,delivery:'gesture'});
+  }
+  assert.deepEqual(validateForestWrittenTurn('(しっぽをふった。)','gesture'),
+    {text:'（しっぽをふった。）',delivery:'gesture'});
+  for(const text of ['こんにちは！','（こんにちは！）','（王さまに話しかけた。）',
+    '（頭の中で答えをつぶやいた。）','（しっぽをふり「はい」と答えた。）',
+    '（ねこは地面に文字を書いた。）','（葉っぱにちいさくかいた。）']){
+    assert.equal(validateForestWrittenTurn(text,'gesture'),null,text);
+  }
+  assert.equal(validateForestWrittenTurn('こっちだよ。',undefined),null);
 });

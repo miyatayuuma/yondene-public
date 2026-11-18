@@ -271,7 +271,7 @@ test('twins pause automatic advance while reading a selected line and resume aft
   }finally{closeForest();globalThis.setTimeout=originalSet;globalThis.clearTimeout=originalClear}
 });
 
-test('cat writes the validated generated word on the ground without speaking or autoplay',async()=>{
+test('cat shows written dialogue in the bubble without speaking or a 3D mark',async()=>{
   const env=environment(),world=fakeWorld(),speech=fakeSpeechEngine();let api;
   const ready=new Promise(resolve=>{
     mountBookForest({familyId:'silent-cat-writing',privateSprites:{images},
@@ -293,11 +293,13 @@ test('cat writes the validated generated word on the ground without speaking or 
   assert.equal(talk.hidden,false);
   talk.click();await Promise.resolve();await Promise.resolve();
   assert.equal(find(env.document.body,'bookForestMessage').dataset.voiceEnabled,'false');
-  assert.equal(world.scene.children.filter(object=>object.name==='forest-cat-writing').length,1);
+  assert.match(find(env.document.body,'bookForestMessage').textContent,/\nこっち$/u);
+  assert.equal(world.scene.children.filter(object=>object.name==='forest-cat-writing').length,0);
   assert.equal(speech.calls.length,0);
   const response=find(env.document.body,'bookForestReplies').children[0];
   response.click();await Promise.resolve();await Promise.resolve();
-  assert.equal(world.scene.children.filter(object=>object.name==='forest-cat-writing').length,1);
+  assert.match(find(env.document.body,'bookForestMessage').textContent,/\nまたね$/u);
+  assert.equal(world.scene.children.filter(object=>object.name==='forest-cat-writing').length,0);
   assert.equal(speech.calls.length,0);
   find(env.document.body,'bookForestDismiss').click();
   assert.equal(world.scene.children.filter(object=>object.name==='forest-cat-writing').length,0);

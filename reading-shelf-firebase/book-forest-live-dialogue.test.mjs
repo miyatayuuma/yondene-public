@@ -48,7 +48,7 @@ test('generates contextual reply choices, then a character reply only after a ch
   const log=JSON.parse(storage.getItem('forest-ai-local-v1:log'));
   assert.deepEqual(log.map(x=>x.event),['generated-opening','selected-offered-choice','generated-reply']);
   assert.equal(log[0].text,first.text,'export can reconstruct the initial line');
-  assert.equal(log[0].promptVersion,'forest-scene-generation-v23-profile2');
+  assert.equal(log[0].promptVersion,'forest-scene-generation-v24-profile2');
   assert.equal(log[1].label,'風の音を聞く');
   director.end();
 });
@@ -82,7 +82,7 @@ test('a second AI reply ends the encounter naturally without requesting or showi
     assert.equal(result.choices.length,i===1?0:2);
   }
   assert.equal(result.conversationComplete,true);
-  assert.ok(prompts[2].constraints.some(text=>text.includes('この一言で会話を終える')));
+  assert.ok(prompts[2].constraints.some(text=>text.includes('別れの定型句は不要')));
   assert.equal(prompts.length,3,'one opening generation and two replies');
   assert.equal(director.getProgress().aiRepliesThisSession,2);
   await director.select({...identity,choiceId:'old-choice'});
@@ -601,8 +601,8 @@ test('nonverbal NPC chooses reactions by context, with writing optional and no h
     sourceKind:'review-reaction',reviewSpotlight:review});
   assert.match(reflection.task,/readerReflection.*具体的な内容/u);
   assert.match(story.task,/確認済みの既読/u);
-  assert.match(reply.task,/直前の行動/u);
-  assert.match(closing.task,/自然に終える/u);
+  assert.match(reply.task,/相手の選択/u);
+  assert.match(closing.task,/具体的な返事/u);
   assert.notEqual(reflection.task,casual.task);
   assert.ok(reflection.constraints.some(line=>/書かない場面はmark:null/.test(line)));
   assert.ok(reflection.constraints.some(line=>/動くことや解決することを強制しない/.test(line)));
@@ -652,10 +652,10 @@ test('cat uses a private Sheets persona for nonverbal AI action and writing, nev
   assert.ok(prompts[0].constraints.some(line=>line.includes('mark')));
   assert.match(prompts[0].npc.voice,/架空の相棒・テスト設定A/);
   assert.match(prompts[0].npc.voice,/家事・買い物/);
-  assert.ok(prompts[0].constraints.some(line=>line.includes('具体的な意味')));
+  assert.ok(prompts[0].constraints.some(line=>line.includes('実際の文章')));
   assert.doesNotMatch(prompts[0].constraints.join('|'),/王さまとの友情|家事・買い物/, 'persona must come from Sheets only');
   assert.deepEqual(validateLiveForestOutput({
-    text:'（ねこはていねいにメモをおいた。）',
+    text:'（ねこは紙に書いて、そっとおいた。）',
     mark:{surface:'note',word:'おうさま、こっちはあぶないから、いっしょにとおろう。'},
     choices:['ついていく','メモをみる']
   },{characterId:'cat',requireLine:true}).mark,

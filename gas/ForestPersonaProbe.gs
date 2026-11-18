@@ -232,7 +232,14 @@ var ForestPersonaProbe = (() => {
     ...roster.filter((item) => item.mode === "ai" && item.voice && !item.voiceId).map((item) => ({ id: item.id, name: item.voiceLabel || item.name })),
     ...roster.filter((item) => item.mode === "twins" && item.voice).map((item) => ({ id: item.voiceId || item.id, name: item.voiceLabel || item.name }))
   ]);
-  var FOREST_DIALOGUE_PROTOCOL = "scene-dialogue-v22-profile2";
+  var FOREST_DISPLAY_NAMES = Object.freeze(Object.fromEntries(
+    roster.map(({ id, name }) => [id, name])
+  ));
+  function canonicalForestMention(text, speakers = []) {
+    if (typeof text !== "string" || speakers.some((speaker) => speaker.name.includes("\u30CF\u30C1\u30D3\u30FC"))) return text;
+    return text.replace(/(?<![ァ-ヿー])ハチビー(?![ァ-ヿー])/gu, FOREST_DISPLAY_NAMES.hachibee);
+  }
+  var FOREST_DIALOGUE_PROTOCOL = "scene-dialogue-v24-profile2";
   function forestMemoryBelongsToCharacter(memory, characterId) {
     const names = FOREST_ACTOR_NAMES[characterId] || [];
     return String(memory?.characters || "").split(/[\s,，、|;；]+/u).some((name) => names.includes(name));
@@ -1101,6 +1108,9 @@ var ForestPersonaProbe = (() => {
   // reading-shelf-firebase/book-forest-reflection-spotlight.mjs
   var GENERATORS = new Set(FOREST_AI_GENERATION_IDS);
   var MAX_FRESH_DAYS = 14;
+  var DAY_MS = 864e5;
+  var ARCHIVE_COOLDOWN = 7 * DAY_MS;
+  var forestReflectionArchiveCutoff = (now) => now - MAX_FRESH_DAYS * DAY_MS;
   var KEY = /^[a-z0-9]{1,12}$/u;
   var clean = (value, max) => String(value ?? "").trim().replace(/\s+/gu, " ").slice(0, max);
   var dayJapan = (now) => new Date(now + 9 * 36e5).toISOString().slice(0, 10);
@@ -1121,10 +1131,12 @@ var ForestPersonaProbe = (() => {
     const acknowledged = raw?.version === 2 ? validKeys(raw.acknowledged) : raw?.version === 1 && raw.seen && typeof raw.seen === "object" ? validKeys(Object.values(raw.seen).flatMap((x) => Array.isArray(x) ? x : [])) : [];
     const day = dayJapan(now);
     const active = raw?.version === 2 && raw.day === day;
+    const archiveUsage = Object.fromEntries(Object.entries(raw?.archiveUsage || {}).filter(([key2, at]) => KEY.test(key2) && Number.isFinite(at) && at > now - ARCHIVE_COOLDOWN && at <= now).slice(-80));
     return {
       version: 2,
       day,
       acknowledged,
+      archiveUsage,
       visits: active && Number.isSafeInteger(raw.visits) ? Math.max(0, raw.visits) : 0,
       lastReactionVisit: active && Number.isSafeInteger(raw.lastReactionVisit) ? Math.max(0, raw.lastReactionVisit) : 0,
       reactors: active ? Array.isArray(raw.reactors) ? raw.reactors.filter((x) => GENERATORS.has(x)) : [] : [],
@@ -1148,6 +1160,15 @@ var ForestPersonaProbe = (() => {
     if ((Array.isArray(cues) ? cues : []).some((cue) => cue?.approval === "approved" && cue.characterId === characterId && cue.kind === "story" && (cue.bookId === bookId || relatedMemories.has(cue.memoryId)))) return 1;
     return 0;
   }
+  function archiveScope({ characterId, books, catalog, cues, sourceMemoryId }, state) {
+    const memories = unlockedStoryMemories(books, catalog);
+    const sourceBook = memories.find((memory) => memory.id === sourceMemoryId)?.bookId;
+    return books.filter((book) => book?.status === "read" && !state.archiveUsage?.[hash(book.id)]).map((book) => ({ id: book.id, affinity: book.id === sourceBook ? 3 : affinityFor(book.id, characterId, memories, cues) })).filter((item) => item.affinity > 0).sort((a, b) => b.affinity - a.affinity || hash(state.day + ":" + characterId + ":" + a.id).localeCompare(hash(state.day + ":" + characterId + ":" + b.id))).slice(0, 2);
+  }
+  function mayReact(characterId, state) {
+    return GENERATORS.has(characterId) && !(state.reactors || []).includes(characterId) && // At least two ambient encounters between review conversations.
+    !(state.lastReactionVisit > 0 && (state.visits || 0) - state.lastReactionVisit < 2);
+  }
   function chooseForestReflectionSpotlight({
     characterId,
     books = [],
@@ -1155,11 +1176,10 @@ var ForestPersonaProbe = (() => {
     catalog = [],
     cues = [],
     state = {},
-    now = Date.now()
+    now = Date.now(),
+    archiveBooks = null
   } = {}) {
-    if (!GENERATORS.has(characterId) || !Array.isArray(reflections)) return null;
-    if ((state.reactors || []).includes(characterId)) return null;
-    if (state.lastReactionVisit > 0 && (state.visits || 0) - state.lastReactionVisit < 2) return null;
+    if (!mayReact(characterId, state) || !Array.isArray(reflections)) return null;
     const readBooks = new Map((Array.isArray(books) ? books : []).filter((book) => book?.status === "read" && typeof book.id === "string").map((book) => [book.id, book]));
     const memories = unlockedStoryMemories(books, catalog);
     const acknowledged = new Set(state.acknowledged || []);
@@ -1168,13 +1188,14 @@ var ForestPersonaProbe = (() => {
     for (const review of reflections) {
       if (!review || !readBooks.has(review.bookId) || !["verbatim", "parent-summary"].includes(review.attribution) || typeof review.id !== "string" || !review.id) continue;
       const at = stamp(review.createdAt);
-      const ageDays = (now - at) / 864e5;
-      if (ageDays < -1 || ageDays > MAX_FRESH_DAYS) continue;
+      const ageDays = (now - at) / DAY_MS;
+      const archiveAffinity = archiveBooks?.find((book2) => book2.id === review.bookId)?.affinity;
+      if (!at || (archiveBooks ? ageDays <= MAX_FRESH_DAYS || !archiveAffinity : ageDays < -1 || ageDays > MAX_FRESH_DAYS)) continue;
       const quote = clean(review.quote, 180);
       if (!quote) continue;
       const key = hash(review.bookId + ":" + review.id);
       const bookKey = hash(review.bookId);
-      if (acknowledged.has(key) || discussedBooks.has(bookKey)) continue;
+      if (discussedBooks.has(bookKey) || !archiveBooks && acknowledged.has(key)) continue;
       const book = readBooks.get(review.bookId);
       const affinity = affinityFor(review.bookId, characterId, memories, cues);
       const incident = memories.find((memory) => memory.bookId === review.bookId && forestMemoryBelongsToCharacter(memory, characterId)) || memories.find((memory) => memory.bookId === review.bookId);
@@ -1182,9 +1203,11 @@ var ForestPersonaProbe = (() => {
         key,
         bookKey,
         sourceBookId: review.bookId,
+        sourceReflectionId: review.id,
+        ...archiveBooks ? { kind: "reading-memory" } : {},
         createdAt: at,
         // Recency dominates, with a modest bonus for an actual character relation.
-        score: Math.round((MAX_FRESH_DAYS - ageDays) * 5) + affinity * 18,
+        score: archiveBooks ? archiveAffinity : Math.round((MAX_FRESH_DAYS - ageDays) * 5) + affinity * 18,
         bookTitle: clean(book.title, 80),
         summary: /^https:\/\/[^\s]+$/u.test(book.synopsisSourceUrl || "") ? clean(book.synopsis, 260) : "",
         storyContext: incident ? clean(incident.text, 160) : "",
@@ -1206,7 +1229,11 @@ var ForestPersonaProbe = (() => {
     storageKey = "forest-reflection-reactions-v1",
     now = () => Date.now()
   } = {}) {
-    function choose({ characterId, books = [], reflections = [], catalog = [], cues = [] } = {}) {
+    function archiveBooks(input) {
+      const state = load(storage, storageKey, now());
+      return mayReact(input.characterId, state) ? archiveScope(input, state) : [];
+    }
+    function choose({ characterId, books = [], reflections = [], catalog = [], cues = [], archiveBooks: archiveBooks2 = null } = {}) {
       return chooseForestReflectionSpotlight({
         characterId,
         books,
@@ -1214,7 +1241,8 @@ var ForestPersonaProbe = (() => {
         catalog,
         cues,
         state: load(storage, storageKey, now()),
-        now: now()
+        now: now(),
+        archiveBooks: archiveBooks2
       });
     }
     function visited() {
@@ -1225,23 +1253,24 @@ var ForestPersonaProbe = (() => {
     function displayed(characterId, spotlight) {
       if (!GENERATORS.has(characterId) || !KEY.test(spotlight?.key || "") || !KEY.test(spotlight?.bookKey || "")) return;
       const state = load(storage, storageKey, now());
-      state.acknowledged = validKeys([...state.acknowledged, spotlight.key]);
+      if (spotlight.kind === "reading-memory") state.archiveUsage[spotlight.bookKey] = now();
+      else state.acknowledged = validKeys([...state.acknowledged, spotlight.key]);
       state.books = validKeys([...state.books, spotlight.bookKey], 20);
       state.reactors = [.../* @__PURE__ */ new Set([...state.reactors, characterId])];
       state.lastReactionVisit = state.visits;
       save(storage, storageKey, state);
     }
-    return { choose, visited, displayed };
+    return { choose, archiveBooks, visited, displayed };
   }
 
   // reading-shelf-firebase/book-forest-daily-context.mjs
-  var DAY_MS = 864e5;
+  var DAY_MS2 = 864e5;
   var MAX_EVENTS = 24;
   var MAX_RECENT = 8;
   var ACTOR_NAMES = FOREST_ACTOR_NAMES;
   var RELATIONS = FOREST_RELATIONS;
   var dayJapan2 = (timestamp) => new Date(timestamp + 9 * 36e5).toISOString().slice(0, 10);
-  var dayNumber = (day) => Math.floor(Date.parse(day + "T00:00:00Z") / DAY_MS);
+  var dayNumber = (day) => Math.floor(Date.parse(day + "T00:00:00Z") / DAY_MS2);
   var clean2 = (value, max = 32) => String(value ?? "").trim().replace(/\s+/gu, " ").slice(0, max);
   function hash2(value) {
     let n = 2166136261;
@@ -1543,9 +1572,18 @@ var ForestPersonaProbe = (() => {
       const record = records.get(event.bookId + ":" + event.sourceId);
       return normalizeRecentForestReflection(event, record, { id: record?.id || "" });
     }).filter(Boolean);
+    const readIds = new Set(books.filter((book) => book.status === "read").map((book) => book.id));
+    const archiveReflections = [];
+    for (const [key, record] of records) {
+      const bookId = key.split(":")[0];
+      if (!readIds.has(bookId)) continue;
+      const review = normalizeRecentForestReflection({ bookId }, record, { id: record.id });
+      if (review) archiveReflections.push(review);
+    }
     return {
       books,
       reflections,
+      archiveReflections,
       snapshotAt: parseTime(syncAt),
       bookCount: books.length,
       readCount: books.filter((b) => b.status === "read").length,
@@ -1590,6 +1628,8 @@ var ForestPersonaProbe = (() => {
   var FORBIDDEN_SPEECH = /[「」『』]|しゃべ|おしゃべり|話し|話す|話しかけ|言っ|言う|声を出|ささや|つぶや|よびかけ|呼びかけ/iu;
   var INNER_VOICE = /心の(?:中|声)|頭の中|胸の内|内心|ひそかに(?:思|考)|と(?:思った|思う|思い|考えた|考える)/iu;
   var BARE_GREETING = /^（(?:こんにちは|こんばんは|おはよう(?:ございます)?|ありがとう(?:ございます)?|さようなら|おやすみ(?:なさい)?|どうも|はい|いいえ|おーい|ごめん(?:なさい)?)[！!？?。、]*）$/u;
+  var FOREST_WRITTEN_TURN_LIMIT = 80;
+  var WRITING_ACTION = /書(?:い|き|く|け)|か(?:い|き|く)[^。]{0,8}(?:見せ|みせ|差し出|さしだ)|(?:紙|地面|落ち葉|葉っぱ|はっぱ|おちば|字|文字)に[^。]{0,12}か(?:いた|き)|(?:地面|じめん)をなぞ/u;
   var PARENTHETICAL_ACTION = /^（[^（）\n\r]+）$/u;
   function validateForestGestureMark(raw) {
     if (raw === null || raw === void 0) return null;
@@ -1601,7 +1641,13 @@ var ForestPersonaProbe = (() => {
   function validateForestGestureText(raw) {
     if (typeof raw !== "string") return false;
     const text = raw.trim();
-    return text.length >= 8 && text.length <= 80 && PARENTHETICAL_ACTION.test(text) && !FORBIDDEN_SPEECH.test(text) && !INNER_VOICE.test(text) && !BARE_GREETING.test(text) && !/[{}<>]/u.test(text);
+    return text.length >= 8 && text.length <= FOREST_WRITTEN_TURN_LIMIT && PARENTHETICAL_ACTION.test(text) && !FORBIDDEN_SPEECH.test(text) && !INNER_VOICE.test(text) && !BARE_GREETING.test(text) && !/[{}<>]/u.test(text);
+  }
+  function validateForestWrittenTurn(rawText, rawMark) {
+    if (!validateForestGestureText(rawText)) return null;
+    const text = rawText.trim(), mark = validateForestGestureMark(rawMark);
+    if (mark === void 0 || Boolean(mark) !== WRITING_ACTION.test(text) || text.length + (mark?.word.length || 0) > FOREST_WRITTEN_TURN_LIMIT) return null;
+    return { text, mark };
   }
 
   // reading-shelf-firebase/book-forest-live-dialogue.mjs
@@ -1612,7 +1658,7 @@ var ForestPersonaProbe = (() => {
   var ACTION_WRITING_IDS2 = new Set(FOREST_ACTION_WRITING_IDS);
   var safeEnd = (id, comma = false) => ACTION_WRITING_IDS2.has(id) ? "\uFF08\u306D\u3053\u306F\u3057\u3063\u307D\u3092\u3086\u3063\u304F\u308A\u3075\u3063\u305F\u3002\uFF09" : GOODBYE[id] || (comma ? "\u307E\u305F\u3001\u68EE\u3067\u4F1A\u304A\u3046\u306D\u3002" : "\u307E\u305F\u68EE\u3067\u4F1A\u304A\u3046\u306D\u3002");
   var WRONG_FIRST_PERSON = FOREST_WRONG_FIRST_PERSON;
-  var FOREST_PROMPT_VERSION = "forest-scene-generation-v23-profile2";
+  var FOREST_PROMPT_VERSION = "forest-scene-generation-v24-profile2";
   var PROMPT_VERSION = FOREST_PROMPT_VERSION;
   var clean3 = (value) => typeof value === "string" ? value.trim().replace(/\s+/gu, " ") : "";
   function readJson(storage, key, fallback) {
@@ -1643,7 +1689,6 @@ var ForestPersonaProbe = (() => {
   function validLine2(characterId, text) {
     const line = clean3(text);
     if (line.length < 2 || line.length > 90 || /[{}<>]/u.test(line)) return false;
-    if (ACTION_WRITING_IDS2.has(characterId)) return validateForestGestureText(line);
     const name = SELF_NAMES2[characterId];
     if (name && new RegExp("(?:^|[\u3002\uFF01\uFF1F\u3001\u300C\u300E\\s])" + name + "[\u306F\u304C]").test(line)) return false;
     if ((WRONG_FIRST_PERSON[characterId] || []).some((word) => new RegExp("(?:^|[\u3002\uFF01\uFF1F\u3001\u300C\u300E\\s])" + word + "(?:\u306F|\u3082|\u304C|\u306E|\u3001|\u3063\u3066|\u306A\u3089)").test(line))) return false;
@@ -1659,18 +1704,19 @@ var ForestPersonaProbe = (() => {
       return null;
     }
     if (!data || typeof data !== "object" || !CHARACTERS2.has(characterId)) return null;
-    const text = clean3(data.text);
+    const gesture = ACTION_WRITING_IDS2.has(characterId);
+    const text = gesture ? data.text : canonicalForestMention(clean3(data.text), context.speakers);
     if (unsafeForestForaging(data, context)) return null;
     const multi = MULTI_SPEAKER.has(characterId);
-    const turns = multi ? validateTwinTurns(data.turns) : null;
-    if (multi && !turns || !multi && requireLine && !validLine2(characterId, text)) return null;
-    const line = turns ? { text: turns.map((turn) => turn.text).join(" "), turns } : { text };
-    const gesture = ACTION_WRITING_IDS2.has(characterId);
-    const mark = gesture ? validateForestGestureMark(data.mark) : null;
-    if (gesture && mark === void 0) return null;
+    const rawTurns = multi ? validateTwinTurns(data.turns) : null;
+    const turns = rawTurns?.map((turn) => ({ ...turn, text: canonicalForestMention(turn.text, context.speakers) }));
+    const written = gesture ? validateForestWrittenTurn(text, data.mark) : null;
+    if (multi && !turns || gesture && !written || !multi && !gesture && requireLine && !validLine2(characterId, text)) return null;
+    const line = turns ? { text: turns.map((turn) => turn.text).join(" "), turns } : { text: written?.text ?? text };
+    const mark = written?.mark;
     if (closing) return { ...line, labels: [], ...mark ? { mark } : {} };
     const candidates = Array.isArray(data.choices) ? data.choices.slice(0, 3) : [];
-    const labels = [...new Set(candidates.map((choice) => clean3(typeof choice === "string" ? choice : choice?.label)).filter((label) => label.length >= 2 && label.length <= 24 && !/[\r\n{}<>「」]/u.test(label)))].slice(0, 2);
+    const labels = [...new Set(candidates.map((choice) => canonicalForestMention(clean3(typeof choice === "string" ? choice : choice?.label), context.speakers)).filter((label) => label.length >= 2 && label.length <= 24 && !/[\r\n{}<>「」]/u.test(label)))].slice(0, 2);
     if (labels.length < 2) {
       if (!requireLine) return null;
       return { ...line, labels: gesture ? ["\u3082\u3046\u3059\u3053\u3057\u307F\u308B", "\u307E\u305F\u306D"] : ["\u3082\u3046\u5C11\u3057\u805E\u304F", "\u307E\u305F\u306D"], ...mark ? { mark } : {} };
@@ -1704,11 +1750,13 @@ var ForestPersonaProbe = (() => {
     recentLines = [],
     reviewSpotlight = null,
     situation = null,
-    twinNames = null
+    twinNames = null,
+    repliesLeft = closing ? 0 : 2
   }) {
     const guide = forestCharacterVoiceGuide(characterProfile);
     const npc = {
       id: characterId,
+      displayName: FOREST_DISPLAY_NAMES[characterId],
       voice: guide,
       profileSchemaVersion: 2,
       profileRevision: guide ? characterProfile.revision : "",
@@ -1718,13 +1766,15 @@ var ForestPersonaProbe = (() => {
     const context = {
       npcLine: "",
       sourceKind,
+      repliesLeft,
+      npcDisplayNames: FOREST_DISPLAY_NAMES,
       ...twinNames ? { speakers: [{ slot: 1, name: twinNames.firstName }, { slot: 2, name: twinNames.secondName }] } : {},
       chosenLabel: clean3(chosenLabel).slice(0, 24),
       ...situation ? { situation } : {},
       recentTurns: history.slice(-4),
       ...topic ? { topic } : {},
       ...reviewSpotlight ? { readerReflection: Object.fromEntries(
-        Object.entries(reviewSpotlight).filter(([key]) => !["key", "bookKey", "sourceBookId"].includes(key))
+        Object.entries(reviewSpotlight).filter(([key]) => !["key", "bookKey", "sourceBookId", "sourceReflectionId"].includes(key))
       ) } : {},
       ...dailyContext ? { today: {
         scene: promptScene(dailyContext.scene, sourceKind),
@@ -1735,32 +1785,32 @@ var ForestPersonaProbe = (() => {
       } } : {},
       ...recentLines.length ? { avoidRecentLines: recentLines.slice(-3) } : {}
     };
+    const finishTask = "\u9078\u3093\u3060\u8A00\u8449\u3084\u884C\u52D5\u306B\u3001\u305D\u306E\u5834\u3067\u8D77\u304D\u308B\u5C0F\u3055\u306A\u7D50\u679C\u3084\u5177\u4F53\u7684\u306A\u8FD4\u4E8B\u3092\u8FD4\u3057\u3066\u7D42\u3048\u308B\u3002\u6B21\u306E\u884C\u52D5\u3092\u59CB\u3081\u3066\u3059\u3050\u5225\u308C\u306A\u3044\u3002\u9759\u304B\u306A\u4F59\u97FB\u3067\u3082\u3088\u3044";
+    const choiceTask = "\u5B50\u3069\u3082\u306E\u8FD4\u7B54\u5019\u88DC\u306F2\u500B\u3001\u540416\u5B57\u4EE5\u5185\u3002\u6B8B\u308A\u306E\u8FD4\u7B54\u3067\u5FDC\u3048\u3089\u308C\u308B\u8A00\u8449\u3084\u884C\u52D5\u3092\u9078\u3073\u3001\u79FB\u52D5\u3084\u5F8C\u3067\u5B9F\u884C\u3059\u308B\u7D04\u675F\u3092\u524D\u63D0\u306B\u3057\u306A\u3044";
     if (nonverbal) return {
       mode,
       closing,
       // Different situations demand different reactions. Do not make an
       // incidental physical gesture the only answer to a reader's reflection.
-      task: closing ? "\u3053\u306E\u5834\u306E\u3084\u308A\u53D6\u308A\u3092\u81EA\u7136\u306B\u7D42\u3048\u308B\u3002\u4F59\u97FB\u3084\u9759\u304B\u306A\u9593\u3067\u3082\u3088\u3044" : mode === "reply" ? "\u76F8\u624B\u304C\u9078\u3093\u3060\u3053\u3068\u3068\u76F4\u524D\u306E\u884C\u52D5\u3092\u8E0F\u307E\u3048\u3001\u540C\u3058\u5408\u56F3\u306E\u7E70\u308A\u8FD4\u3057\u3067\u306F\u306A\u3044\u6B21\u306E\u53CD\u5FDC\u3092\u3059\u308B" : reviewSpotlight ? "readerReflection\u306E\u5177\u4F53\u7684\u306A\u5185\u5BB9\u3092\u53D7\u3051\u6B62\u3081\u3001\u305D\u306E\u7740\u773C\u70B9\u306B\u4EBA\u7269\u8A2D\u5B9A\u3089\u3057\u304F\u7121\u8A00\u3067\u53CD\u5FDC\u3059\u308B\u3002\u5225\u4F5C\u54C1\u306A\u3089\u7B2C\u4E09\u8005\u3068\u3057\u3066\u63A5\u3059\u308B" : sourceKind === "story" ? "\u78BA\u8A8D\u6E08\u307F\u306E\u65E2\u8AAD\u306E\u51FA\u6765\u4E8B\u306F\u904E\u53BB\u306E\u8A18\u61B6\u3068\u3057\u3066\u53D7\u3051\u6B62\u3081\u3001\u4ECA\u306E\u68EE\u3067\u518D\u6F14\u305B\u305A\u3001\u4EBA\u7269\u8A2D\u5B9A\u306B\u5408\u3046\u81EA\u7136\u306A\u53CD\u5FDC\u3092\u3059\u308B" : sourceKind === "relay" ? "\u524D\u306E\u4EBA\u7269\u304B\u3089\u306E\u8A71\u984C\u306B\u672C\u4EBA\u3089\u3057\u304F\u53CD\u5FDC\u3059\u308B\u3002\u76F4\u63A5\u805E\u3044\u305F\u3075\u308A\u3092\u3057\u306A\u3044" : sourceKind === "meet" ? "\u521D\u5BFE\u9762\u306E\u76F8\u624B\u306B\u3001\u4EBA\u7269\u8A2D\u5B9A\u306B\u5408\u3046\u7121\u8A00\u306E\u521D\u3081\u306E\u53CD\u5FDC\u3092\u3059\u308B" : "\u3053\u306E\u5834\u9762\u306E\u610F\u5473\u3068\u4EBA\u7269\u8A2D\u5B9A\u306B\u5408\u3046\u81EA\u7136\u306A\u53CD\u5FDC\u3092\u3059\u308B",
+      task: closing ? finishTask : mode === "reply" ? "\u76F8\u624B\u306E\u9078\u629E\u306B\u3001\u5834\u306B\u5408\u3046\u5177\u4F53\u7684\u306A\u8FD4\u7B54\u3084\u884C\u52D5\u3092\u8FD4\u3059\u3002\u524D\u306E\u6587\u5B57\u3084\u8EAB\u632F\u308A\u3092\u7E70\u308A\u8FD4\u3055\u306A\u3044" : reviewSpotlight ? "readerReflection\u306E\u5177\u4F53\u7684\u306A\u5185\u5BB9\u3092\u53D7\u3051\u6B62\u3081\u3001\u305D\u306E\u7740\u773C\u70B9\u306B\u4EBA\u7269\u8A2D\u5B9A\u3089\u3057\u304F\u7121\u8A00\u3067\u53CD\u5FDC\u3059\u308B\u3002\u5225\u4F5C\u54C1\u306A\u3089\u7B2C\u4E09\u8005\u3068\u3057\u3066\u63A5\u3059\u308B" : sourceKind === "story" ? "\u78BA\u8A8D\u6E08\u307F\u306E\u65E2\u8AAD\u306E\u51FA\u6765\u4E8B\u306F\u904E\u53BB\u306E\u8A18\u61B6\u3068\u3057\u3066\u53D7\u3051\u6B62\u3081\u3001\u4ECA\u306E\u68EE\u3067\u518D\u6F14\u305B\u305A\u3001\u4EBA\u7269\u8A2D\u5B9A\u306B\u5408\u3046\u81EA\u7136\u306A\u53CD\u5FDC\u3092\u3059\u308B" : sourceKind === "relay" ? "\u524D\u306E\u4EBA\u7269\u304B\u3089\u306E\u8A71\u984C\u306B\u672C\u4EBA\u3089\u3057\u304F\u53CD\u5FDC\u3059\u308B\u3002\u76F4\u63A5\u805E\u3044\u305F\u3075\u308A\u3092\u3057\u306A\u3044" : sourceKind === "meet" ? "\u521D\u5BFE\u9762\u306E\u76F8\u624B\u306B\u3001\u4EBA\u7269\u8A2D\u5B9A\u306B\u5408\u3046\u7121\u8A00\u306E\u521D\u3081\u306E\u53CD\u5FDC\u3092\u3059\u308B" : "\u3053\u306E\u5834\u9762\u306E\u610F\u5473\u3068\u4EBA\u7269\u8A2D\u5B9A\u306B\u5408\u3046\u81EA\u7136\u306A\u53CD\u5FDC\u3092\u3059\u308B",
       npc,
       context,
       constraints: [
         "\u6700\u512A\u5148\u306Fnpc.voice\u306E\u4EBA\u7269\u50CF\u30FB\u95A2\u4FC2\u6027\u30FB\u52D5\u6A5F\u30FB\u3075\u308B\u307E\u3044\u3002\u8A2D\u5B9A\u306E\u8AAC\u660E\u3084\u4E00\u822C\u7684\u306A\u6559\u8A13\u3067\u4EE3\u7528\u3057\u306A\u3044",
-        "\u307E\u305A\u76F8\u624B\u306E\u8A00\u8449\u30FB\u76EE\u306E\u524D\u306E\u51FA\u6765\u4E8B\u306E\u4F55\u306B\u53CD\u5FDC\u3059\u308B\u304B\u3092\u6C7A\u3081\u308B\u3002\u8EAB\u632F\u308A\u3060\u3051\u3001\u9759\u304B\u306B\u898B\u5B88\u308B\u3001\u4F55\u304B\u3092\u8A66\u3059\u3001\u9053\u5177\u3084\u6587\u5B57\u3067\u4F1D\u3048\u308B\u7B49\u3001\u72B6\u6CC1\u306B\u5408\u3046\u8868\u73FE\u3092\u81EA\u7531\u306B\u9078\u3076\u3002\u52D5\u304F\u3053\u3068\u3084\u89E3\u6C7A\u3059\u308B\u3053\u3068\u3092\u5F37\u5236\u3057\u306A\u3044",
+        "\u8CEA\u554F\u30FB\u5197\u8AC7\u30FB\u63D0\u6848\u30FB\u8FD4\u4E8B\u306A\u3069\u3001\u8A00\u8449\u3067\u4F1D\u3048\u305F\u3044\u3068\u304D\u306F\u5B9F\u969B\u306E\u53F0\u8A5E\u3068\u3057\u3066\u66F8\u304F\u3002\u9759\u304B\u306B\u904E\u3054\u3059\u5834\u9762\u3067\u306F\u8EAB\u632F\u308A\u3060\u3051\u3067\u3088\u3044",
         "readerReflection\u304C\u3042\u308B\u5834\u5408\u306F\u3001\u305D\u306E\u611F\u60F3\u306E\u5177\u4F53\u7684\u306A\u7740\u773C\u70B9\u306B\u53CD\u5FDC\u3059\u308B\u3002\u4F55\u3092\u805E\u3044\u3066\u3082\u540C\u3058\u9A5A\u304D\u3084\u8EAB\u632F\u308A\u3067\u6E08\u307E\u305B\u305A\u3001\u672C\u4EBA\u306E\u767A\u8A00\u3068\u4FDD\u8B77\u8005\u8981\u7D04\u3092\u533A\u5225\u3057\u3001\u5225\u4F5C\u54C1\u306E\u51FA\u6765\u4E8B\u3092\u81EA\u5206\u306E\u7D4C\u9A13\u306B\u3057\u306A\u3044",
-        "\u4EBA\u9593\u306E\u8A00\u8449\u3092\u58F0\u306B\u51FA\u3055\u305A\u3001\u5FC3\u306E\u58F0\u30FB\u5F15\u7528\u7B26\u4ED8\u304D\u306E\u767A\u8A71\u3082\u4F5C\u3089\u306A\u3044\u3002text\u306B\u306F\u5168\u89D2\u4E38\u62EC\u5F27\uFF08 \uFF09\u306B\u56F2\u3093\u306080\u5B57\u4EE5\u5185\u306E\u72B6\u6CC1\u30FB\u52D5\u4F5C\u63CF\u5199\u3060\u3051\u3092\u66F8\u304F",
-        "mark\u306F\u66F8\u304D\u6587\u5B57\u3092\u51FA\u3059\u5834\u9762\u3060\u3051\u6307\u5B9A\u3059\u308B\u3002\u66F8\u304B\u306A\u3044\u5834\u9762\u306Fmark:null\u3002\u7279\u5B9A\u306E\u8EAB\u632F\u308A\u3084\u66F8\u304D\u6587\u5B57\u3092\u6BCE\u56DE\u7E70\u308A\u8FD4\u3059\u5F62\u5F0F\u306B\u3057\u306A\u3044",
-        '\u66F8\u304F\u306A\u3089mark={surface:"note"|"ground"|"leaf",word:"\u7528\u4EF6\u306E\u4F1D\u308F\u308B\u77ED\u3044\u6587\u7AE0"}\u3002\u6587\u5B57\u306E\u5185\u5BB9\u3068\u884C\u52D5\u63CF\u5199\u306F\u91CD\u8907\u3055\u305B\u305A\u3001text\u306B\u66F8\u304F\u5834\u9762\u3092\u81EA\u7136\u306B\u63CF\u3044\u3066\u3088\u3044',
+        "\u4EBA\u9593\u306E\u8A00\u8449\u3092\u58F0\u306B\u51FA\u3055\u305A\u3001\u5FC3\u306E\u58F0\u30FB\u5F15\u7528\u7B26\u4ED8\u304D\u306E\u767A\u8A71\u3082\u4F5C\u3089\u306A\u3044\u3002text\u306B\u306F\u5168\u89D2\u4E38\u62EC\u5F27\uFF08 \uFF09\u306B\u56F2\u3093\u3060\u77ED\u3044\u884C\u52D5\u3060\u3051\u3092\u66F8\u304F",
+        `\u66F8\u304F\u306A\u3089text\u306B\u77ED\u304F\u66F8\u304F\u52D5\u4F5C\u3092\u63CF\u304D\u3001mark\u306B\u5B9F\u969B\u306E\u6587\u7AE0\u3092\u5FC5\u305A\u5165\u308C\u308B\u3002\u4E21\u65B9\u5408\u308F\u305B\u3066${FOREST_WRITTEN_TURN_LIMIT}\u5B57\u4EE5\u5185\u3002\u66F8\u304B\u306A\u3044\u5834\u5408\u306Fmark:null`,
         "mark.word\u306F1\u301C48\u6587\u5B57\u3001\u3072\u3089\u304C\u306A\u30FB\u9577\u97F3\u7B26\u30FB\u5C0F\u5B66\u68211\u5E74\u751F\u306E\u6F22\u5B57\u30FB\u300C\u3001\u3002\uFF01\uFF1F\u300D\u3060\u3051\u3002\u30AB\u30BF\u30AB\u30CA\u30FB\u4E0A\u7D1A\u6F22\u5B57\u30FB\u6570\u5B57\u30FB\u5F15\u7528\u7B26\u30FB\u6539\u884C\u306F\u4F7F\u308F\u306A\u3044",
         "1\u5E74\u751F\u306E\u6F22\u5B5780\u5B57\uFF1A\u4E00\u53F3\u96E8\u5186\u738B\u97F3\u4E0B\u706B\u82B1\u8C9D\u5B66\u6C17\u4E5D\u4F11\u7389\u91D1\u7A7A\u6708\u72AC\u898B\u4E94\u53E3\u6821\u5DE6\u4E09\u5C71\u5B50\u56DB\u7CF8\u5B57\u8033\u4E03\u8ECA\u624B\u5341\u51FA\u5973\u5C0F\u4E0A\u68EE\u4EBA\u6C34\u6B63\u751F\u9752\u5915\u77F3\u8D64\u5343\u5DDD\u5148\u65E9\u8349\u8DB3\u6751\u5927\u7537\u7AF9\u4E2D\u866B\u753A\u5929\u7530\u571F\u4E8C\u65E5\u5165\u5E74\u767D\u516B\u767E\u6587\u6728\u672C\u540D\u76EE\u7ACB\u529B\u6797\u516D",
-        "\u66F8\u3044\u305F\u6587\u5B57\u306B\u306F\u72B6\u6CC1\u306B\u6CBF\u3046\u5177\u4F53\u7684\u306A\u610F\u5473\u3092\u6301\u305F\u305B\u308B\u3002\u77ED\u3044\u8A9E\u3067\u3082\u8907\u6570\u6587\u3067\u3082\u3088\u3044\u304C\u3001\u8A2D\u5B9A\u306B\u306A\u3044\u77E5\u6027\u306E\u4E0A\u9650\u3092\u6587\u5B57\u6570\u304B\u3089\u63A8\u5B9A\u3057\u306A\u3044",
         "\u539F\u4F5C\u306B\u306A\u3044\u51FA\u6765\u4E8B\u3092\u4E8B\u5B9F\u3068\u305B\u305A\u3001\u5B50\u3069\u3082\u306E\u5B9F\u969B\u306E\u8A00\u8449\u3084\u6C17\u6301\u3061\u3092\u634F\u9020\u3057\u306A\u3044\u3002\u5225\u306ENPC\u306E\u4F1A\u8A71\u3092\u76F4\u63A5\u805E\u3044\u305F\u3075\u308A\u3092\u3057\u306A\u3044",
-        "\u8FD4\u7B54\u5019\u88DC\u306F\u5B50\u3069\u3082\u304C\u53D6\u308B\u884C\u52D5\u30922\u3064\u3001\u540416\u5B57\u4EE5\u5185\u3002\u3053\u306ENPC\u306B\u767A\u8A71\u3055\u305B\u308B\u9078\u629E\u80A2\u3067\u306F\u306A\u304F\u3001\u5834\u9762\u3078\u306E\u50CD\u304D\u304B\u3051\u30FB\u898B\u5B88\u308B\u30FB\u5148\u3078\u9032\u3080\u7B49\u304B\u3089\u81EA\u7136\u306B\u9078\u3076\u3002\u500B\u4EBA\u60C5\u5831\u3092\u5C0B\u306D\u306A\u3044",
+        choiceTask,
         ...closing ? ["\u7D42\u4E86\u6642\u306F\u65B0\u3057\u3044\u554F\u3044\u3092\u51FA\u3055\u305A\u3001choices:[]\u306B\u3059\u308B"] : []
       ],
       output: { format: "JSON", shape: {
-        text: "\uFF08\u305D\u306E\u4EBA\u7269\u306E\u7121\u8A00\u306E\u884C\u52D5\u3092\u8868\u305980\u5B57\u4EE5\u5185\u306E\u63CF\u5199\uFF09",
+        text: "\uFF08\u77ED\u3044\u884C\u52D5\u63CF\u5199\uFF09",
         mark: "null\u307E\u305F\u306F{surface:note|ground|leaf,word:\u8A31\u53EF\u6587\u5B57\u3060\u3051\u306E1\u301C48\u6587\u5B57}",
-        choices: closing ? [] : ["\u5B50\u3069\u3082\u306E\u884C\u52D5A", "\u5B50\u3069\u3082\u306E\u884C\u52D5B"]
+        choices: closing ? [] : ["\u5B50\u3069\u3082\u306E\u8FD4\u7B54A", "\u5B50\u3069\u3082\u306E\u8FD4\u7B54B"]
       } }
     };
     const firstLineTask = {
@@ -1773,7 +1823,7 @@ var ForestPersonaProbe = (() => {
     return {
       mode,
       closing,
-      task: closing ? "\u9078\u629E\u3055\u308C\u305F\u554F\u3044\u3084\u983C\u307F\u3078\u306E\u5177\u4F53\u7684\u306A\u7B54\u3048\u3092\u5148\u306B\u8FD4\u3057\u3001\u305D\u308C\u304B\u3089\u81EA\u7136\u306B\u7D42\u3048\u308B\u3002\u7D04\u675F\u3057\u305F\u5185\u5BB9\u3092\u5148\u9001\u308A\u3057\u306A\u3044" : mode === "reply" ? "\u76F4\u524D\u306E\u4F1A\u8A71\u3068\u9078\u3070\u308C\u305F\u8A00\u8449\u3084\u884C\u52D5\u3092\u53D7\u3051\u3001\u6B21\u306E\u53CD\u5FDC\u3092\u8FD4\u3059\u3002\u554F\u3044\u306E\u5FA9\u5531\u3060\u3051\u3067\u6E08\u307E\u305B\u306A\u3044" : reviewSpotlight ? "\u672C\u306E\u611F\u60F3\u306BNPC\u672C\u4EBA\u3089\u3057\u304F\u3001\u611F\u60F3\u306E\u5177\u4F53\u7684\u306A\u4E00\u7B87\u6240\u306B\u53CD\u5FDC\u3057\u3001\u8FD4\u7B54\u5019\u88DC2\u3064\u3092\u4F5C\u308B\u3002\u5225\u4F5C\u54C1\u306A\u3089\u7B2C\u4E09\u8005\u306E\u7ACB\u5834\u3092\u5B88\u308B" : sourceKind === "ambient" && situation?.focus === "character" ? "\u4EBA\u7269\u8A2D\u5B9A\u306E\u95A2\u5FC3\u30FB\u666E\u6BB5\u306E\u884C\u52D5\u304B\u3089\u3001\u672C\u4EBA\u3089\u3057\u3044\u96D1\u8AC7\u3084\u5197\u8AC7\u3068\u8FD4\u7B54\u5019\u88DC2\u3064\u3092\u4F5C\u308B" : firstLineTask[sourceKind] || firstLineTask.ambient,
+      task: closing ? finishTask : mode === "reply" ? "\u76F4\u524D\u306E\u4F1A\u8A71\u3068\u9078\u3070\u308C\u305F\u8A00\u8449\u3084\u884C\u52D5\u3092\u53D7\u3051\u3001\u6B21\u306E\u53CD\u5FDC\u3092\u8FD4\u3059\u3002\u554F\u3044\u306E\u5FA9\u5531\u3060\u3051\u3067\u6E08\u307E\u305B\u306A\u3044" : reviewSpotlight ? "\u672C\u306E\u611F\u60F3\u306BNPC\u672C\u4EBA\u3089\u3057\u304F\u3001\u611F\u60F3\u306E\u5177\u4F53\u7684\u306A\u4E00\u7B87\u6240\u306B\u53CD\u5FDC\u3057\u3001\u8FD4\u7B54\u5019\u88DC2\u3064\u3092\u4F5C\u308B\u3002\u5225\u4F5C\u54C1\u306A\u3089\u7B2C\u4E09\u8005\u306E\u7ACB\u5834\u3092\u5B88\u308B" : sourceKind === "ambient" && situation?.focus === "character" ? "\u4EBA\u7269\u8A2D\u5B9A\u306E\u95A2\u5FC3\u30FB\u666E\u6BB5\u306E\u884C\u52D5\u304B\u3089\u3001\u672C\u4EBA\u3089\u3057\u3044\u96D1\u8AC7\u3084\u5197\u8AC7\u3068\u8FD4\u7B54\u5019\u88DC2\u3064\u3092\u4F5C\u308B" : firstLineTask[sourceKind] || firstLineTask.ambient,
       npc,
       context,
       constraints: [
@@ -1784,12 +1834,12 @@ var ForestPersonaProbe = (() => {
         "\u6700\u512A\u5148\u306FNPC\u672C\u4EBA\u3089\u3057\u3044\u8A00\u8449\u3001\u9593\u3001\u53CD\u5FDC\u3001\u884C\u52D5\u3002\u60C5\u5831\u91CF\u3084\u6DF1\u3044\u8A71\u3092\u6C42\u3081\u305A\u3001\u601D\u8003\u306E\u7A2E\u304B\u3089\u8CEA\u554F\u30FB\u6559\u8A13\u30FB\u7ACB\u6D3E\u306A\u6C17\u3065\u304D\u3092\u5168\u54E1\u306B\u5F37\u3044\u306A\u3044",
         "\u5B8C\u6210\u6E08\u307F\u53F0\u672C\u3092\u53C2\u7167\u305B\u305A\u3001\u4EBA\u7269\u50CF\u30FB\u76EE\u306E\u524D\u306E\u72B6\u6CC1\u30FB\u8A31\u53EF\u3055\u308C\u305F\u65E2\u8AAD\u4E8B\u5B9F\u304B\u3089\u81EA\u7136\u306A\u767A\u8A71\u3092\u65B0\u898F\u306B\u4F5C\u308B",
         "NPC\u306E\u8FD4\u4E8B\u306F\u81EA\u7136\u306A\u4E00\u8A00\u301C2\u6587\u306765\u5B57\u4EE5\u5185\u3002\u524D\u306E\u767A\u8A00\u3092\u7E70\u308A\u8FD4\u3055\u305A\u3001\u8A2D\u5B9A\u306E\u8AAC\u660E\u3092\u4F1A\u8A71\u306B\u6DF7\u305C\u306A\u3044",
-        "\u8FD4\u7B54\u5019\u88DC\u306F2\u500B\u3001\u540416\u5B57\u4EE5\u5185\u3002\u3042\u308A\u304D\u305F\u308A\u306A\u76F8\u3065\u3061\u3084\u7121\u610F\u5473\u306A\u8CEA\u554F\u3092\u7D9A\u3051\u306A\u3044",
+        choiceTask,
         "\u9078\u629E\u80A2\u306F\u30B2\u30FC\u30E0\u4E0A\u306E\u53CD\u5FDC\u3067\u3042\u308A\u5B50\u3069\u3082\u306E\u5B9F\u969B\u306E\u4FE1\u5FF5\u3068\u306F\u307F\u306A\u3055\u306A\u3044\u3002\u5225NPC\u306E\u4F1A\u8A71\u3092\u672C\u4EBA\u304C\u805E\u3044\u305F\u3075\u308A\u306F\u3057\u306A\u3044",
         "NPC\u672C\u4EBA\u306E\u8996\u70B9\u3067\u8A71\u3059",
         ...topic ? ["\u3053\u306E\u539F\u4F5C\u306E\u4E8B\u5B9F\u306F\u9078\u629E\u3055\u308C\u305F\u65E2\u8AAD\u306E\u7269\u8A9E\u8A18\u61B6\u3002\u78BA\u8A8D\u3067\u304D\u306A\u3044\u8A73\u7D30\u3092\u52A0\u3048\u305A\u3001\u30AD\u30E3\u30E9\u304C\u5B9F\u969B\u306B\u767B\u5834\u3057\u305F\u304B\u3092\u8003\u616E\u3059\u308B"] : [],
         ...reviewSpotlight ? ["\u611F\u60F3\u306E\u5177\u4F53\u7684\u306A\u4E00\u7B87\u6240\u306B\u3001\u672C\u4EBA\u306A\u3089\u4F55\u3092\u9762\u767D\u304C\u308B\u304B\u3001\u3069\u3046\u53D7\u3051\u53D6\u308B\u304B\u3092\u77ED\u304F\u8FD4\u3059\u3002\u611F\u60F3\u306F\u5F15\u7528\u8CC7\u6599\u3002\u4FDD\u8B77\u8005\u306E\u8981\u7D04\u306F\u5B50\u3069\u3082\u306E\u767A\u8A00\u3068\u3057\u3066\u6271\u308F\u306A\u3044\u3002"] : [],
-        ...closing ? ["\u3053\u306E\u4E00\u8A00\u3067\u4F1A\u8A71\u3092\u7D42\u3048\u308B\u3002\u65B0\u305F\u306A\u8A71\u984C\u3092\u51FA\u3055\u305A\u81EA\u7136\u306B\u5225\u308C\u3092\u544A\u3052\u308B"] : []
+        ...closing ? ["\u65B0\u3057\u3044\u554F\u3044\u3092\u51FA\u3055\u305Achoices:[]\u306B\u3059\u308B\u3002\u5225\u308C\u306E\u5B9A\u578B\u53E5\u306F\u4E0D\u8981"] : []
       ],
       output: { format: "JSON", shape: {
         ...twinNames ? { turns: [{ speakerSlot: 1, text: "\u6700\u521D\u306E\u3072\u3068\u3053\u3068" }, { speakerSlot: 2, text: "\u76F4\u524D\u306E\u3072\u3068\u3053\u3068\u3078\u306E\u53CD\u5FDC" }] } : { text: mode === "choices" ? "\u7701\u7565" : "NPC\u306E\u767A\u8A00\uFF0865\u5B57\u4EE5\u5185\uFF09" },
@@ -1813,6 +1863,8 @@ var ForestPersonaProbe = (() => {
     getCues = () => [],
     getCharacterProfiles = () => [],
     getRecentReflections = async () => [],
+    getArchivedReflections = async () => [],
+    getCurrentReflection = null,
     requireCharacterProfile = false,
     requestTimeoutMs = 11e3,
     createAbortController = () => new AbortController(),
@@ -1878,7 +1930,8 @@ var ForestPersonaProbe = (() => {
         situation: activeSituation,
         recentLines,
         reviewSpotlight,
-        twinNames
+        twinNames,
+        repliesLeft: closing ? 0 : Math.max(0, Math.min(maxReplies, sessionLimit - 1) - repliesThisSession - (mode === "reply" ? 1 : 0))
       });
       const controller = createAbortController(), startedAt = now();
       inflight = { controller, characterId, mode, startedAt };
@@ -1953,7 +2006,7 @@ var ForestPersonaProbe = (() => {
       };
       return twinDialogueFrame(first, twinNames, { next: second });
     }
-    const historyLine = (result) => result.turns ? { turns: result.turns } : { npc: clean3(result.text).slice(0, 150) };
+    const historyLine = (result) => result.turns ? { turns: result.turns } : { npc: clean3(result.text).slice(0, 150), ...result.mark ? { written: result.mark.word } : {} };
     function decorate(characterId, result, meta = {}) {
       const { text, labels } = result;
       const relay = meta.relayChoice;
@@ -1974,8 +2027,8 @@ var ForestPersonaProbe = (() => {
     async function sourceStillAllowed({ reviewEvidence, sourceMemoryId, dailySourceMemoryId }) {
       try {
         if (reviewEvidence) {
-          const [books, reflections] = await Promise.all([getBooks(), getRecentReflections()]);
-          return isCurrentForestReflection(reviewEvidence, { books, reflections });
+          const reflections = getCurrentReflection ? [await getCurrentReflection(reviewEvidence.sourceBookId, reviewEvidence.sourceReflectionId)].filter(Boolean) : reviewEvidence.kind === "reading-memory" ? await getArchivedReflections([reviewEvidence.sourceBookId], forestReflectionArchiveCutoff(now())) : await getRecentReflections();
+          return isCurrentForestReflection(reviewEvidence, { books: await getBooks(), reflections });
         }
         const memoryId = sourceMemoryId || dailySourceMemoryId;
         if (memoryId) return unlockedStoryMemories(await getBooks(), await getCatalog()).some((memory) => memory.id === memoryId);
@@ -2058,6 +2111,22 @@ var ForestPersonaProbe = (() => {
           spotlight = null;
         }
       }
+      if (!spotlight && (canReact || original?.sourceKind === "story" && (!requireCharacterProfile || activeCharacterProfile))) {
+        try {
+          const input = { characterId, books, catalog, cues, sourceMemoryId: original.sourceMemoryId };
+          const archiveBooks = reviewSession.archiveBooks(input);
+          if (archiveBooks.length) {
+            const reflections = await getArchivedReflections(
+              archiveBooks.map((book) => book.id),
+              forestReflectionArchiveCutoff(now())
+            );
+            spotlight = reviewSession.choose({ ...input, reflections, archiveBooks });
+          }
+        } catch {
+          spotlight = null;
+        }
+        if (closed || generation !== epoch) return null;
+      }
       if (original && identity?.characterId) {
         try {
           activeDailyInput = {
@@ -2107,7 +2176,9 @@ var ForestPersonaProbe = (() => {
         sourceKind,
         spotlight
       );
+      const allowed = !spotlight || !getCurrentReflection || await sourceStillAllowed({ reviewEvidence: spotlight });
       if (closed || generation !== epoch) return null;
+      if (!allowed) return finish(characterId);
       if (!result) {
         record({
           event: "script-fallback",
@@ -2212,7 +2283,7 @@ var ForestPersonaProbe = (() => {
         characterId,
         ...["review-reaction", "reflection"].includes(current.sourceKind) ? {} : { label }
       });
-      const closing = repliesThisSession + 1 >= maxReplies || /^(?:またね|ばいばい|バイバイ|帰る|かえる|おしまい|また今度)[。！!]*$/u.test(label);
+      const closing = repliesThisSession + 1 >= maxReplies || sessionCount + 1 >= sessionLimit || /^(?:またね|ばいばい|バイバイ|帰る|かえる|おしまい|また今度)[。！!]*$/u.test(label);
       const topic = activeTopic;
       const generated = await request(
         characterId,
@@ -2224,7 +2295,9 @@ var ForestPersonaProbe = (() => {
         current.sourceKind,
         current.reviewEvidence || null
       );
+      const stillAllowed = !current.reviewEvidence || !getCurrentReflection || await sourceStillAllowed(current);
       if (closed || generation !== epoch) return null;
+      if (!stillAllowed) return finish(characterId);
       if (!generated) {
         record({
           event: "script-fallback",
@@ -2273,14 +2346,12 @@ var ForestPersonaProbe = (() => {
           reviewSession.visited();
         }
         if (pending?.reviewSpotlightKey && pending.characterId === identity?.characterId && (result?.text === pending.text || result?.mode === "twins" && !result.autoNext)) {
-          reviewSession.displayed(identity.characterId, {
-            key: pending.reviewSpotlightKey,
-            bookKey: pending.reviewSpotlightBookKey
-          });
+          reviewSession.displayed(identity.characterId, pending.reviewEvidence);
           pending.reviewSpotlightKey = "";
           record({
             event: "reflection-reaction-displayed",
             characterId: identity.characterId,
+            reflectionKind: pending.reviewEvidence?.kind || "recent",
             promptVersion: PROMPT_VERSION
           });
         }
@@ -2343,7 +2414,7 @@ var ForestPersonaProbe = (() => {
   }
 
   // cloudflare/forest-ai/src/index.mjs
-  var FOREST_WORKER_VERSION = "forest-dialogue-v23-profile2";
+  var FOREST_WORKER_VERSION = "forest-dialogue-v24-profile2";
   var NPCS = new Set(FOREST_AI_GENERATION_IDS);
   var ACTION_WRITING_IDS3 = new Set(FOREST_ACTION_WRITING_IDS);
   var MULTI_SPEAKER2 = new Set(FOREST_MULTI_SPEAKER_IDS);
@@ -2359,20 +2430,22 @@ var ForestPersonaProbe = (() => {
     }
     if (unsafeForestForaging(parsed, context)) throw Error("Invalid model unsafe-foraging");
     const multi = MULTI_SPEAKER2.has(characterId);
-    const turns = multi ? validateTwinTurns(parsed?.turns) : null;
+    const validatedTurns = multi ? validateTwinTurns(parsed?.turns) : null;
+    const turns = validatedTurns?.map((turn) => ({ ...turn, text: canonicalForestMention(turn.text, context.speakers) }));
     if (multi && !turns) throw Error("Invalid model speaker turns");
     if (turns && closing) return { turns, choices: [] };
     const silent = ACTION_WRITING_IDS3.has(characterId);
-    const mark = silent ? validateForestGestureMark(parsed?.mark) : null;
-    if (silent && (!validateForestGestureText(parsed?.text) || mark === void 0))
-      throw Error("Invalid silent cat action");
+    const written = silent ? validateForestWrittenTurn(parsed?.text, parsed?.mark) : null;
+    if (silent && !written) throw Error("Invalid silent cat action");
+    const mark = written?.mark;
+    const text = written?.text ?? canonicalForestMention(parsed?.text, context.speakers);
     if (closing) {
       if (typeof parsed?.text !== "string" || parsed.text.length > 90) throw Error("Invalid closing line");
-      return { text: parsed.text, choices: [], ...mark ? { mark } : {} };
+      return { text, choices: [], ...mark ? { mark } : {} };
     }
     if (!Array.isArray(parsed?.choices) || parsed.choices.length < 2 || parsed.choices.length > 3)
       throw Error("Invalid model output");
-    const choices = parsed.choices.map((choice) => typeof choice === "string" ? choice : choice?.label);
+    const choices = parsed.choices.map((choice) => canonicalForestMention(typeof choice === "string" ? choice : choice?.label, context.speakers));
     if (choices.some((choice) => typeof choice !== "string" || choice.length < 2 || choice.length > 24))
       throw Error("Invalid model choices");
     if (!multi && mode === "opening" && (typeof parsed.text !== "string" || !parsed.text.trim()))
@@ -2381,7 +2454,7 @@ var ForestPersonaProbe = (() => {
       throw Error("Invalid model text");
     return {
       choices: choices.slice(0, 2),
-      ...turns ? { turns } : typeof parsed.text === "string" ? { text: parsed.text } : {},
+      ...turns ? { turns } : typeof text === "string" ? { text } : {},
       ...mark ? { mark } : {}
     };
   }
@@ -2390,7 +2463,7 @@ var ForestPersonaProbe = (() => {
     const multi = MULTI_SPEAKER2.has(prompt.npc.id);
     return {
       messages: [
-        { role: "system", content: "\u3042\u306A\u305F\u306F\u5150\u7AE5\u5411\u3051\u300C\u672C\u306E\u68EE\u300D\u3067\u767B\u5834\u4EBA\u7269\u306E\u77ED\u3044\u5373\u8208\u4F1A\u8A71\u3092\u52A9\u3051\u308B\u3002\u5B50\u3069\u3082\u306E\u500B\u4EBA\u60C5\u5831\u3092\u8CEA\u554F\u3057\u306A\u3044\u3002\u7269\u8A9E\u306B\u306A\u3044\u51FA\u6765\u4E8B\u3092\u65AD\u5B9A\u3057\u306A\u3044\u3002\u65E5\u672C\u8A9E\u3067\u81EA\u7136\u306B\u77ED\u304F" + (actionWriting ? "\u7121\u8A00\u306E\u884C\u52D5\u3092\u63CF\u5199\u3059\u308B\u3002" : "\u8A71\u3059\u3002") + "\u4EBA\u7269\u50CF\u306F\u9001\u4FE1\u3055\u308C\u305Fnpc.voice\u306E\u975E\u516C\u958B\u53F0\u5E33\u7531\u6765\u306E\u8A2D\u5B9A\u3092\u6700\u512A\u5148\u3057\u3001\u8A2D\u5B9A\u3092\u8AAC\u660E\u3059\u308B\u3060\u3051\u306E\u6587\u306B\u3057\u306A\u3044\u3002\u5404\u9805\u76EE\u306E\u6839\u62E0\u533A\u5206\u30FB\u76E3\u4FEE\u72B6\u614B\u30FB\u9069\u7528\u7BC4\u56F2\u3068\u672C\u6587\u4E2D\u306E\u7559\u4FDD\u3092\u5B88\u308B\u3002\u4E8C\u6B21\u8CC7\u6599\u306F\u539F\u4F5C\u672C\u6587\u3067\u306F\u306A\u3044\u3002\u7DE8\u96C6\u89E3\u91C8\u30FB\u30B2\u30FC\u30E0\u6F14\u51FA\u30FB\u66AB\u5B9A\u63A1\u7528\u306F\u6F14\u6280\u306E\u624B\u639B\u304B\u308A\u3067\u3042\u308A\u3001\u539F\u4F5C\u306E\u78BA\u5B9A\u4E8B\u5B9F\u3068\u3057\u3066\u8A9E\u3089\u306A\u3044\u3002situation\u306Eplace\u304C\u4ECA\u3044\u308B\u5834\u6240\u3001presentNpcIds\u304C\u540C\u5E2D\u3092\u78BA\u8A8D\u3067\u304D\u308B\u4EBA\u7269\u3002relatedNpcIds\u306F\u95A2\u4FC2\u6027\u3067\u3001\u4ECA\u305D\u3070\u306B\u3044\u308B\u8A3C\u62E0\u3067\u306F\u306A\u3044\u3002\u4ECA\u65E5\u306Escene\u306Fevidence=reviewed\u306A\u3089\u8AAD\u4E86\u6E08\u307F\u539F\u4F5C\u306E\u627F\u8A8D\u6E08\u307F\u4E8B\u5B9F\u3092\u542B\u307F\u3001evidence=imagined\u306A\u3089\u68EE\u306E\u5373\u8208\u306E\u51FA\u6765\u4E8B\u3002\u539F\u4F5C\u306E\u8A18\u61B6\u306F\u904E\u53BB\u306E\u7269\u8A9E\u3067\u3042\u308A\u3001\u4ECA\u65E5\u3053\u306E\u68EE\u3067\u8D77\u304D\u305F\u4E8B\u5B9F\u306B\u7F6E\u304D\u63DB\u3048\u306A\u3044\u3002\u68EE\u3067\u306E\u60F3\u50CF\u3084\u63D0\u6848\u306F\u533A\u5225\u3059\u308B\u3002\u77E5\u3089\u306A\u3044\u6728\u306E\u5B9F\u30FB\u304D\u306E\u3053\u30FB\u690D\u7269\u306E\u98DF\u7528\u6027\u3092\u65AD\u5B9A\u305B\u305A\u3001\u5473\u898B\u3084\u6442\u53D6\u3092\u9078\u629E\u80A2\u306B\u3057\u306A\u3044\u3002\u5B89\u5168\u306A\u98DF\u4E8B\u3084\u98DF\u6B32\u306F\u8868\u73FE\u3057\u3066\u3088\u3044\u3002\u898B\u77E5\u3089\u306C\u5B9F\u306E\u5834\u9762\u3067\u306F\u3001\u898B\u308B\u30FB\u8ABF\u3079\u308B\u30FB\u305D\u306E\u307E\u307E\u306B\u3059\u308B\u306A\u3069\u6B21\u306E\u884C\u52D5\u3092\u51FA\u3059\u3002readerReflection\u304C\u3042\u308B\u5834\u5408\u306F\u672C\u306E\u611F\u60F3\u3092\u53D7\u3051\u6B62\u3081\u3001\u5225\u4F5C\u54C1\u306E\u4EBA\u7269\u306A\u3089\u7B2C\u4E09\u8005\u306E\u7ACB\u5834\u3067\u53CD\u5FDC\u3059\u308B\u3002\u539F\u4F5C\u306B\u767B\u5834\u3057\u305F\u30FB\u76F4\u63A5\u76EE\u6483\u3057\u305F\u3068\u507D\u3089\u305A\u3001\u672C\u4EBA\u306E\u6C17\u6301\u3061\u3092\u52DD\u624B\u306B\u6C7A\u3081\u3064\u3051\u306A\u3044\u3002\u4FDD\u8B77\u8005\u306B\u3088\u308B\u8981\u7D04\u3092\u5B50\u3069\u3082\u306E\u76F4\u63A5\u306E\u767A\u8A00\u3068\u3057\u3066\u6271\u308F\u305A\u3001\u611F\u60F3\u306E\u8FFD\u8A18\u3092\u8981\u6C42\u3057\u306A\u3044\u3002\u5225\u306ENPC\u306E\u4F1A\u8A71\u5185\u5BB9\u3092\u805E\u3044\u305F\u3075\u308A\u3092\u305B\u305A\u3001\u9078\u629E\u80A2\u3092\u5B50\u3069\u3082\u306E\u4FE1\u5FF5\u3068\u307F\u306A\u3055\u306A\u3044\u3002\u5FC5\u305AJSON\u30AA\u30D6\u30B8\u30A7\u30AF\u30C8\u3060\u3051\u3092\u8FD4\u3059\u3002mode=choices\u306A\u3089text\u3092\u7701\u7565\u3057\u3001choices\u30922\u4EF6\u3001\u540416\u5B57\u4EE5\u5185\u3002mode=opening\u306A\u3089context.sourceKind\uFF08meet/story/reflection/relay/ambient/review-reaction\uFF09\u3068task\u3092\u512A\u5148\u3057\u3001\u53F0\u5E33\u306EnpcLine\u3092\u30B3\u30D4\u30FC\u305B\u305A\u3001\u672C\u4EBA\u306E\u65B0\u3057\u3044\u53CD\u5FDC\u3068choices\u30922\u4EF6\u4F5C\u308B\u3002mode=reply\u306F\u65B0\u3057\u3044\u7B2C\u4E00\u58F0\u3067\u306F\u306A\u304F\u76F4\u524D\u306E\u9078\u629E\u3078\u306E\u5FDC\u7B54\u3002\u554F\u3044\u306B\u306F\u77ED\u304F\u7B54\u3048\u308B\u3002\u76F8\u3065\u3061\u3084\u611F\u60F3\u306A\u3089\u540C\u610F\u3092\u8A00\u3044\u63DB\u3048\u305A\u3001\u4EBA\u7269\u3089\u3057\u3044\u5C0F\u3055\u306A\u53CD\u5FDC\u3067\u4F1A\u8A71\u3092\u4E00\u6B69\u9032\u3081\u308B\u3002\u901A\u5E38\u306E\u767A\u8A71NPC\u306Etext\u306F65\u5B57\u4EE5\u5185\u3002\u9078\u629E\u80A2\u306F\u5B50\u3069\u3082\u5074\u306E\u6B21\u306E\u8A00\u8449\u3084\u884C\u52D5\u306B\u3059\u308B\u3002" + (multi ? '\u51FA\u529B\u306Fturns:[{speakerSlot:1,text:"..."},{speakerSlot:2,text:"..."}]\u3068choices\u3002\u5404\u30B9\u30ED\u30C3\u30C8\u3092\u4E00\u5EA6\u305A\u3064\u3001\u9806\u756A\u306F\u4F1A\u8A71\u306B\u5408\u308F\u305B\u308B\u3002\u540D\u524D\u306Fcontext.speakers\u3067\u56FA\u5B9A\u3057\u3001\u521D\u5BFE\u9762\u3067\u306F\u5404\u81EA\u304C\u81EA\u5206\u306E\u540D\u524D\u3092\u540D\u4E57\u308B\u3002\u4E8C\u4EBA\u76EE\u306F\u4E00\u4EBA\u76EE\u306E\u8A00\u8449\u306B\u53CD\u5FDC\u3059\u308B\u3002\u767A\u8A71\u306B\u8A71\u8005\u30E9\u30D9\u30EB\u3084\u304B\u304E\u62EC\u5F27\u3092\u4ED8\u3051\u305A\u3001\u540465\u5B57\u4EE5\u5185\u3002\u5B50\u3069\u3082\u3078\u306E\u554F\u3044\u304B\u3051\u306F\u4E8C\u4EBA\u76EE\u307E\u3067\u5F85\u3064\u3002' : "") + (ACTION_WRITING_IDS3.has(prompt.npc.id) ? "\u3053\u306ENPC\u306F\u975E\u767A\u8A71\u30E2\u30FC\u30C9\u3002\u4EBA\u7269\u50CF\u306Fnpc.voice\u306E\u975E\u516C\u958B\u53F0\u5E33\u7531\u6765\u306E\u8A2D\u5B9A\u3092\u512A\u5148\u3057\u3001\u3053\u3053\u3067\u4EBA\u7269\u50CF\u3092\u63A8\u6E2C\u3057\u306A\u3044\u3002text\u306F\u5168\u89D2\u4E38\u62EC\u5F27\uFF08 \uFF09\u3067\u56F2\u3093\u3060\u7121\u8A00\u306E\u884C\u52D5\u63CF\u5199\u3060\u3051\u3002\u6587\u5B57\u306F\u5FC5\u8981\u306A\u3068\u304D\u3060\u3051mark\u3067\u8868\u73FE\u3059\u308B\u3002mark={surface:note\u307E\u305F\u306Fground\u307E\u305F\u306Fleaf,word:\u3072\u3089\u304C\u306A\u3068\u5C0F\u5B661\u5E74\u751F\u307E\u3067\u306E\u6F22\u5B57\u30FB\u8AAD\u70B9\u53E5\u70B9\u30FB\uFF01\uFF1F\u304B\u3089\u306A\u308B1\u301C48\u6587\u5B57}\u3002\u66F8\u304B\u306A\u3044\u5834\u5408\u306Fmark:null\u3002\u4EBA\u8A9E\u306E\u767A\u58F0\u30FB\u5FC3\u306E\u58F0\u306F\u7981\u6B62\u3002mark\u306E\u6587\u5B57\u7A2E\u306F\u30B5\u30FC\u30D0\u30FC\u3067\u3082\u691C\u8A3C\u3059\u308B\u3002" : "") + "closing=true\u3067\u3082\u76F4\u524D\u306E\u554F\u3044\u3084\u983C\u307F\u306B\u5148\u306B\u7B54\u3048\u3001\u7D04\u675F\u3057\u305F\u5185\u5BB9\u3092\u307E\u305F\u4ECA\u5EA6\u3078\u5148\u9001\u308A\u3057\u306A\u3044\u3002\u65B0\u305F\u306A\u8CEA\u554F\u3092\u305B\u305Achoices\u306F\u7A7A\u914D\u5217\u3068\u3059\u308B\u3002" },
+        { role: "system", content: "\u3042\u306A\u305F\u306F\u5150\u7AE5\u5411\u3051\u300C\u672C\u306E\u68EE\u300D\u3067\u767B\u5834\u4EBA\u7269\u306E\u77ED\u3044\u5373\u8208\u4F1A\u8A71\u3092\u52A9\u3051\u308B\u3002\u5B50\u3069\u3082\u306E\u500B\u4EBA\u60C5\u5831\u3092\u8CEA\u554F\u3057\u306A\u3044\u3002\u7269\u8A9E\u306B\u306A\u3044\u51FA\u6765\u4E8B\u3092\u65AD\u5B9A\u3057\u306A\u3044\u3002\u65E5\u672C\u8A9E\u3067\u81EA\u7136\u306B\u77ED\u304F" + (actionWriting ? "\u884C\u52D5\u3084\u66F8\u304D\u8A00\u8449\u3067\u4F1D\u3048\u308B\u3002" : "\u8A71\u3059\u3002") + "\u751F\u6210\u3059\u308B\u767A\u8A71\u3068\u9078\u629E\u80A2\u306E\u4EBA\u540D\u306F\u3001ID\u304B\u3089\u63A8\u6E2C\u305B\u305Acontext.npcDisplayNames\u307E\u305F\u306Fcontext.speakers\u306E\u8868\u793A\u540D\u3092\u4F7F\u3046\u3002\u4EBA\u7269\u50CF\u306F\u9001\u4FE1\u3055\u308C\u305Fnpc.voice\u306E\u975E\u516C\u958B\u53F0\u5E33\u7531\u6765\u306E\u8A2D\u5B9A\u3092\u6700\u512A\u5148\u3057\u3001\u8A2D\u5B9A\u3092\u8AAC\u660E\u3059\u308B\u3060\u3051\u306E\u6587\u306B\u3057\u306A\u3044\u3002\u5404\u9805\u76EE\u306E\u6839\u62E0\u533A\u5206\u30FB\u76E3\u4FEE\u72B6\u614B\u30FB\u9069\u7528\u7BC4\u56F2\u3068\u672C\u6587\u4E2D\u306E\u7559\u4FDD\u3092\u5B88\u308B\u3002\u4E8C\u6B21\u8CC7\u6599\u306F\u539F\u4F5C\u672C\u6587\u3067\u306F\u306A\u3044\u3002\u7DE8\u96C6\u89E3\u91C8\u30FB\u30B2\u30FC\u30E0\u6F14\u51FA\u30FB\u66AB\u5B9A\u63A1\u7528\u306F\u6F14\u6280\u306E\u624B\u639B\u304B\u308A\u3067\u3042\u308A\u3001\u539F\u4F5C\u306E\u78BA\u5B9A\u4E8B\u5B9F\u3068\u3057\u3066\u8A9E\u3089\u306A\u3044\u3002situation\u306Eplace\u304C\u4ECA\u3044\u308B\u5834\u6240\u3001presentNpcIds\u304C\u540C\u5E2D\u3092\u78BA\u8A8D\u3067\u304D\u308B\u4EBA\u7269\u3002relatedNpcIds\u306F\u95A2\u4FC2\u6027\u3067\u3001\u4ECA\u305D\u3070\u306B\u3044\u308B\u8A3C\u62E0\u3067\u306F\u306A\u3044\u3002\u4ECA\u65E5\u306Escene\u306Fevidence=reviewed\u306A\u3089\u8AAD\u4E86\u6E08\u307F\u539F\u4F5C\u306E\u627F\u8A8D\u6E08\u307F\u4E8B\u5B9F\u3092\u542B\u307F\u3001evidence=imagined\u306A\u3089\u68EE\u306E\u5373\u8208\u306E\u51FA\u6765\u4E8B\u3002\u539F\u4F5C\u306E\u8A18\u61B6\u306F\u904E\u53BB\u306E\u7269\u8A9E\u3067\u3042\u308A\u3001\u4ECA\u65E5\u3053\u306E\u68EE\u3067\u8D77\u304D\u305F\u4E8B\u5B9F\u306B\u7F6E\u304D\u63DB\u3048\u306A\u3044\u3002\u68EE\u3067\u306E\u60F3\u50CF\u3084\u63D0\u6848\u306F\u533A\u5225\u3059\u308B\u3002\u77E5\u3089\u306A\u3044\u6728\u306E\u5B9F\u30FB\u304D\u306E\u3053\u30FB\u690D\u7269\u306E\u98DF\u7528\u6027\u3092\u65AD\u5B9A\u305B\u305A\u3001\u5473\u898B\u3084\u6442\u53D6\u3092\u9078\u629E\u80A2\u306B\u3057\u306A\u3044\u3002\u5B89\u5168\u306A\u98DF\u4E8B\u3084\u98DF\u6B32\u306F\u8868\u73FE\u3057\u3066\u3088\u3044\u3002\u898B\u77E5\u3089\u306C\u5B9F\u306E\u5834\u9762\u3067\u306F\u3001\u898B\u308B\u30FB\u8ABF\u3079\u308B\u30FB\u305D\u306E\u307E\u307E\u306B\u3059\u308B\u306A\u3069\u6B21\u306E\u884C\u52D5\u3092\u51FA\u3059\u3002readerReflection\u304C\u3042\u308B\u5834\u5408\u306F\u672C\u306E\u611F\u60F3\u3092\u53D7\u3051\u6B62\u3081\u3001\u5225\u4F5C\u54C1\u306E\u4EBA\u7269\u306A\u3089\u7B2C\u4E09\u8005\u306E\u7ACB\u5834\u3067\u53CD\u5FDC\u3059\u308B\u3002\u539F\u4F5C\u306B\u767B\u5834\u3057\u305F\u30FB\u76F4\u63A5\u76EE\u6483\u3057\u305F\u3068\u507D\u3089\u305A\u3001\u672C\u4EBA\u306E\u6C17\u6301\u3061\u3092\u52DD\u624B\u306B\u6C7A\u3081\u3064\u3051\u306A\u3044\u3002\u4FDD\u8B77\u8005\u306B\u3088\u308B\u8981\u7D04\u3092\u5B50\u3069\u3082\u306E\u76F4\u63A5\u306E\u767A\u8A00\u3068\u3057\u3066\u6271\u308F\u305A\u3001\u611F\u60F3\u306E\u8FFD\u8A18\u3092\u8981\u6C42\u3057\u306A\u3044\u3002\u5225\u306ENPC\u306E\u4F1A\u8A71\u5185\u5BB9\u3092\u805E\u3044\u305F\u3075\u308A\u3092\u305B\u305A\u3001\u9078\u629E\u80A2\u3092\u5B50\u3069\u3082\u306E\u4FE1\u5FF5\u3068\u307F\u306A\u3055\u306A\u3044\u3002\u5FC5\u305AJSON\u30AA\u30D6\u30B8\u30A7\u30AF\u30C8\u3060\u3051\u3092\u8FD4\u3059\u3002mode=choices\u306A\u3089text\u3092\u7701\u7565\u3057\u3001choices\u30922\u4EF6\u3001\u540416\u5B57\u4EE5\u5185\u3002mode=opening\u306A\u3089context.sourceKind\uFF08meet/story/reflection/relay/ambient/review-reaction\uFF09\u3068task\u3092\u512A\u5148\u3057\u3001\u53F0\u5E33\u306EnpcLine\u3092\u30B3\u30D4\u30FC\u305B\u305A\u3001\u672C\u4EBA\u306E\u65B0\u3057\u3044\u53CD\u5FDC\u3068choices\u30922\u4EF6\u4F5C\u308B\u3002mode=reply\u306F\u65B0\u3057\u3044\u7B2C\u4E00\u58F0\u3067\u306F\u306A\u304F\u76F4\u524D\u306E\u9078\u629E\u3078\u306E\u5FDC\u7B54\u3002\u554F\u3044\u306B\u306F\u77ED\u304F\u7B54\u3048\u308B\u3002\u76F8\u3065\u3061\u3084\u611F\u60F3\u306A\u3089\u540C\u610F\u3092\u8A00\u3044\u63DB\u3048\u305A\u3001\u4EBA\u7269\u3089\u3057\u3044\u5C0F\u3055\u306A\u53CD\u5FDC\u3067\u4F1A\u8A71\u3092\u4E00\u6B69\u9032\u3081\u308B\u3002\u901A\u5E38\u306E\u767A\u8A71NPC\u306Etext\u306F65\u5B57\u4EE5\u5185\u3002\u9078\u629E\u80A2\u306F\u5B50\u3069\u3082\u5074\u306E\u6B21\u306E\u8A00\u8449\u3084\u884C\u52D5\u306B\u3059\u308B\u3002" + (multi ? '\u51FA\u529B\u306Fturns:[{speakerSlot:1,text:"..."},{speakerSlot:2,text:"..."}]\u3068choices\u3002\u5404\u30B9\u30ED\u30C3\u30C8\u3092\u4E00\u5EA6\u305A\u3064\u3001\u9806\u756A\u306F\u4F1A\u8A71\u306B\u5408\u308F\u305B\u308B\u3002\u540D\u524D\u306Fcontext.speakers\u3067\u56FA\u5B9A\u3057\u3001\u521D\u5BFE\u9762\u3067\u306F\u5404\u81EA\u304C\u81EA\u5206\u306E\u540D\u524D\u3092\u540D\u4E57\u308B\u3002\u4E8C\u4EBA\u76EE\u306F\u4E00\u4EBA\u76EE\u306E\u8A00\u8449\u306B\u53CD\u5FDC\u3059\u308B\u3002\u767A\u8A71\u306B\u8A71\u8005\u30E9\u30D9\u30EB\u3084\u304B\u304E\u62EC\u5F27\u3092\u4ED8\u3051\u305A\u3001\u540465\u5B57\u4EE5\u5185\u3002\u5B50\u3069\u3082\u3078\u306E\u554F\u3044\u304B\u3051\u306F\u4E8C\u4EBA\u76EE\u307E\u3067\u5F85\u3064\u3002' : "") + (ACTION_WRITING_IDS3.has(prompt.npc.id) ? `\u3053\u306ENPC\u306F\u975E\u767A\u8A71\u30E2\u30FC\u30C9\u3002\u4EBA\u7269\u50CF\u306Fnpc.voice\u306E\u975E\u516C\u958B\u53F0\u5E33\u7531\u6765\u306E\u8A2D\u5B9A\u3092\u512A\u5148\u3057\u3001\u3053\u3053\u3067\u4EBA\u7269\u50CF\u3092\u63A8\u6E2C\u3057\u306A\u3044\u3002text\u306F\u5168\u89D2\u4E38\u62EC\u5F27\u306E\u77ED\u3044\u884C\u52D5\u63CF\u5199\u3002\u66F8\u304F\u3068\u63CF\u5199\u3057\u305F\u3089mark.word\u306B\u5B9F\u969B\u306E\u53F0\u8A5E\u3092\u5165\u308C\u3001\u884C\u52D5\u3068\u53F0\u8A5E\u3067${FOREST_WRITTEN_TURN_LIMIT}\u5B57\u4EE5\u5185\u3002\u8EAB\u632F\u308A\u3060\u3051\u306E\u5834\u9762\u306Fmark:null\u3002\u65E5\u672C\u8A9E\u306E\u767A\u58F0\u3068\u5FC3\u306E\u58F0\u306F\u7981\u6B62\u3002mark={surface:note\u307E\u305F\u306Fground\u307E\u305F\u306Fleaf,word:\u3072\u3089\u304C\u306A\u3068\u5C0F\u5B661\u5E74\u751F\u307E\u3067\u306E\u6F22\u5B57\u30FB\u8AAD\u70B9\u53E5\u70B9\u30FB\uFF01\uFF1F\u304B\u3089\u306A\u308B1\u301C48\u6587\u5B57}\u3002\u66F8\u304D\u8A00\u8449\u3082\u8A71\u3059\u4EBA\u7269\u3068\u540C\u69D8\u306B\u76F8\u624B\u306E\u554F\u3044\u3084\u9078\u629E\u306B\u7B54\u3048\u3089\u308C\u308B\u3002` : "") + "context.repliesLeft\u306F\u3053\u306E\u767A\u8A71\u306E\u5F8C\u3067\u9078\u629E\u306B\u8FD4\u305B\u308B\u56DE\u6570\u3002closing=true\u306A\u3089\u76F4\u524D\u306E\u9078\u629E\u306B\u5177\u4F53\u7684\u306A\u8FD4\u4E8B\u3084\u305D\u306E\u5834\u306E\u5C0F\u3055\u306A\u7D50\u679C\u3092\u8FD4\u3059\u3002\u51FA\u767A\u3084\u5148\u306E\u7D04\u675F\u3092\u59CB\u3081\u305A\u3001\u65B0\u305F\u306A\u8CEA\u554F\u3092\u51FA\u3055\u305A\u3001choices\u306F\u7A7A\u914D\u5217\u3002" },
         { role: "user", content: JSON.stringify(prompt) }
       ],
       max_completion_tokens: 320,
@@ -2428,6 +2501,8 @@ var ForestPersonaProbe = (() => {
     getCues = () => [],
     getReflections = async () => [],
     getRecentReflections = async () => [],
+    getArchivedReflections = async () => [],
+    getCurrentReflection = null,
     getCharacterProfiles = () => [],
     getTwinNames = () => [],
     getTwinScenes = () => [],
@@ -2465,6 +2540,8 @@ var ForestPersonaProbe = (() => {
       ...common,
       base,
       getRecentReflections,
+      getArchivedReflections,
+      getCurrentReflection,
       getCharacterProfiles,
       requireCharacterProfile: true,
       storageKey: "scenario:live",
@@ -2784,6 +2861,8 @@ var ForestPersonaProbe = (() => {
       getTwinNames: () => twinNames,
       getTwinScenes: () => twinScenes,
       getRecentReflections: async () => snapshot.reflections || [],
+      getArchivedReflections: async (bookIds, before) => bookIds.flatMap((bookId) => (snapshot.archiveReflections || []).filter((row) => row.bookId === bookId && row.createdAt < before).sort((a, b) => b.createdAt - a.createdAt).slice(0, 3)),
+      getCurrentReflection: async (bookId, id) => [...snapshot.reflections || [], ...snapshot.archiveReflections || []].find((row) => row.bookId === bookId && row.id === id) || null,
       getReflections: async (bookId) => (snapshot.reflections || []).filter((r) => r.bookId === bookId),
       runtime: {
         createAbortController: () => ({ signal: { aborted: false }, abort() {
@@ -2811,8 +2890,8 @@ var ForestPersonaProbe = (() => {
       const rows = q.getDataRange().getDisplayValues().slice(1), counts = {};
       for (const row of rows) counts[row[0]] = (counts[row[0]] || 0) + 1;
       const results = out.getDataRange().getDisplayValues().slice(1), existing = new Set(results.map((r) => r[0]));
-      const today = Utilities.formatDate(/* @__PURE__ */ new Date(), "Asia/Tokyo", "yyyy-MM-dd");
-      const key = "YONDENE_GEMMA_TEST_ATTEMPTS_" + today;
+      const today = Utilities.formatDate(/* @__PURE__ */ new Date(), "UTC", "yyyy-MM-dd");
+      const key = "YONDENE_GEMMA_TEST_ATTEMPTS_UTC_" + today;
       let attempts = Number(props.getProperty(key) || 0), done = 0, mirror = null;
       if (!Number.isFinite(attempts) || attempts < 0) throw Error("INVALID_LOCAL_USAGE_COUNTER");
       const catalogSheet = ss.getSheetByName("\u7269\u8A9E\u8A18\u61B6");

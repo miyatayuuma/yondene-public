@@ -46,8 +46,8 @@ test('bundled integrated queue records three real transport calls and state in t
   const saved=JSON.parse(results[1][15]);
   assert.equal(saved.conversation.trace.length,3);
   assert.equal(saved.conversation.progress.visits.cat,1);
-  assert.equal(properties.YONDENE_GEMMA_TEST_ATTEMPTS_2026_11_18,undefined);
-  assert.equal(properties['YONDENE_GEMMA_TEST_ATTEMPTS_2026-11-18'],'3');
+  assert.equal(properties.YONDENE_GEMMA_TEST_ATTEMPTS_UTC_2026_11_18,undefined);
+  assert.equal(properties['YONDENE_GEMMA_TEST_ATTEMPTS_UTC_2026-11-18'],'3');
   assert.ok(marks.some(([row,col,value])=>row===2&&col===5&&value==='APPLIED'));
 });
 test('independent GAS probe uses the same parser, prompt and Worker input, with no real reading data',()=>{
@@ -59,7 +59,7 @@ test('independent GAS probe uses the same parser, prompt and Worker input, with 
   assert.ok(sent.npc.voice.includes('友だちと道具をなおす'));
   assert.equal(sent.context.situation.evidence,'imagined');
   assert.equal('readerReflection' in sent.context,false);
-  assert.ok(sent.constraints.some(rule=>rule.includes('書かない場面はmark:null')));
+  assert.ok(sent.constraints.some(rule=>rule.includes('書かない場合はmark:null')));
 });
 test('generated Apps Script saves actual output and exact model input before marking one pending request applied',()=>{
   const output=[],marks=[],requests=[];

@@ -129,7 +129,16 @@ export const FOREST_VOICE_CHARACTERS=Object.freeze([
 ]);
 
 // Version the browser/Worker input contract separately from roster membership.
-export const FOREST_DIALOGUE_PROTOCOL='scene-dialogue-v22-profile2';
+export const FOREST_DISPLAY_NAMES=Object.freeze(Object.fromEntries(
+  roster.map(({id,name})=>[id,name])));
+export function canonicalForestMention(text,speakers=[]){
+  // This one observed misspelling is a whole katakana token. Saved names
+  // take precedence, including names that happen to contain that token.
+  if(typeof text!=='string'||speakers.some(speaker=>speaker.name.includes('ハチビー')))return text;
+  return text.replace(/(?<![ァ-ヿー])ハチビー(?![ァ-ヿー])/gu,FOREST_DISPLAY_NAMES.hachibee);
+}
+
+export const FOREST_DIALOGUE_PROTOCOL='scene-dialogue-v24-profile2';
 
 export function forestMemoryBelongsToCharacter(memory,characterId){
   const names=FOREST_ACTOR_NAMES[characterId]||[];

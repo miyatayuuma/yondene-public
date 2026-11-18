@@ -2679,7 +2679,6 @@ var ForestPersonaProbe = (() => {
   }
 
   // gas/ForestPersonaProbe.mjs
-  var DAILY_TEST_LIMIT = 76;
   var MODEL = "@cf/google/gemma-4-26b-a4b-it";
   var MODES = /* @__PURE__ */ new Set(["synthetic", "mirror-reflection", "mirror-daily", "mirror-story", "continuation", "integrated-synthetic", "integrated-mirror"]);
   var safeText = (v) => /^\s*[=+@-]/u.test(String(v)) ? "'" + String(v) : String(v);
@@ -2932,7 +2931,7 @@ var ForestPersonaProbe = (() => {
       const catalog = parseStoryMemoryRows(catalogSheet?.getDataRange().getDisplayValues() || []);
       const cues = parseForestDialogueRows(cuesSheet?.getDataRange().getDisplayValues() || []);
       const originalPeople = person.getDataRange().getDisplayValues(), originalSources = source.getDataRange().getDisplayValues();
-      for (let i = 0; i < rows.length && done < 3 && attempts < DAILY_TEST_LIMIT; i++) {
+      for (let i = 0; i < rows.length && done < 3; i++) {
         const [id, npc, scene, utterance, state, , , , modeCell, bookId, previousId, choice, caseId, issue] = rows[i];
         if (state !== "PENDING") continue;
         const mode = norm(modeCell) || "synthetic";
@@ -2960,8 +2959,7 @@ var ForestPersonaProbe = (() => {
             mark("ERROR", "INVALID_CHOICE");
             continue;
           }
-          const maximumCalls = Math.min(2, 1 + selectedChoices.length) - Number(replayOpening);
-          if (done !== 0 || DAILY_TEST_LIMIT - attempts < maximumCalls) break;
+          if (done !== 0) break;
         }
         mark("RUNNING", "");
         SpreadsheetApp.flush();
@@ -3007,7 +3005,6 @@ var ForestPersonaProbe = (() => {
                     throw Error("Previous opening no longer matches this visit");
                   return replay.raw;
                 }
-                if (attempts >= DAILY_TEST_LIMIT) throw Error("Local quota reached");
                 props.setProperty(key, String(++attempts));
                 const started = Date.now();
                 let response;

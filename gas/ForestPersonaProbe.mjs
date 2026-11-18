@@ -19,8 +19,7 @@ import {FOREST_PROMPT_VERSION,promptFor} from '../reading-shelf-firebase/book-fo
 import {runForestConversationScenario,scenarioStorage} from '../scripts/forest-conversation-scenario.mjs';
 import {forestGenerationInput,readCompletion} from '../cloudflare/forest-ai/src/index.mjs';
 
-// A release acceptance batch can follow the original 60-call baseline on the same day.
-const DAILY_TEST_LIMIT=76;
+// The probe has no local daily call cap; provider-side quotas still apply.
 const MODEL='@cf/google/gemma-4-26b-a4b-it';
 const MODES=new Set(['synthetic','mirror-reflection','mirror-daily','mirror-story','continuation','integrated-synthetic','integrated-mirror']);
 const safeText=v=>/^\s*[=+@-]/u.test(String(v))?"'"+String(v):String(v);
@@ -223,7 +222,7 @@ export async function processQueue(){
     const cues=parseForestDialogueRows(cuesSheet?.getDataRange().getDisplayValues()||[]);
     const originalPeople=person.getDataRange().getDisplayValues(),
       originalSources=source.getDataRange().getDisplayValues();
-    for(let i=0;i<rows.length&&done<3&&attempts<DAILY_TEST_LIMIT;i++){
+    for(let i=0;i<rows.length&&done<3;i++){
       const [id,npc,scene,utterance,state,,,,modeCell,bookId,previousId,choice,caseId,issue]=rows[i];
       if(state!=='PENDING')continue;
       const mode=norm(modeCell)||'synthetic';
@@ -245,8 +244,7 @@ export async function processQueue(){
           replayOpening&&(!previousId||selectedChoices.length!==2)){
           mark('ERROR','INVALID_CHOICE');continue;
         }
-        const maximumCalls=Math.min(2,1+selectedChoices.length)-Number(replayOpening);
-        if(done!==0||DAILY_TEST_LIMIT-attempts<maximumCalls)break;
+        if(done!==0)break;
       }
       mark('RUNNING','');SpreadsheetApp.flush();done++;
       let prepared;
@@ -286,7 +284,6 @@ export async function processQueue(){
                   throw Error('Previous opening no longer matches this visit');
                 return replay.raw;
               }
-              if(attempts>=DAILY_TEST_LIMIT)throw Error('Local quota reached');
               props.setProperty(key,String(++attempts));
               const started=Date.now();
               let response;

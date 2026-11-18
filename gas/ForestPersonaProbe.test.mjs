@@ -51,14 +51,14 @@ test('bundled integrated queue records two transport calls and state in the exis
   assert.equal(properties.YONDENE_GEMMA_TEST_ATTEMPTS_UTC_2026_11_18,undefined);
   assert.equal(properties['YONDENE_GEMMA_TEST_ATTEMPTS_UTC_2026-11-18'],'2');
   assert.ok(marks.some(([row,col,value])=>row===2&&col===5&&value==='APPLIED'));
-  // A paired comparison reuses the saved opening; only the new last choices count against quota.
-  properties['YONDENE_GEMMA_TEST_ATTEMPTS_UTC_2026-11-18']='75';
+  // A paired comparison must run even after exceeding the former daily limit of 76.
+  properties['YONDENE_GEMMA_TEST_ATTEMPTS_UTC_2026-11-18']='76';
   rows[1][4]='APPLIED';
   rows.push(['replay-request','cat','統合試験','','PENDING','','','','integrated-synthetic',
     '','integrated-request','[0,0]','replay-opening']);
   await vm.runInContext('yondeneGemmaTestProcessQueue()',ctx);
   assert.equal(requests.length,3);
-  assert.equal(properties['YONDENE_GEMMA_TEST_ATTEMPTS_UTC_2026-11-18'],'76');
+  assert.equal(properties['YONDENE_GEMMA_TEST_ATTEMPTS_UTC_2026-11-18'],'77');
   const replay=JSON.parse(results[2][15]).conversation;
   assert.equal(replay.replayedOpeningId,'integrated-request');
   assert.equal(replay.frames.at(-1).result.text,'木の下に 白い花がさいているよ。');

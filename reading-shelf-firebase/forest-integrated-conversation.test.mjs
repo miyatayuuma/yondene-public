@@ -52,6 +52,9 @@ test('unusable final pairs do not offer a promise or discard an otherwise valid 
   const observed=[{label:'かくれんぼしよう！',outcome:'いいよ！わたしたちが、かくるね！'},
     {label:'お話ししよう！',outcome:'うん！すきなこと、おしえて！'}];
   assert.deepEqual(readCompletion({response:JSON.stringify({text:main,choices:observed})},options).choices,[]);
+  const questionOnly={text:'なにか、おもしろい遊び、あるかな？',choices:observed};
+  assert.throws(()=>readCompletion({response:JSON.stringify(questionOnly)},options),/unfinished ending/);
+  assert.equal(validateLiveForestOutput(questionOnly,options),null);
   const unsafe={label:'木の実を食べてみよう',outcome:'森の木の実はおいしいよ。'};
   assert.deepEqual(readCompletion({response:JSON.stringify({text:main,choices:[unsafe,good]})},options).choices,[good]);
 });

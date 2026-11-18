@@ -5,7 +5,9 @@ import {unsafeForestForaging} from './book-forest-output-safety.mjs';
 // An observed failure was a standalone promise to go, begin or prepare.
 // This catches that ending shape; whether a reply earns its choice also
 // depends on context and is checked on real conversations.
-const unfinished=/[？?][。！!]*$|(?:おしえて|教えて|かくる)(?:ね|よ)?[。！!]*$|(?:準備(?:を)?(?:する|しよう)|じゅんび(?:を)?(?:する|しよう)|(?:探し|さがし)に(?:行こう|いこう)|(?:始め|はじめ)(?:よう|る)|(?:今度|こんど)(?:やろう|しよう))(?:ね|よ|か|ぜ|ぞ|な)?[。！!]*$/u;
+const unfinished=/[？?][。！!]*$|(?:おしえて|教えて|かくる|ましょう|てみよう|ついてこい)(?:ね|よ)?[。！!]*$|(?:準備(?:を)?(?:する|しよう)|じゅんび(?:を)?(?:する|しよう)|(?:探し|さがし)に(?:行こう|いこう)|(?:始め|はじめ)(?:よう|る)|(?:今度|こんど)(?:やろう|しよう))(?:ね|よ|か|ぜ|ぞ|な)?[。！!]*$/u;
+
+export const forestEndingNeedsReply=text=>typeof text==='string'&&unfinished.test(text.replace(/[ 　]/gu,''));
 
 export function forestEndingChoices(choices,{context={},silent=false,multi=false,line='',validLine=()=>true}={}){
   if(!Array.isArray(choices))return [];
@@ -22,7 +24,7 @@ export function forestEndingChoices(choices,{context={},silent=false,multi=false
     const written=silent?validateForestWrittenTurn(outcome,choice.delivery??'written'):null;
     if(silent?!written:!validLine(outcome))continue;
     const text=written?.text??outcome;
-    if(unfinished.test(text.replace(/[ 　]/gu,''))||text===line||offered.some(c=>c.outcome===text))continue;
+    if(forestEndingNeedsReply(text)||text===line||offered.some(c=>c.outcome===text))continue;
     if(unsafeForestForaging({text,choices:[label]},
       {...context,chosenLabel:label,recentTurns:[...(context.recentTurns||[]),{npc:line}]}))continue;
     offered.push({label,outcome:text,...(multi?{speakerSlot}:{}),...(written?{delivery:written.delivery}:{})});

@@ -1,4 +1,4 @@
-import {forestEndingChoices} from '../../../reading-shelf-firebase/book-forest-ending.mjs';
+import {forestEndingChoices,forestEndingNeedsReply} from '../../../reading-shelf-firebase/book-forest-ending.mjs';
 import {unsafeForestForaging} from '../../../reading-shelf-firebase/book-forest-output-safety.mjs';
 import {FOREST_AI_GENERATION_IDS,FOREST_ACTION_WRITING_IDS,FOREST_MULTI_SPEAKER_IDS,FOREST_ROSTER_REVISION,FOREST_DIALOGUE_PROTOCOL,canonicalForestMention} from '../../../reading-shelf-firebase/forest-character-registry.mjs';
 import {validateForestWrittenTurn,FOREST_WRITTEN_TURN_LIMIT} from '../../../reading-shelf-firebase/book-forest-gesture.mjs';
@@ -127,8 +127,12 @@ export function readCompletion(result,{closing=false,mode='reply',characterId=''
   if(!written&&parsed.text!==undefined&&(typeof parsed.text!=='string'||parsed.text.length>90))
     throw Error('Invalid model text');
   const line=turns?{turns}:{...(typeof text==='string'?{text}:{}),...(written?{delivery:written.delivery}:{})};
-  if(lastChoices)return {...line,choices:forestEndingChoices(parsed.choices,{
-    context,silent,multi,line:turns?.map(turn=>turn.text).join(' ')??text})};
+  if(lastChoices){
+    const choices=forestEndingChoices(parsed.choices,{context,silent,multi,
+      line:turns?.map(turn=>turn.text).join(' ')??text});
+    if(!choices.length&&forestEndingNeedsReply(turns?.at(-1)?.text??text))throw Error('Invalid model unfinished ending');
+    return {...line,choices};
+  }
   if(!Array.isArray(parsed?.choices)||parsed.choices.length<2||parsed.choices.length>3)
     throw Error('Invalid model output');
   const choices=parsed.choices.map(choice=>canonicalForestMention(typeof choice==='string'?choice:choice?.label,context.speakers));
@@ -172,7 +176,7 @@ export function forestGenerationInput(prompt){
         (prompt.context.repliesLeft===1?
           '最後の候補は{label,outcome}。outcomeは選択後に表示する実際の台詞。' +
           (multi?'各候補のspeakerSlotは話す一人の番号。':'')+
-          'この後は子どもが返事をする番はない。続きを求めず、答え・具体的な伝言・その場の発見を言い切る。遊びを始める誘いは、遊び方やかくれ場所を聞く言葉、または想像の遊びの提案に変える。outcomeで実際に遊びを始めたり、子どもに次の行動を頼んだりしない。':
+          '最後の二択は子どもがNPCに聞きたいこと。例「どこを探す？」→「足もとの石の間だよ。」。遊びなら遊び方や想像上のかくれ場所、伝言なら届ける言葉、探索なら目の前の手掛かりを具体的に答える。NPCからは質問せず、移動や遊びの開始を約束しない。':
           'closing=trueでは選ばれた言葉にその場で応え、新しい質問を出さず、choicesは空配列。')},
         {role:'user',content:JSON.stringify(prompt)}],
       max_completion_tokens:320,temperature:.75,

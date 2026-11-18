@@ -1,7 +1,7 @@
 import {FOREST_CHARACTER_IDS,FOREST_SELF_NAMES,FOREST_GOODBYES,FOREST_WRONG_FIRST_PERSON,
   FOREST_ACTION_WRITING_IDS,FOREST_MULTI_SPEAKER_IDS,FOREST_DIALOGUE_PROTOCOL,FOREST_DISPLAY_NAMES,canonicalForestMention} from './forest-character-registry.mjs';
 import {validateTwinTurns,twinDialogueFrame} from './book-forest-twins.mjs';
-import {forestEndingChoices} from './book-forest-ending.mjs';
+import {forestEndingChoices,forestEndingNeedsReply} from './book-forest-ending.mjs';
 import {unsafeForestForaging} from './book-forest-output-safety.mjs';
 import {isCurrentForestReflection,forestReflectionArchiveCutoff} from './book-forest-reflection-spotlight.mjs';
 import {validateForestWrittenTurn,FOREST_GRADE_ONE_KANJI} from './book-forest-gesture.mjs';
@@ -19,7 +19,7 @@ const ACTION_WRITING_IDS=new Set(FOREST_ACTION_WRITING_IDS);
 const safeEnd=(id,comma=false)=>ACTION_WRITING_IDS.has(id)?
   '（ねこはしっぽをゆっくりふった。）':GOODBYE[id]||(comma?'また、森で会おうね。':'また森で会おうね。');
 const WRONG_FIRST_PERSON=FOREST_WRONG_FIRST_PERSON;
-export const FOREST_PROMPT_VERSION='forest-scene-generation-v27.1-profile2';
+export const FOREST_PROMPT_VERSION='forest-scene-generation-v27.2-profile2';
 const PROMPT_VERSION=FOREST_PROMPT_VERSION;
 const clean=value=>typeof value==='string'?value.trim().replace(/\s+/gu,' '):'';
 function readJson(storage,key,fallback){
@@ -73,6 +73,7 @@ export function validateLiveForestOutput(raw,{characterId,requireLine=false,clos
   if(lastChoices){
     const endings=forestEndingChoices(data.choices,{context,silent:gesture,multi,line:line.text,
       validLine:value=>validLine(characterId,value)});
+    if(!endings.length&&forestEndingNeedsReply(turns?.at(-1)?.text??line.text))return null;
     return {...line,labels:endings.map(choice=>choice.label),endings};
   }
   const candidates=Array.isArray(data.choices)?data.choices.slice(0,3):[];
@@ -123,7 +124,7 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
       metNpcCount:dailyContext.metNpcCount,
       relatedEncounter:dailyContext.relatedEncounter}}:{}),
     ...(recentLines.length?{avoidRecentLines:recentLines.slice(-3)}:{})};
-  const endingShape={label:'子どもの言葉',outcome:'選ばれたときそのまま見せる、具体的な返事',
+  const endingShape={label:'子どもの質問や言葉',outcome:'NPCがその質問に今ここで返す具体的な答え',
     ...(twinNames?{speakerSlot:1}:{}),...(nonverbal?{delivery:'written'}:{})};
   const finishTask=handoffTo?
     '選択を受けて、相手に会ったときに渡せる言葉をここで伝える。相手はまだ同席していない':
@@ -138,7 +139,7 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
   return {
     mode,closing,
     task:closing?finishTask:
-      mode==='reply'?'直前の会話と選ばれた言葉や行動を受け、次の反応を返す。問いの復唱だけで済ませない':
+      mode==='reply'?(repliesLeft===1?'直前の会話への反応は言い切る。最後は子どもの二つの問いと、NPCがすぐ返せる具体的な答えを組にする':'直前の会話と選ばれた言葉や行動を受け、次の反応を返す。問いの復唱だけで済ませない'):
       reviewSpotlight?'本の感想にNPC本人らしく、感想の具体的な一箇所に反応し、返答候補2つを作る。別作品なら第三者の立場を守る':
       sourceKind==='ambient'&&situation?.focus==='character'?
         '人物設定の関心・普段の行動から、本人らしい雑談や冗談と返答候補2つを作る':

@@ -1652,7 +1652,7 @@ var ForestPersonaProbe = (() => {
   }
 
   // reading-shelf-firebase/book-forest-ending.mjs
-  var unfinished = /[？?][。！!]*$|(?:おしえて|教えて|かくる|ましょう|てみよう|ついてこい|(?:みせ|見せ)てあげる)(?:ね|よ)?[。！!]*$|(?:準備(?:を)?(?:する|しよう)|じゅんび(?:を)?(?:する|しよう)|(?:探し|さがし)に(?:行こう|いこう)|(?:始め|はじめ)(?:よう|る)|(?:今度|こんど)(?:やろう|しよう))(?:ね|よ|か|ぜ|ぞ|な)?[。！!]*$/u;
+  var unfinished = /[？?][。！!]*$|(?:おしえて|教えて|かくる|ましょう|てみよう|ついてこい|(?:みせ|見せ)てあげる)(?:ね|よ|か|ぜ|ぞ|な)?[。！!]*$|(?:準備(?:を)?(?:する|しよう)|じゅんび(?:を)?(?:する|しよう)|(?:まで|へ|に)(?:行こう|いこう)|(?:始め|はじめ)(?:よう|る)|(?:今度|こんど)(?:やろう|しよう))(?:ね|よ|か|ぜ|ぞ|な)?[。！!]*$/u;
   var forestEndingNeedsReply = (text) => typeof text === "string" && unfinished.test(text.replace(/[ 　]/gu, ""));
   function forestEndingChoices(choices, { context = {}, silent = false, multi = false, line = "", validLine: validLine3 = () => true } = {}) {
     if (!Array.isArray(choices)) return [];

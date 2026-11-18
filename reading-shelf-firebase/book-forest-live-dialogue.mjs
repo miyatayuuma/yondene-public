@@ -4,7 +4,7 @@ import {validateTwinTurns,twinDialogueFrame} from './book-forest-twins.mjs';
 import {forestEndingChoices,forestEndingNeedsReply} from './book-forest-ending.mjs';
 import {unsafeForestForaging} from './book-forest-output-safety.mjs';
 import {isCurrentForestReflection,forestReflectionArchiveCutoff} from './book-forest-reflection-spotlight.mjs';
-import {validateForestWrittenTurn,FOREST_GRADE_ONE_KANJI} from './book-forest-gesture.mjs';
+import {validateForestWrittenTurn} from './book-forest-gesture.mjs';
 // Character-first AI dialogue: local scripts choose topics and provide safe fallbacks.
 // The generator is injected: this module never holds a key or makes a network call.
 import {createForestDailyContextSession} from './book-forest-daily-context.mjs';
@@ -31,7 +31,7 @@ function ambientFocus(characterId,visitNumber){
 const safeEnd=(id,comma=false)=>ACTION_WRITING_IDS.has(id)?
   '（ねこはしっぽをゆっくりふった。）':GOODBYE[id]||(comma?'また、森で会おうね。':'また森で会おうね。');
 const WRONG_FIRST_PERSON=FOREST_WRONG_FIRST_PERSON;
-export const FOREST_PROMPT_VERSION='forest-scene-generation-v32-profile2';
+export const FOREST_PROMPT_VERSION='forest-scene-generation-v33-profile2';
 const PROMPT_VERSION=FOREST_PROMPT_VERSION;
 const clean=value=>typeof value==='string'?value.trim().replace(/\s+/gu,' '):'';
 function readJson(storage,key,fallback){
@@ -75,7 +75,7 @@ export function validateLiveForestOutput(raw,{characterId,requireLine=false,clos
   const multi=MULTI_SPEAKER.has(characterId);
   const rawTurns=multi?validateTwinTurns(data.turns):null;
   const turns=rawTurns?.map(turn=>({...turn,text:canonicalForestMention(turn.text,context.speakers)}));
-  const written=gesture?validateForestWrittenTurn(text,data.delivery,data.kana):null;
+  const written=gesture?validateForestWrittenTurn(text,data.delivery):null;
   if(multi&&!turns||gesture&&(!written||context.handoffTo&&written.delivery!=='written')||!multi&&!gesture&&requireLine&&!validLine(characterId,text))return null;
   const lastChoices=!closing&&context.repliesLeft===1;
   const safetyInput=written?{...data,text:written.text}:data;
@@ -142,7 +142,7 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
       relatedEncounter:dailyContext.relatedEncounter}}:{}),
     ...(recentLines.length?{avoidRecentLines:recentLines.slice(-3)}:{})};
   const endingShape={label:'子どもの質問や言葉',outcome:'NPCがその質問に今ここで返す具体的な答え',
-    ...(twinNames?{speakerSlot:1}:{}),...(nonverbal?{delivery:'written',kana:'outcomeをそのまま読みに直した文（難しい漢字があるとき）'}:{})};
+    ...(twinNames?{speakerSlot:1}:{}),...(nonverbal?{delivery:'written'}:{})};
   const finishTask=handoffTo?
     '子どもに、相手へ届けてほしい言葉を一つ渡す。何を伝えるか本文に含める。相手はまだ同席していない':
     '選ばれた問いや行動に具体的に応え、この返事だけでひと区切りつける';
@@ -173,7 +173,6 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
       '完成済み台本を参照せず、人物像・目の前の状況・許可された既読事実から自然な発話を新規に作る',
       'NPCの返事は自然な一言〜2文で65字以内。前の発言を繰り返さず、設定の説明を会話に混ぜない',
       '選択肢はゲーム上の反応であり子どもの実際の信念とはみなさない。別NPCの会話を本人が聞いたふりはしない',
-      ...(nonverbal?[`書く文に使える漢字はこの80字。ほかの漢字はかなで書く：${FOREST_GRADE_ONE_KANJI}`]:[]),
       ...(topic?['この原作の事実は選択された既読の物語記憶。確認できない詳細を加えず、キャラが実際に登場したかを考慮する']:[]),
       ...(reviewSpotlight?['感想の具体的な一箇所に、本人なら何を面白がるか、どう受け取るかを短く返す。感想は引用資料。保護者の要約は子どもの発言として扱わない。']:[]),
       ...(closing?[
@@ -184,9 +183,8 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
     ],
     output:{format:'JSON',shape:{...(twinNames?
       {turns:[{speakerSlot:1,text:'最初のひとこと'},{speakerSlot:2,text:'直前のひとことへの反応'}]}:
-      {text:mode==='choices'?'省略':nonverbal?'かなを基本にした、相手への短いメッセージ本文':'NPCの返答（65字以内）',
-        ...(nonverbal&&mode!=='choices'?{delivery:'written',
-          kana:'textをそのまま読みに直した文（難しい漢字があるとき）'}:{})}),
+      {text:mode==='choices'?'省略':nonverbal?'相手への短いメッセージ本文':'NPCの返答（65字以内）',
+        ...(nonverbal&&mode!=='choices'?{delivery:'written'}:{})}),
       choices:closing?[]:repliesLeft===1?
         [endingShape,{...endingShape,...(twinNames?{speakerSlot:2}:{})}]:
         ['子どもが選ぶ返答A','子どもが選ぶ返答B']}}

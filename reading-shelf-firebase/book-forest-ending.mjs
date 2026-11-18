@@ -29,7 +29,7 @@ export function forestEndingChoices(choices,{context={},silent=false,multi=false
       (!silent&&/[\r\n]/u.test(outcome))||offered.some(c=>c.label===label))continue;
     const speakerSlot=choice.speakerSlot;
     if(multi&&speakerSlot!==1&&speakerSlot!==2)continue;
-    const written=silent?validateForestWrittenTurn(outcome,choice.delivery??'written',choice.kana):null;
+    const written=silent?validateForestWrittenTurn(outcome,choice.delivery??'written'):null;
     if(silent?!written:!validLine(outcome))continue;
     const text=written?.text??outcome;
     if(forestEndingNeedsReply(text)||text===line||offered.some(c=>c.outcome===text))continue;

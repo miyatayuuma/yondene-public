@@ -6,7 +6,7 @@ import {validateTwinTurns} from '../../../reading-shelf-firebase/book-forest-twi
 // よんでね 本の森: a small, owner-only proxy for the free Workers AI allowance.
 // No bookshelf data, Firebase private credentials, or Cloudflare API keys here.
 const MODEL='@cf/google/gemma-4-26b-a4b-it';
-export const FOREST_WORKER_VERSION='forest-dialogue-v29-profile2';
+export const FOREST_WORKER_VERSION='forest-dialogue-v30-profile2';
 const VERSION=FOREST_WORKER_VERSION;
 const JWKS_URL='https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com';
 const ORIGINS=new Set(['https://kodomo-reading-shelf-87f11.web.app',
@@ -112,7 +112,7 @@ export function readCompletion(result,{closing=false,mode='reply',characterId=''
   const turns=validatedTurns?.map(turn=>({...turn,text:canonicalForestMention(turn.text,context.speakers)}));
   if(multi&&!turns)throw Error('Invalid model speaker turns');
   const silent=ACTION_WRITING_IDS.has(characterId);
-  const written=silent?validateForestWrittenTurn(parsed?.text,parsed?.delivery,parsed?.kana):null;
+  const written=silent?validateForestWrittenTurn(parsed?.text,parsed?.delivery):null;
   if(silent&&!written)throw Error('Invalid silent cat action');
   if(silent&&context.handoffTo&&written.delivery!=='written')throw Error('Invalid silent relay message');
   const lastChoices=!closing&&context.repliesLeft===1;
@@ -153,7 +153,7 @@ export function forestGenerationInput(prompt){
         '子どもの個人情報を質問しない。物語にない出来事を断定しない。'+
         '日本語で人物らしい短い会話を作る。'+
         (actionWriting?
-          'このNPCは声や心の声を使わず、ふつうは文字で会話する。{"delivery":"written","text":"雨がふったら 木の下で休もう。"}。textは相手へのメッセージ本文だけ。かっこ書き、文字を書く場面、書く場所や道具は要らない。人物資料の「身振り」「筆記」は人物像の参考。書く言葉の内容は他の人物と同じように考え、表記はかなを基本にする。本文と最後のoutcomeは、読みやすく区切ったひらがなを基本に、名前のカタカナは使ってよい。書名・資料の言葉もかなに直す。一覧にない漢字が残るときは、同じオブジェクトのkanaに、漢字のところだけを読みに直した全文を入れる（text:「お城の ことだね。」、kana:「おしろの ことだね。」）。意味・かな・句読点はそのまま。ひと目で意味が分かる身振りだけのときはdelivery:"gesture"、textは（うなずく）のような動きだけ。':'')+
+          'このNPCは声や心の声を使わず、ふつうは文字で会話する。{"delivery":"written","text":"雨がふったら 木の下で休もう。"}。textは相手へのメッセージ本文だけ。かっこ書き、文字を書く場面、書く場所や道具は要らない。人物資料の「身振り」「筆記」は人物像の参考。書く言葉の内容は他の人物と同じように考え、本文と最後のoutcomeでは、ひらがなや小学1年生で習う漢字をできるだけ使い、自然に伝わる言葉を選ぶ。ひと目で意味が分かる身振りだけのときはdelivery:"gesture"、textは（うなずく）のような動きだけ。':'')+
         '生成する発話と選択肢の人名は、IDから推測せずcontext.npcDisplayNamesまたはcontext.speakersの表示名を使う。'+
         '人物像はnpc.voiceの非公開台帳由来の設定に従い、設定を説明するだけの文にしない。出力の書式はこの指示に従う。'+
         '各項目の根拠区分・監修状態・適用範囲と本文中の留保を守る。二次資料は原作本文ではない。'+
@@ -191,7 +191,7 @@ export function forestGenerationInput(prompt){
           '例「どこにかくれる？」→「木のうら。ぼうしが見えたら、すぐ見つかっちゃうね。」。outcomeで新しく質問したり、続きの操作を促したりしない。':
           'closing=trueでは選ばれた言葉にその場で応え、新しい質問を出さず、choicesは空配列。')},
         {role:'user',content:JSON.stringify(prompt)}],
-      max_completion_tokens:actionWriting?420:320,temperature:actionWriting?.55:.75,
+      max_completion_tokens:320,temperature:actionWriting?.55:.75,
       chat_template_kwargs:{enable_thinking:false}};
 }
 

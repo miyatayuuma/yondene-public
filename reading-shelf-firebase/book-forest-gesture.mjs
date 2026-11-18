@@ -1,21 +1,14 @@
 // Written dialogue and silent gestures use the same text field.
-// MEXT's grade-one 80 kanji: https://www.mext.go.jp/a_menu/shotou/new-cs/news/080216/002.pdf
-export const FOREST_GRADE_ONE_KANJI=
-  '一右雨円王音下火花貝学気九休玉金空月犬見'+
-  '五口校左三山子四糸字耳七車手十出女小上森'+
-  '人水正生青夕石赤千川先早草足村大男竹中虫'+
-  '町天田土二日入年白八百文木本名目立力林六';
-const GRADE_ONE_SET=new Set([...FOREST_GRADE_ONE_KANJI]);
 export const FOREST_WRITTEN_TURN_LIMIT=65;
 const WRITTEN_LAYOUT_LIMIT=100;
-const WRITTEN_CHARACTER=/^[\p{Script=Hiragana}\p{Script=Katakana}ー・、。！？「」『』!? 　]$/u;
-export function validForestWrittenGlyphs(value){
-  return typeof value==='string'&&value.length<=WRITTEN_LAYOUT_LIMIT&&
+const JAPANESE_LETTER=/[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u;
+const WRITTEN_CHARACTERS=/^[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}ー・、。！？「」『』!? 　]+$/u;
+function validWrittenText(value){
+  return value.length<=WRITTEN_LAYOUT_LIMIT&&
     value.replace(/[ 　]/gu,'').length<=FOREST_WRITTEN_TURN_LIMIT&&
-    [...value].some(char=>/[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(char)||GRADE_ONE_SET.has(char))&&
-    [...value].every(char=>WRITTEN_CHARACTER.test(char)||GRADE_ONE_SET.has(char));
+    JAPANESE_LETTER.test(value)&&WRITTEN_CHARACTERS.test(value);
 }
-const FORBIDDEN_SPEECH=/[「」『』]|しゃべ|おしゃべり|話しかけ|話し(?:た|て|出)|話す|言っ|言う|声を出|ささや|つぶや|よびかけ|呼びかけ/iu;
+const SPEECH_ACTION=/しゃべ|喋|話しかけ|話し(?:た|て|出)|話す|言っ|言う|声を出|声に出|ささや|囁|つぶや|呟|よびかけ|呼びかけ|といった/u;
 // Describing an action must not smuggle an inner monologue into the narration.
 // These checks concern *speech* and *inner voice*, not which noun starts a sentence.
 const INNER_VOICE=/心の(?:中|声)|頭の中|胸の内|内心|ひそかに(?:思|考)|と(?:思った|思う|思い|考えた|考える)/iu;
@@ -23,44 +16,18 @@ const INNER_VOICE=/心の(?:中|声)|頭の中|胸の内|内心|ひそかに(?:�
 // Do not classify a short *action* as speech just because it has no explicit cat subject.
 const BARE_GREETING=/^（(?:こんにちは|こんばんは|おはよう(?:ございます)?|ありがとう(?:ございます)?|さようなら|おやすみ(?:なさい)?|どうも|はい|いいえ|おーい|ごめん(?:なさい)?)[！!？?。、]*）$/u;
 const WRITING_ACTION=/書(?:い|き|く|け|こ)|か(?:い|き|く)[^。]{0,8}(?:見せ|みせ|差し出|さしだ)|(?:紙|地面|落ち葉|葉っぱ|はっぱ|おちば|字|文字)に[^。]{0,12}か(?:いた|き|く)|(?:地面|じめん)をなぞ|(?:もじ|文字|めも|メモ)を(?:かく|かいた|かいて|かき)/u;
+const WRITING_ONLY_END=/(?:書(?:いた|く|きました)|か(?:いた|く|きました)|(?:見せ|みせ|差し出し|さしだし)(?:た|ます))(?:よ|ね)?[。！!]*$/u;
 const WRITTEN_STAGE_DIRECTION=/^(?:[（(]|(?:ねこは)?(?:.*[、])?(?:もじ|文字|めも|メモ)を(?:かく|かいた|書く|書いた)(?:[。！!]|$))/u;
+const CAT_NARRATION=/^(?:ねこ|ネコ|猫)[はが]/u;
+const WRITING_SURFACE=/^(?:紙|地面|じめん|落ち葉|葉っぱ|はっぱ|おちば|字|文字)[にを]/u;
 const PARENTHETICAL_ACTION=/^（[^（）\n\r]+）$/u;
 
 function validGesture(text){
   return text.length<=FOREST_WRITTEN_TURN_LIMIT&&PARENTHETICAL_ACTION.test(text)&&
-    !FORBIDDEN_SPEECH.test(text)&&!INNER_VOICE.test(text)&&!BARE_GREETING.test(text)&&!/[{}<>]/u.test(text);
+    !SPEECH_ACTION.test(text)&&!INNER_VOICE.test(text)&&!BARE_GREETING.test(text)&&!/[「」『』{}<>]/u.test(text);
 }
 
-// Model-supplied readings may replace kanji runs, keeping kana and punctuation
-// in place. Track reachable offsets so repeated words cannot cause backtracking.
-function verifiedWrittenReading(text,reading){
-  if(typeof reading!=='string'||!validForestWrittenGlyphs(reading)||text.length>WRITTEN_LAYOUT_LIMIT)
-    return null;
-  const words=text.replace(/[ 　]/gu,'').split(/(\p{Script=Han}+)/u);
-  const isKana=char=>/[\p{Script=Hiragana}\p{Script=Katakana}ー]/u.test(char);
-  if(!words.some((part,index)=>index%2===1&&[...part].some(char=>!GRADE_ONE_SET.has(char)))||
-    !words.some((part,index)=>index%2===0&&[...part].some(isKana)))return null;
-  const target=reading.replace(/[ 　]/gu,'');
-  let offsets=new Set([0]);
-  for(const [index,part] of words.entries()){
-    if(!part)continue;
-    const next=new Set();
-    const replaceKanji=index%2===1&&[...part].some(char=>!GRADE_ONE_SET.has(char));
-    for(const offset of offsets){
-      if(!replaceKanji){
-        if(target.startsWith(part,offset))next.add(offset+part.length);
-        continue;
-      }
-      const limit=Math.min(target.length,offset+Math.min(part.length*6,24));
-      for(let end=offset;end<limit&&isKana(target[end]);end++)next.add(end+1);
-    }
-    if(!next.size)return null;
-    offsets=next;
-  }
-  return offsets.has(target.length)?reading:null;
-}
-
-export function validateForestWrittenTurn(rawText,delivery,kana){
+export function validateForestWrittenTurn(rawText,delivery){
   if(typeof rawText!=='string')return null;
   const text=rawText.normalize('NFC').trim();
   if(delivery==='written'){
@@ -68,10 +35,14 @@ export function validateForestWrittenTurn(rawText,delivery,kana){
     const annotated=/^(?:（([^（）\r\n]+)）|\(([^()\r\n]+)\))[ 　]*\r?\n([\s\S]+)$/u.exec(text);
     const message=annotated&&validGesture('（'+(annotated[1]??annotated[2])+'）')?annotated[3].trim():text;
     const body=message.replace(/[ 　]*\r?\n[\r\n 　]*/gu,' ');
-    if(WRITTEN_STAGE_DIRECTION.test(body))return null;
-    if(validForestWrittenGlyphs(body))return {text:body,delivery};
-    const reading=verifiedWrittenReading(body,typeof kana==='string'?kana.normalize('NFC').trim():null);
-    if(reading)return {text:reading,delivery};
+    const compact=body.replace(/[ 　]/gu,'');
+    const narration=CAT_NARRATION.test(compact);
+    const writingOnly=(narration||WRITING_SURFACE.test(compact))&&
+      WRITING_ONLY_END.test(compact)&&WRITING_ACTION.test(compact);
+    if(WRITTEN_STAGE_DIRECTION.test(compact)||writingOnly||
+      narration&&(SPEECH_ACTION.test(compact)||INNER_VOICE.test(compact)))
+      return null;
+    if(validWrittenText(body))return {text:body,delivery};
   }
   if(delivery==='gesture'){
     const action=text.replace(/^\(([^()（）\r\n]+)\)$/u,'（$1）');

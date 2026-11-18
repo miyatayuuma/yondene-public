@@ -48,7 +48,7 @@ test('generates contextual reply choices, then a character reply only after a ch
   const log=JSON.parse(storage.getItem('forest-ai-local-v1:log'));
   assert.deepEqual(log.map(x=>x.event),['generated-opening','selected-offered-choice','generated-reply']);
   assert.equal(log[0].text,first.text,'export can reconstruct the initial line');
-  assert.equal(log[0].promptVersion,'forest-scene-generation-v26-profile2');
+  assert.equal(log[0].promptVersion,'forest-scene-generation-v26-planned-profile2');
   assert.equal(log[1].label,'風の音を聞く');
   director.end();
 });
@@ -71,8 +71,10 @@ test('a second AI reply ends the encounter naturally without requesting or showi
   const storage=memoryStorage(),prompts=[];
   const generator=async prompt=>{
     prompts.push(prompt);
-    return prompt.task.includes('返答候補だけ')?{choices:['森を歩こう','お話ししよう']}:
-      {text:'また森で会えるのが楽しみだね。',choices:['もう少し聞く','ここで待つ']};
+    const choices=prompt.context.repliesLeft===1?
+      [{label:'何の音？',outcome:'風が木を鳴らす音だと答える'},
+        {label:'ここで待つ',outcome:'風の音が弱まるまで耳を澄ます'}]:['もう少し聞く','ここで待つ'];
+    return {text:'森の奥から音がするね。',choices};
   };
   const director=createForestLiveDialogueDirector({base:base(),generate:generator,storage});
   let result=await director.start(identity);
@@ -84,6 +86,8 @@ test('a second AI reply ends the encounter naturally without requesting or showi
   assert.equal(result.conversationComplete,true);
   assert.ok(prompts[1].constraints.some(text=>text.includes('これが最後の二択')));
   assert.ok(prompts[2].constraints.some(text=>text.includes('この場で一手進んだ結果')));
+  assert.equal(prompts[2].context.chosenLabel,'何の音？');
+  assert.equal(prompts[2].context.choiceOutcome,'風が木を鳴らす音だと答える');
   assert.equal(prompts.length,3,'one opening generation and two replies');
   assert.equal(director.getProgress().aiRepliesThisSession,2);
   await director.select({...identity,choiceId:'old-choice'});

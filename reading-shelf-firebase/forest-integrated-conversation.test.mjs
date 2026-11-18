@@ -230,13 +230,18 @@ test('registered names, written cat replies and the remaining reply count surviv
       return {response:JSON.stringify({
         text:closing?'ほら、切り株のかげに丸い石があったぞ。':mode==='opening'
           ?'切り株のかげに、何かあるぞ。':'葉っぱをどけると、丸いものが見えるぞ。',
-        choices:closing?[]:['ハチビーはどう思う？','一緒に見てみよう']})};
+        choices:closing?[]:mode==='opening'?['ハチビーはどう思う？','一緒に見てみよう']:
+          [{label:'丸いものって何？',outcome:'切り株のかげで見つけた丸い石だと答える'},
+            {label:'一緒に見てみよう',outcome:'目の前の石を指さす'}]})};
     }});
   assert.deepEqual(run.trace.map(t=>t.prompt.context.repliesLeft),[2,1,0,2,1,0]);
   assert.equal(run.trace[0].prompt.npc.displayName,'ハチベエ');
   assert.equal(run.trace[3].prompt.context.npcDisplayNames.hachibee,'ハチベエ');
   assert.equal(run.frames[0].result.choices[0].label,'ハチベエはどう思う？');
   assert.equal(run.trace[1].prompt.context.chosenLabel,'ハチベエはどう思う？');
+  assert.equal(run.trace[2].prompt.context.chosenLabel,'丸いものって何？');
+  assert.equal(run.trace[2].prompt.context.choiceOutcome,'切り株のかげで見つけた丸い石だと答える');
+  assert.deepEqual(Object.keys(run.frames[1].result.choices[0]).sort(),['id','label']);
   assert.equal(run.frames[2].result.conversationComplete,true);
   assert.equal(run.frames[3].result.delivery,'written');
   assert.match(run.frames[3].result.text,/^キキと ジジ/u);

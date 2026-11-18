@@ -178,6 +178,6 @@ Cloudflareのサインインが一般的なエラーで拒否され、配信権�
 ## Android v25 ログを受けた書字と会話の区切り
 
 - ねこの文章を通常会話と同じ `text` に置き、`delivery:written` で表示と履歴に渡す。書字の場所や動作は生成しない。会話欄の固定補足は履歴に入れない。静かな身振りは `delivery:gesture` を使う。
-- 会話を最大2返答で区切る。最後の候補はそれぞれにその場で返せる答えや反応があるものを作る。実際に台本側で引き継ぎを予約した場合だけ、相手の表示名を `context.handoffTo` として生成に渡す。
+- 会話を最大2返答で区切る。最後の候補はラベルとその場で返せる答えや反応を一緒に作る。画面にはラベルだけを出し、子どもが選んだ候補の着地点を最終の生成に渡す。実際に台本側で引き継ぎを予約した場合だけ、相手の表示名を `context.handoffTo` として生成に渡す。
 - 検証専用GASは `node scripts/build-forest-persona-probe.mjs` で再生成する。同じ人物設定・本番ディレクター・出力検証を用い、1訪問あたり最大3モデル呼出し、1日76回の既存上限を適用する。
 - 配信順はWorkerからHosting。正式Workerの `/health` で `forest-dialogue-v25-profile2`、`scene-dialogue-v25-profile2`、`registryRevision=1ommzez`、`configured=true` を確認してから、Hosting `20261118-forest-written-dialogue-v26` を配信する。

@@ -127,9 +127,14 @@ export function readCompletion(result,{closing=false,mode='reply',characterId=''
     throw Error('Opening line required');
   if(!written&&parsed.text!==undefined&&(typeof parsed.text!=='string'||parsed.text.length>90))
     throw Error('Invalid model text');
+  const offered=choices.slice(0,2).map((label,i)=>{
+    const raw=context.repliesLeft===1?parsed.choices[i]?.outcome:null;
+    const outcome=typeof raw==='string'?raw.trim():'';
+    return outcome&&outcome.length<=60&&!/[\r\n{}<>]/u.test(outcome)?{label,outcome}:label;
+  });
   // Gemma may supply a third button despite the requested two. Keep its valid
   // NPC line and normalize the UI-only choices instead of discarding the turn.
-  return {choices:choices.slice(0,2),...(turns?{turns}:typeof text==='string'?{text}:{}),
+  return {choices:offered,...(turns?{turns}:typeof text==='string'?{text}:{}),
     ...(written?{delivery:written.delivery}:{})};
 }
 
@@ -165,8 +170,8 @@ export function forestGenerationInput(prompt){
           '二人目は一人目の言葉に反応する。発話に話者ラベルやかぎ括弧を付けず、各65字以内。子どもへの問いかけは二人目まで待つ。':'')+
         '現在の場面はsituation.placeに留める。森の小さな即興は目の前で起こることから選ぶ。移動や合流を済ませたふりはせず、よその場所は想像や思い出として話す。'+
         '選択肢は今の話への子どもの言葉や行動を2つ。context.repliesLeftは選択後に返答できる回数。'+
-        '残り1回なら、候補ごとに次の一答で渡せる答えや反応を考えてから、ラベルだけを返す。共同作業なら、その場で一手進んで区切れるものにする。探しに出発したり別の人に会ったりする必要がある約束を選択肢にしない。'+
-        'closing=trueではcontext.chosenLabelに具体的に応え、選択に応じた答え、反応、結果のいずれかをここで返す。親しみのある短いひとことや静かな余韻でもよい。新しい質問や次の行動を要求せず、choicesは空配列。'},
+        '残り1回なら各候補を{label,outcome}にする。outcomeは次の返答で渡す具体的な答えか、小さな反応・結果（60字以内）。たとえば音の質問には音の正体、共同作業には今できた一手を書く。移動や後の約束に頼らない。'+
+        'closing=trueではcontext.chosenLabelに具体的に応え、choiceOutcomeがあれば、それに沿った答えや結果をここで渡す。親しみのある短いひとことや静かな余韻でもよい。新しい質問や次の行動を要求せず、choicesは空配列。'},
         {role:'user',content:JSON.stringify(prompt)}],
       max_completion_tokens:320,temperature:.75,
       chat_template_kwargs:{enable_thinking:false}};

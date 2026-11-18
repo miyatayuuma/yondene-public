@@ -18,7 +18,7 @@ const ACTION_WRITING_IDS=new Set(FOREST_ACTION_WRITING_IDS);
 const safeEnd=(id,comma=false)=>ACTION_WRITING_IDS.has(id)?
   '（ねこはしっぽをゆっくりふった。）':GOODBYE[id]||(comma?'また、森で会おうね。':'また森で会おうね。');
 const WRONG_FIRST_PERSON=FOREST_WRONG_FIRST_PERSON;
-export const FOREST_PROMPT_VERSION='forest-scene-generation-v26-profile2';
+export const FOREST_PROMPT_VERSION='forest-scene-generation-v26-planned-profile2';
 const PROMPT_VERSION=FOREST_PROMPT_VERSION;
 const clean=value=>typeof value==='string'?value.trim().replace(/\s+/gu,' '):'';
 function readJson(storage,key,fallback){
@@ -68,15 +68,21 @@ export function validateLiveForestOutput(raw,{characterId,requireLine=false,clos
   const line=turns?{text:turns.map(turn=>turn.text).join(' '),turns}:written||{text};
   if(closing)return {...line,labels:[]};
   const candidates=Array.isArray(data.choices)?data.choices.slice(0,3):[];
-  const labels=[...new Set(candidates.map(choice=>canonicalForestMention(clean(typeof choice==='string'?choice:choice?.label),context.speakers))
-    .filter(label=>label.length>=2&&label.length<=24&&!/[\r\n{}<>「」]/u.test(label)))].slice(0,2);
-  // If a good NPC reply came back with poor buttons, retain the distinctive
-  // line and use neutral CHILD choices. An opening without choices stays local.
+  const byLabel=new Map();
+  for(const choice of candidates){
+    const label=canonicalForestMention(clean(typeof choice==='string'?choice:choice?.label),context.speakers);
+    if(label.length<2||label.length>24||/[\r\n{}<>「」]/u.test(label)||byLabel.has(label))continue;
+    const outcome=context.repliesLeft===1?clean(choice?.outcome):'';
+    byLabel.set(label,outcome.length<=60&&!/[{}<>]/u.test(outcome)?outcome:'');
+  }
+  const labels=[...byLabel.keys()].slice(0,2);
+  // Keep a valid NPC line playable if the model returned unusable buttons.
   if(labels.length<2){
     if(!requireLine)return null;
     return {...line,labels:gesture?['もうすこしみる','またね']:['もう少し聞く','またね']};
   }
-  return {...line,text:requireLine?line.text:null,labels};
+  const outcomes=labels.map(label=>byLabel.get(label));
+  return {...line,text:requireLine?line.text:null,labels,...(outcomes.some(Boolean)?{outcomes}:{})};
 }
 
 function promptScene(scene,sourceKind){
@@ -89,7 +95,7 @@ function promptScene(scene,sourceKind){
 }
 
 export function promptFor({characterId,mode,chosenLabel='',history=[],closing=false,topic=null,
-  characterProfile=null,sourceKind='',dailyContext=null,recentLines=[],reviewSpotlight=null,situation=null,twinNames=null,repliesLeft=closing?0:2,handoffTo=''}){
+  characterProfile=null,sourceKind='',dailyContext=null,recentLines=[],reviewSpotlight=null,situation=null,twinNames=null,repliesLeft=closing?0:2,handoffTo='',choiceOutcome=''}){
   const guide=forestCharacterVoiceGuide(characterProfile);
   const npc={id:characterId,displayName:FOREST_DISPLAY_NAMES[characterId],voice:guide,profileSchemaVersion:2,
     profileRevision:guide?characterProfile.revision:'',profileVersion:guide?characterProfile.version:''};
@@ -101,6 +107,7 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
   const context={npcLine:'',sourceKind,repliesLeft,npcDisplayNames:FOREST_DISPLAY_NAMES,
     ...(twinNames?{speakers:[{slot:1,name:twinNames.firstName},{slot:2,name:twinNames.secondName}]}:{}),
     ...(handoffTo?{handoffTo:FOREST_DISPLAY_NAMES[handoffTo]}:{}),
+    ...(choiceOutcome?{choiceOutcome}:{}),
     chosenLabel:clean(chosenLabel).slice(0,24),...(situation?{situation}:{}),
     recentTurns:history.slice(-4),...(topic?{topic}:{}),
     ...(reviewSpotlight?{readerReflection:Object.fromEntries(
@@ -146,14 +153,17 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
       ...(closing?[
         '質問なら答えを言い切る。行動なら、この場で一手進んだ結果まで返す。「よし、始めよう」で止めない。移動が必要な選択でも、ここで分かることや伝えられる言葉を一つ返す。新しい問いは出さずchoices:[]'
       ]:repliesLeft===1?[
-        'これが最後の二択。それぞれを選んだ子に、次の一答で何を渡せるか具体的に考える。共同作業ならこの場で完了する一手に絞り、移動や誰かを探しに行く誘いは、今わかることを聞く・言葉を託すなどに置き換える'
+        'これが最後の二択。各候補に、次の一答で子どもが受け取れる具体的な答えや結果をoutcomeに添える。その場で完了する一手に絞り、約束や発案だけのoutcomeは作らない'
       ]:[])
     ],
     output:{format:'JSON',shape:{...(twinNames?
       {turns:[{speakerSlot:1,text:'最初のひとこと'},{speakerSlot:2,text:'直前のひとことへの反応'}]}:
       {text:mode==='choices'?'省略':'NPCの返答（65字以内）',
         ...(nonverbal&&mode!=='choices'?{delivery:'written'}:{})}),
-      choices:closing?[]:['子どもが選ぶ返答A','子どもが選ぶ返答B']}}
+      choices:closing?[]:repliesLeft===1?
+        [{label:'子どもの返答A',outcome:'次の一答で渡す具体的な答えや結果A'},
+          {label:'子どもの返答B',outcome:'次の一答で渡す具体的な答えや結果B'}]:
+        ['子どもが選ぶ返答A','子どもが選ぶ返答B']}}
   };
 }
 
@@ -200,7 +210,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     return true;
   }
   async function request(characterId,mode,npcLine,chosenLabel='',closing=false,topic=null,
-    sourceKind='',reviewSpotlight=null,handoffTo=''){
+    sourceKind='',reviewSpotlight=null,{handoffTo='',choiceOutcome=''}={}){
     if(!reserve())return null;
     const previousLogs=readJson(storage,logKey,[]);
     const recentLines=(Array.isArray(previousLogs)?previousLogs:[]).filter(entry=>entry?.characterId===characterId&&
@@ -209,7 +219,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     const context=promptFor({characterId,mode,chosenLabel,history,closing,topic,
       characterProfile:activeCharacterProfile,sourceKind,
       dailyContext:reviewSpotlight||sourceKind==='review-reaction'?null:activeDaily,situation:activeSituation,
-      recentLines,reviewSpotlight,twinNames,handoffTo,
+      recentLines,reviewSpotlight,twinNames,handoffTo,choiceOutcome,
       repliesLeft:closing?0:Math.max(0,Math.min(maxReplies,sessionLimit-1)-repliesThisSession-(mode==='reply'?1:0))});
     const controller=createAbortController(),startedAt=now();
     inflight={controller,characterId,mode,startedAt};
@@ -256,7 +266,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     const relay=meta.relayChoice;
     const choices=labels.slice(0,relay?1:2).map((label,i)=>({id:`ai-${++serial}-${i}`,label}));
     if(relay)choices.push({id:relay.id,label:relay.label,relayTo:relay.relayTo});
-    pending={characterId,text,choices,...meta};
+    pending={characterId,text,choices,outcomes:result.outcomes,...meta};
     return present(result,choices);
   }
   function finish(characterId){
@@ -436,7 +446,8 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
       return original?scripted(original,characterId):{text:safeEnd(characterId),choices:[],conversationComplete:true};
     }
     pending=null;
-    const label=current.choices.find(choice=>choice.id===choiceId).label;
+    const chosenIndex=current.choices.findIndex(choice=>choice.id===choiceId);
+    const {label}=current.choices[chosenIndex];
     const allowed=await sourceStillAllowed(current);
     if(closed||generation!==epoch)return null;
     if(!allowed)return finish(characterId);
@@ -449,7 +460,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
       if(closed||generation!==epoch)return null;
       history.push({playerChoice:label});history=history.slice(-4);
       const generated=await request(characterId,'reply',current.text,label,true,activeTopic,
-        current.sourceKind,null,current.relayChoice.relayTo);
+        current.sourceKind,null,{handoffTo:current.relayChoice.relayTo});
       if(closed||generation!==epoch)return null;
       if(!generated){
         record({event:'script-fallback',characterId,reason:'relay-generation-unavailable',
@@ -469,7 +480,8 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
       /^(?:またね|ばいばい|バイバイ|帰る|かえる|おしまい|また今度)[。！!]*$/u.test(label);
     const topic=activeTopic;
     const generated=await request(characterId,'reply',current.text,label,closing,topic,
-      current.sourceKind,current.reviewEvidence||null);
+      current.sourceKind,current.reviewEvidence||null,
+      {choiceOutcome:closing?current.outcomes?.[chosenIndex]:''});
     const stillAllowed=!current.reviewEvidence||!getCurrentReflection||await sourceStillAllowed(current);
     if(closed||generation!==epoch)return null;
     if(!stillAllowed)return finish(characterId);

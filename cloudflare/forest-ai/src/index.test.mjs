@@ -197,7 +197,7 @@ test('Worker sends written dialogue and silent gestures through one dialogue con
     const {profileRevision,...rest}=await res.json();
     assert.deepEqual(rest,expected);
   }
-  assert.match(messages[0][0].content,/残り1回なら、候補ごとに次の一答で渡せる答えや反応/);
+  assert.match(messages[0][0].content,/残り1回なら各候補を\{label,outcome\}/);
   assert.match(messages[0][0].content,/声や心の声を使わず/);
   assert.match(messages[0][1].content,/非公開Sheetsの合成設定A/);
   assert.doesNotMatch(messages[0][0].content,/王さまの親友|家事・買い物/);

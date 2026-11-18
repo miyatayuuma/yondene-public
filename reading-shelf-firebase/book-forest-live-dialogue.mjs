@@ -111,7 +111,7 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
       metNpcCount:dailyContext.metNpcCount,
       relatedEncounter:dailyContext.relatedEncounter}}:{}),
     ...(recentLines.length?{avoidRecentLines:recentLines.slice(-3)}:{})};
-  const finishTask='選んだ言葉や行動に、その場で起きる小さな結果や具体的な返事を返して終える。次の行動を始めてすぐ別れない。静かな余韻でもよい';
+  const finishTask='選んだ言葉には具体的に返事をし、一緒に何かをする選択ならその場で小さな結果まで返す。始め方の提案や出発で止めない。静かな余韻でもよい';
   const choiceTask='子どもの返答候補は2個、各16字以内。残りの返答で応えられる言葉や行動を選び、移動や後で実行する約束を前提にしない';
   if(nonverbal)return {
     mode,closing,

@@ -168,7 +168,7 @@ export function forestGenerationInput(prompt){
           'mark={surface:noteまたはgroundまたはleaf,word:ひらがなと小学1年生までの漢字・読点句点・！？からなる1〜48文字}。'+
           '書き言葉も話す人物と同様に相手の問いや選択に答えられる。':
           '')+
-        'context.repliesLeftはこの発話の後で選択に返せる回数。closing=trueなら直前の選択に具体的な返事やその場の小さな結果を返す。出発や先の約束を始めず、新たな質問を出さず、choicesは空配列。'},
+        'context.repliesLeftはこの発話の後で選択に返せる回数。closing=trueなら直前の選択に具体的に返す。一緒に探す選択なら、たとえばその場で見える手掛かりを一つ示す。次の行動の提案や約束、新たな質問は出さず、choicesは空配列。'},
         {role:'user',content:JSON.stringify(prompt)}],
       max_completion_tokens:320,temperature:.75,
       chat_template_kwargs:{enable_thinking:false}};

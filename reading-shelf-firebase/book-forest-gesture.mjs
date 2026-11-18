@@ -31,7 +31,36 @@ function validGesture(text){
     !FORBIDDEN_SPEECH.test(text)&&!INNER_VOICE.test(text)&&!BARE_GREETING.test(text)&&!/[{}<>]/u.test(text);
 }
 
-export function validateForestWrittenTurn(rawText,delivery){
+// Model-supplied readings may replace kanji runs, keeping kana and punctuation
+// in place. Track reachable offsets so repeated words cannot cause backtracking.
+function verifiedWrittenReading(text,reading){
+  if(typeof reading!=='string'||!validForestWrittenGlyphs(reading)||text.length>WRITTEN_LAYOUT_LIMIT)
+    return null;
+  const words=text.replace(/[ 　]/gu,'').split(/(\p{Script=Han}+)/u);
+  const isKana=char=>/[\p{Script=Hiragana}\p{Script=Katakana}ー]/u.test(char);
+  if(!words.some((part,index)=>index%2===1&&[...part].some(char=>!GRADE_ONE_SET.has(char)))||
+    !words.some((part,index)=>index%2===0&&[...part].some(isKana)))return null;
+  const target=reading.replace(/[ 　]/gu,'');
+  let offsets=new Set([0]);
+  for(const [index,part] of words.entries()){
+    if(!part)continue;
+    const next=new Set();
+    const replaceKanji=index%2===1&&[...part].some(char=>!GRADE_ONE_SET.has(char));
+    for(const offset of offsets){
+      if(!replaceKanji){
+        if(target.startsWith(part,offset))next.add(offset+part.length);
+        continue;
+      }
+      const limit=Math.min(target.length,offset+Math.min(part.length*6,24));
+      for(let end=offset;end<limit&&isKana(target[end]);end++)next.add(end+1);
+    }
+    if(!next.size)return null;
+    offsets=next;
+  }
+  return offsets.has(target.length)?reading:null;
+}
+
+export function validateForestWrittenTurn(rawText,delivery,kana){
   if(typeof rawText!=='string')return null;
   const text=rawText.normalize('NFC').trim();
   if(delivery==='written'){
@@ -39,7 +68,10 @@ export function validateForestWrittenTurn(rawText,delivery){
     const annotated=/^(?:（([^（）\r\n]+)）|\(([^()\r\n]+)\))[ 　]*\r?\n([\s\S]+)$/u.exec(text);
     const message=annotated&&validGesture('（'+(annotated[1]??annotated[2])+'）')?annotated[3].trim():text;
     const body=message.replace(/[ 　]*\r?\n[\r\n 　]*/gu,' ');
-    if(!WRITTEN_STAGE_DIRECTION.test(body)&&validForestWrittenGlyphs(body))return {text:body,delivery};
+    if(WRITTEN_STAGE_DIRECTION.test(body))return null;
+    if(validForestWrittenGlyphs(body))return {text:body,delivery};
+    const reading=verifiedWrittenReading(body,typeof kana==='string'?kana.normalize('NFC').trim():null);
+    if(reading)return {text:reading,delivery};
   }
   if(delivery==='gesture'){
     const action=text.replace(/^\(([^()（）\r\n]+)\)$/u,'（$1）');

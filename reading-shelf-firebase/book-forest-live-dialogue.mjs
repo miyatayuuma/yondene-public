@@ -31,7 +31,7 @@ function ambientFocus(characterId,visitNumber){
 const safeEnd=(id,comma=false)=>ACTION_WRITING_IDS.has(id)?
   '（ねこはしっぽをゆっくりふった。）':GOODBYE[id]||(comma?'また、森で会おうね。':'また森で会おうね。');
 const WRONG_FIRST_PERSON=FOREST_WRONG_FIRST_PERSON;
-export const FOREST_PROMPT_VERSION='forest-scene-generation-v31-profile2';
+export const FOREST_PROMPT_VERSION='forest-scene-generation-v32-profile2';
 const PROMPT_VERSION=FOREST_PROMPT_VERSION;
 const clean=value=>typeof value==='string'?value.trim().replace(/\s+/gu,' '):'';
 function readJson(storage,key,fallback){
@@ -75,7 +75,7 @@ export function validateLiveForestOutput(raw,{characterId,requireLine=false,clos
   const multi=MULTI_SPEAKER.has(characterId);
   const rawTurns=multi?validateTwinTurns(data.turns):null;
   const turns=rawTurns?.map(turn=>({...turn,text:canonicalForestMention(turn.text,context.speakers)}));
-  const written=gesture?validateForestWrittenTurn(text,data.delivery):null;
+  const written=gesture?validateForestWrittenTurn(text,data.delivery,data.kana):null;
   if(multi&&!turns||gesture&&(!written||context.handoffTo&&written.delivery!=='written')||!multi&&!gesture&&requireLine&&!validLine(characterId,text))return null;
   const lastChoices=!closing&&context.repliesLeft===1;
   const safetyInput=written?{...data,text:written.text}:data;
@@ -142,7 +142,7 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
       relatedEncounter:dailyContext.relatedEncounter}}:{}),
     ...(recentLines.length?{avoidRecentLines:recentLines.slice(-3)}:{})};
   const endingShape={label:'子どもの質問や言葉',outcome:'NPCがその質問に今ここで返す具体的な答え',
-    ...(twinNames?{speakerSlot:1}:{}),...(nonverbal?{delivery:'written'}:{})};
+    ...(twinNames?{speakerSlot:1}:{}),...(nonverbal?{delivery:'written',kana:'outcomeをそのまま読みに直した文（難しい漢字があるとき）'}:{})};
   const finishTask=handoffTo?
     '子どもに、相手へ届けてほしい言葉を一つ渡す。何を伝えるか本文に含める。相手はまだ同席していない':
     '選ばれた問いや行動に具体的に応え、この返事だけでひと区切りつける';
@@ -185,7 +185,8 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
     output:{format:'JSON',shape:{...(twinNames?
       {turns:[{speakerSlot:1,text:'最初のひとこと'},{speakerSlot:2,text:'直前のひとことへの反応'}]}:
       {text:mode==='choices'?'省略':nonverbal?'かなを基本にした、相手への短いメッセージ本文':'NPCの返答（65字以内）',
-        ...(nonverbal&&mode!=='choices'?{delivery:'written'}:{})}),
+        ...(nonverbal&&mode!=='choices'?{delivery:'written',
+          kana:'textをそのまま読みに直した文（難しい漢字があるとき）'}:{})}),
       choices:closing?[]:repliesLeft===1?
         [endingShape,{...endingShape,...(twinNames?{speakerSlot:2}:{})}]:
         ['子どもが選ぶ返答A','子どもが選ぶ返答B']}}

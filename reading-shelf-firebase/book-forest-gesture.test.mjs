@@ -37,3 +37,13 @@ test('an optional silent annotation cannot displace or weaken validation of the 
   assert.equal(validateForestWrittenTurn('（「やあ」と声を出した）\n'+text,'written'),null);
   assert.equal(validateForestWrittenTurn('（葉っぱに字を書く）\n完成したよ。','written'),null);
 });
+
+
+test('a written reply may use a verified reading of its unsupported kanji',()=>{
+  const text='お城の ことは おぼえているよ。新しい 暮らしだったね。';
+  const kana='おしろの ことは おぼえているよ。あたらしい くらしだったね。';
+  assert.deepEqual(validateForestWrittenTurn(text,'written',kana),{text:kana,delivery:'written'});
+  assert.equal(validateForestWrittenTurn(text,'written','もう わすれたよ。'),null);
+  assert.equal(validateForestWrittenTurn(text,'written','おしろの ことは わすれているよ。あたらしい くらしだったね。'),null);
+  assert.equal(validateForestWrittenTurn('（はっぱに 字を 書いた）','written','ここへ おいで。'),null);
+});

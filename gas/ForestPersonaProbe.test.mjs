@@ -66,7 +66,7 @@ test('bundled integrated queue records two transport calls and state in the exis
 });
 test('independent GAS probe uses the same parser, prompt and Worker input, with no real reading data',()=>{
   const p=probeInput(people,sources,'cat','架空の橋','道具をなおそう');
-  assert.equal(p.input.max_completion_tokens,320);
+  assert.equal(p.input.max_completion_tokens,420);
   assert.equal(p.input.chat_template_kwargs.enable_thinking,false);
   const sent=JSON.parse(p.input.messages[1].content);
   assert.equal(sent.npc.profileRevision,p.profile.revision);

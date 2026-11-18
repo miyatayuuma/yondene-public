@@ -19,8 +19,7 @@ import {FOREST_PROMPT_VERSION,promptFor} from '../reading-shelf-firebase/book-fo
 import {runForestConversationScenario,scenarioStorage} from '../scripts/forest-conversation-scenario.mjs';
 import {forestGenerationInput,readCompletion} from '../cloudflare/forest-ai/src/index.mjs';
 
-// A release acceptance batch can follow the original 60-call baseline on the same day.
-const DAILY_TEST_LIMIT=76;
+// The probe has no local daily call cap; provider-side quotas still apply.
 const MODEL='@cf/google/gemma-4-26b-a4b-it';
 const MODES=new Set(['synthetic','mirror-reflection','mirror-daily','mirror-story','continuation','integrated-synthetic','integrated-mirror']);
 const safeText=v=>/^\s*[=+@-]/u.test(String(v))?"'"+String(v):String(v);
@@ -223,7 +222,7 @@ export async function processQueue(){
     const cues=parseForestDialogueRows(cuesSheet?.getDataRange().getDisplayValues()||[]);
     const originalPeople=person.getDataRange().getDisplayValues(),
       originalSources=source.getDataRange().getDisplayValues();
-    for(let i=0;i<rows.length&&done<3&&attempts<DAILY_TEST_LIMIT;i++){
+    for(let i=0;i<rows.length&&done<3;i++){
       const [id,npc,scene,utterance,state,,,,modeCell,bookId,previousId,choice,caseId,issue]=rows[i];
       if(state!=='PENDING')continue;
       const mode=norm(modeCell)||'synthetic';
@@ -236,14 +235,16 @@ export async function processQueue(){
       }
       if(existing.has(id)){mark('APPLIED','ALREADY_RECORDED');continue;}
       const integrated=mode.startsWith('integrated-');
+      const replayOpening=integrated&&caseId==='replay-opening';
       let selectedChoices;
       if(integrated){
         try{selectedChoices=choice?JSON.parse(choice):[0,0]}catch{}
         if(!Array.isArray(selectedChoices)||selectedChoices.length>2||
-          selectedChoices.some(c=>!Number.isInteger(c)||c<0||c>1)){
+          selectedChoices.some(c=>!Number.isInteger(c)||c<0||c>1)||
+          replayOpening&&(!previousId||selectedChoices.length!==2)){
           mark('ERROR','INVALID_CHOICE');continue;
         }
-        if(done!==0||DAILY_TEST_LIMIT-attempts<1+selectedChoices.length)break;
+        if(done!==0)break;
       }
       mark('RUNNING','');SpreadsheetApp.flush();done++;
       let prepared;
@@ -251,12 +252,23 @@ export async function processQueue(){
         // Never silently replace an unavailable bookshelf mirror with invented text.
         if(!['synthetic','integrated-synthetic'].includes(mode)&&!mirror)mirror=readMirror(ss,props);
         if(integrated){
-          let prior=null;
+          let prior=null,replay=null;
           if(previousId){
             const matches=results.filter(row=>row[0]===previousId&&['PASS','FAIL'].includes(row[17])&&row[18]===mode);
             if(matches.length!==1)throw Error('PREVIOUS_RESULT_MISSING');
-            try{prior=JSON.parse(matches[0][15]).conversation.storage}catch{throw Error('PREVIOUS_INPUT_INVALID')}
-            if(!prior)throw Error('PREVIOUS_INPUT_INVALID');
+            try{
+              const previous=JSON.parse(matches[0][15]).conversation;
+              if(replayOpening){
+                const first=previous.trace[0];
+                const prompt=JSON.parse(first.input.messages[1].content);
+                if(first.validation!=='accepted'||prompt.mode!=='opening'||prompt.npc.id!==npc||!first.raw)
+                  throw Error('PREVIOUS_INPUT_INVALID');
+                replay={prompt,raw:first.raw};
+              }else{
+                prior=previous.storage;
+                if(!prior)throw Error('PREVIOUS_INPUT_INVALID');
+              }
+            }catch{throw Error('PREVIOUS_INPUT_INVALID')}
           }
           const snapshot=mode==='integrated-mirror'?mirror:{books:[],reflections:[]};
           const conversation=await probeConversation(originalPeople,originalSources,npc,{
@@ -265,8 +277,13 @@ export async function processQueue(){
               twinNames:parseTwinNameRows(ss.getSheetByName('ふたご名前')?.getDataRange().getDisplayValues()||[]),
               twinScenes:parseTwinSceneRows(ss.getSheetByName('ふたご会話')?.getDataRange().getDisplayValues()||[])
             }:{}),
-            transport:async input=>{
-              if(attempts>=DAILY_TEST_LIMIT)throw Error('Local quota reached');
+            transport:async(input,{prompt})=>{
+              if(replay&&prompt.mode==='opening'){
+                if(prompt.npc.profileRevision!==replay.prompt.npc.profileRevision||
+                  JSON.stringify(prompt.context.speakers)!==JSON.stringify(replay.prompt.context.speakers))
+                  throw Error('Previous opening no longer matches this visit');
+                return replay.raw;
+              }
               props.setProperty(key,String(++attempts));
               const started=Date.now();
               let response;
@@ -284,7 +301,7 @@ export async function processQueue(){
             }});
           done+=2;
           const valid=conversation.trace.length>0&&conversation.trace.every(t=>t.validation==='accepted');
-          const compact={...conversation,storage:compactProbeStorage(conversation.storage),
+          const compact={...conversation,...(replay?{replayedOpeningId:previousId}:{}),storage:compactProbeStorage(conversation.storage),
             trace:conversation.trace.map(({prompt,...rest})=>rest)};
           const saved=JSON.stringify({conversation:compact});
           if(saved.length>48000)throw Error('TRACE_TOO_LARGE');

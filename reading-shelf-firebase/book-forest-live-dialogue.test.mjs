@@ -29,7 +29,9 @@ test('generates contextual reply choices, then a character reply only after a ch
     prompts.push(prompt);
     return prompts.length===1?{text:'この風、少し遠くまで行きたくなるね。',
       choices:['風の音を聞く','どこに行く？']}:
-      {text:'この先の道を歩いてみたいな。',choices:['いっしょに行く','ここで待つ']};
+      {text:'この先の道を歩いてみたいな。',choices:[
+        {label:'どんな道？',outcome:'小さな花が道のわきに並んでいるよ。'},
+        {label:'ここで待つ',outcome:'この木の下なら風がやさしいね。'}]};
   };
   const director=createForestLiveDialogueDirector({base:base(),generate:generator,storage,now:()=>1000});
   const first=await director.start(identity);
@@ -43,12 +45,12 @@ test('generates contextual reply choices, then a character reply only after a ch
   assert.equal(prompts.length,2);
   assert.equal(prompts[1].context.chosenLabel,'風の音を聞く');
   assert.equal(second.text,'この先の道を歩いてみたいな。');
-  assert.deepEqual(second.choices.map(x=>x.label),['いっしょに行く','ここで待つ']);
+  assert.deepEqual(second.choices.map(x=>x.label),['どんな道？','ここで待つ']);
   assert.equal(director.getProgress().aiRequestsThisSession,2);
   const log=JSON.parse(storage.getItem('forest-ai-local-v1:log'));
   assert.deepEqual(log.map(x=>x.event),['generated-opening','selected-offered-choice','generated-reply']);
   assert.equal(log[0].text,first.text,'export can reconstruct the initial line');
-  assert.equal(log[0].promptVersion,'forest-scene-generation-v24-profile2');
+  assert.equal(log[0].promptVersion,'forest-scene-generation-v27.3-profile2');
   assert.equal(log[1].label,'風の音を聞く');
   director.end();
 });
@@ -71,8 +73,10 @@ test('a second AI reply ends the encounter naturally without requesting or showi
   const storage=memoryStorage(),prompts=[];
   const generator=async prompt=>{
     prompts.push(prompt);
-    return prompt.task.includes('返答候補だけ')?{choices:['森を歩こう','お話ししよう']}:
-      {text:'また森で会えるのが楽しみだね。',choices:['もう少し聞く','ここで待つ']};
+    const choices=prompt.context.repliesLeft===1?
+      [{label:'何の音？',outcome:'風が木を鳴らしている音だよ。'},
+        {label:'ここで待つ',outcome:'風の音、少し小さくなったね。'}]:['もう少し聞く','ここで待つ'];
+    return {text:'森の奥から音がするね。',choices};
   };
   const director=createForestLiveDialogueDirector({base:base(),generate:generator,storage});
   let result=await director.start(identity);
@@ -82,11 +86,12 @@ test('a second AI reply ends the encounter naturally without requesting or showi
     assert.equal(result.choices.length,i===1?0:2);
   }
   assert.equal(result.conversationComplete,true);
-  assert.ok(prompts[2].constraints.some(text=>text.includes('別れの定型句は不要')));
-  assert.equal(prompts.length,3,'one opening generation and two replies');
+  assert.equal(prompts[1].context.repliesLeft,1);
+  assert.equal(result.text,'風が木を鳴らしている音だよ。');
+  assert.equal(prompts.length,2,'the selected ending makes no network request');
   assert.equal(director.getProgress().aiRepliesThisSession,2);
   await director.select({...identity,choiceId:'old-choice'});
-  assert.equal(prompts.length,3,'closed encounter cannot start another AI call');
+  assert.equal(prompts.length,2,'closed encounter cannot start another AI call');
 });
 
 test('closing an encounter during the opening delay sends no AI request',async()=>{
@@ -221,7 +226,7 @@ test('the next related NPC can react to the previous selected button and daily s
   const generator=async prompt=>{
     prompts.push(prompt);
     return {text:prompt.npc.id==='kiki'?'今日の森は風が強いね。':'キキは急いでるのかな。',
-      choices:['風の音を聞く','ちょっと歩こう']};
+      choices:prompt.context.repliesLeft===1?[{label:'風の音を聞く',outcome:'風で葉が鳴っているね。'}]:['風の音を聞く','ちょっと歩こう']};
   };
   const common={storage,startDelayMs:0,generate:generator,now:()=>Date.UTC(2026,10,11,13)};
   const kiki=createForestLiveDialogueDirector({base:base(),...common,maxReplies:1});
@@ -249,14 +254,21 @@ test('AI choices retain the approved handoff to a related NPC',async()=>{
       return {text:'ジジも近くにいるよ。',choices:[]};
     }};
   const director=createForestLiveDialogueDirector({base:authored,storage,startDelayMs:0,
-    generate:async()=>{generated++;return {text:'ジジはどこかな。',
+    generate:async prompt=>{generated++;
+      if(prompt.closing){
+        assert.equal(prompt.context.handoffTo,'ジジ');
+        assert.equal(prompt.context.chosenLabel,'ジジのところへ');
+        assert.equal(prompt.context.repliesLeft,0);
+        return {text:'ジジに会ったら、木の下の風が気持ちいいって伝えて。',choices:[]};
+      }
+      return {text:'ジジはどこかな。',
       choices:['ここで探す','別の道を見る']}}});
   const first=await director.start(identity);
   assert.equal(first.choices.length,2);
   assert.equal(first.choices[0].label,'ここで探す');
   assert.equal(first.choices[1].label,'ジジのところへ');
   const result=await director.select({...identity,choiceId:'visit-jiji'});
-  assert.equal(result.text,'ジジはどこかな。');
+  assert.equal(result.text,'ジジに会ったら、木の下の風が気持ちいいって伝えて。');
   assert.equal(result.conversationComplete,true);
   assert.equal(scriptedSelections,1);
   assert.equal(generated,2,'handoff is generated, with local state transition preserved');
@@ -599,29 +611,28 @@ test('nonverbal NPC chooses reactions by context, with writing optional and no h
     reviewSpotlight:review,chosenLabel:'もう少し見る',history:[{npc:'（石を見つめる。）'}]});
   const closing=promptFor({...base,mode:'reply',closing:true,
     sourceKind:'review-reaction',reviewSpotlight:review});
-  assert.match(reflection.task,/readerReflection.*具体的な内容/u);
-  assert.match(story.task,/確認済みの既読/u);
-  assert.match(reply.task,/相手の選択/u);
-  assert.match(closing.task,/その場で小さな結果/u);
+  assert.match(reflection.task,/感想の具体的な一箇所/u);
+  assert.match(story.task,/確認済み/u);
+  assert.match(reply.task,/選ばれた言葉/u);
+  assert.match(closing.task,/ひと区切り/u);
   assert.notEqual(reflection.task,casual.task);
-  assert.ok(reflection.constraints.some(line=>/書かない場合はmark:null/.test(line)));
-  assert.ok(reflection.constraints.some(line=>/身振りだけで通じるとき/.test(line)));
-  assert.ok(reflection.constraints.some(line=>/帰属|本人の発言/.test(line)));
+  assert.equal(reflection.task,promptFor({...base,characterId:'king',reviewSpotlight:review}).task);
+  assert.equal(reflection.output.shape.delivery,'written');
   assert.equal(reflection.context.readerReflection.quote,review.quote);
   assert.equal(reflection.context.readerReflection.attribution,'verbatim');
   assert.equal(reflection.npc.voice.includes('家事・買い物'),true);
   assert.doesNotMatch(reflection.constraints.join(' '),/家事・買い物|王さまとの友情/u,
     'character personality must come from the private profile');
   assert.deepEqual(validateLiveForestOutput({text:'（石を指して、しばらく静かに見守る。）',
-    mark:null,choices:['近くで見てみる','そのまま待つ']},
+    delivery:'gesture',choices:['近くで見てみる','そのまま待つ']},
   {characterId:'cat',requireLine:true}),{text:'（石を指して、しばらく静かに見守る。）',
-    labels:['近くで見てみる','そのまま待つ']});
+    delivery:'gesture',labels:['近くで見てみる','そのまま待つ']});
   assert.deepEqual(validateLiveForestOutput({text:'（枝を拾い、転がりそうな石の前に置いた。）',
-    mark:null,choices:['いっしょに見る','別の道へ行く']},
+    delivery:'gesture',choices:['いっしょに見る','別の道へ行く']},
   {characterId:'cat',requireLine:true}),{text:'（枝を拾い、転がりそうな石の前に置いた。）',
-    labels:['いっしょに見る','別の道へ行く']});
+    delivery:'gesture',labels:['いっしょに見る','別の道へ行く']});
   assert.equal(validateLiveForestOutput({text:'（「そうね」と心の中で思った。）',
-    mark:null,choices:['近くで見る','もう帰る']},{characterId:'cat',requireLine:true}),null);
+    delivery:'gesture',choices:['近くで見る','もう帰る']},{characterId:'cat',requireLine:true}),null);
 });
 
 test('cat uses a private Sheets persona for nonverbal AI action and writing, never TTS',async()=>{
@@ -635,11 +646,9 @@ test('cat uses a private Sheets persona for nonverbal AI action and writing, nev
     },select:async()=>({text:'（ねこはすわっている。）',choices:[]}),end(){}},
     generate:async prompt=>{
       prompts.push(prompt);
-      return prompt.mode==='opening'?
-        {text:'（ねこはまえあしでじめんをなぞった。）',
-          mark:{surface:'ground',word:'こっち'},choices:['みてみる','ついていく']}:
-        {text:'（ねこはおちばにちいさくかいた。）',
-          mark:{surface:'leaf',word:'またね'},choices:[]};
+      return {text:'木の下にキキのリボンがあるよ。',delivery:'written',choices:[
+        {label:'しずかに見ている',outcome:'（ねこはうなずいた。）',delivery:'gesture'},
+        {label:'なにいろ？',outcome:'赤いリボンだよ。',delivery:'written'}]};
     },
     storage,startDelayMs:0,maxReplies:1,requireCharacterProfile:true,
     getCharacterProfiles:()=>mockCatProfiles()
@@ -649,32 +658,25 @@ test('cat uses a private Sheets persona for nonverbal AI action and writing, nev
   assert.equal(calls[0].generation,true);
   assert.equal(prompts.length,1,'silent cat also receives a generated first encounter');
   assert.ok(prompts[0].npc.voice.includes('人語を話さず'));
-  assert.ok(prompts[0].constraints.some(line=>line.includes('mark')));
+  assert.ok(prompts[0].constraints.some(line=>line.includes('漢字はこの80字')));
   assert.match(prompts[0].npc.voice,/架空の相棒・テスト設定A/);
   assert.match(prompts[0].npc.voice,/家事・買い物/);
-  assert.ok(prompts[0].constraints.some(line=>line.includes('実際の文章')));
   assert.doesNotMatch(prompts[0].constraints.join('|'),/王さまとの友情|家事・買い物/, 'persona must come from Sheets only');
-  assert.deepEqual(validateLiveForestOutput({
-    text:'（ねこは紙に書いて、そっとおいた。）',
-    mark:{surface:'note',word:'おうさま、こっちはあぶないから、いっしょにとおろう。'},
-    choices:['ついていく','メモをみる']
-  },{characterId:'cat',requireLine:true}).mark,
-  {surface:'note',word:'おうさま、こっちはあぶないから、いっしょにとおろう。'});
-  assert.deepEqual(opening.mark,{surface:'ground',word:'こっち'});
-  assert.equal(opening.text,'（ねこはまえあしでじめんをなぞった。）');
+  assert.equal(opening.delivery,'written');
+  assert.equal(opening.text,'木の下にキキのリボンがあるよ。');
   const final=await director.select({...identity,choiceId:opening.choices[0].id});
   assert.equal(final.conversationComplete,true);
-  assert.deepEqual(final.mark,{surface:'leaf',word:'またね'});
-  assert.equal(prompts.length,2);
+  assert.equal(final.delivery,'gesture');
+  assert.equal(prompts.length,1);
   assert.deepEqual(final.choices,[]);
   director.end();
 });
 
 test('cat rejects model-generated speech and invalid writing, preserving its authored action',async()=>{
   const lines=[
-    {text:'こんにちは！',mark:{surface:'ground',word:'あい'},choices:['みる','ついていく']},
-    {text:'（ねこははっぱにかいた。）',mark:{surface:'leaf',word:'HELLO'},choices:['みる','ついていく']},
-    {text:'（ねこは「はい」としゃべった。）',mark:null,choices:['みる','ついていく']}
+    {text:'こんにちは！',delivery:'gesture',choices:['みる','ついていく']},
+    {text:'HELLO',delivery:'written',choices:['みる','ついていく']},
+    {text:'（ねこは「はい」としゃべった。）',delivery:'gesture',choices:['みる','ついていく']}
   ];
   for(const output of lines){
     assert.equal(validateLiveForestOutput(output,{characterId:'cat',requireLine:true}),null);
@@ -698,10 +700,9 @@ test('quota or network failure after a cat action cannot turn into a spoken good
     base:{start:async()=>({text:'（ねこはしっぽをふった。）',sourceKind:'ambient',
       choices:[{id:'another-topic',label:'ほかの話も聞く'}]}),select:async()=>null,end(){}},
     generate:async()=>++calls===1?
-      {text:'（ねこはまえあしでじめんをなぞった。）',
-        mark:{surface:'ground',word:'こっち'},choices:['みてみる','ついていく']}:
+      {text:'（ねこはうなずいた。）',delivery:'gesture',choices:['みてみる','ついていく']}:
       Promise.reject(Error('Forest AI unavailable (502)')),
-    requireCharacterProfile:true,getCharacterProfiles:()=>mockCatProfiles(),storage,startDelayMs:0,maxReplies:1
+    requireCharacterProfile:true,getCharacterProfiles:()=>mockCatProfiles(),storage,startDelayMs:0
   });
   const identity={characterId:'cat'};
   const first=await director.start(identity);
@@ -717,8 +718,7 @@ test('cat does not call Gemma without its private Sheets persona, even if output
   const original={text:'（ねこは王さまのそばにすわった。）',sourceKind:'meet',choices:[]};
   const director=createForestLiveDialogueDirector({
     base:{start:async()=>original,select:async()=>null,end(){}},
-    generate:async()=>{requests++;return {text:'（ねこはメモをおいた。）',
-      mark:{surface:'note',word:'おはよう'},choices:['みる','あそぶ']}},
+    generate:async()=>{requests++;return {text:'おはよう',delivery:'written',choices:['みる','あそぶ']}},
     storage:memoryStorage(),startDelayMs:0,getCharacterProfiles:()=>[],
     requireCharacterProfile:false
   });
@@ -735,12 +735,12 @@ test('changing only the private cat profile changes the generated prompt without
         select:async()=>null,end(){}},
       generate:async prompt=>{received.push(prompt);return {
         text:'（ねこは王さまに向かってしずかにうなずいた。）',
-        mark:null,choices:['いっしょに行く','もうすこしみる']}},
+        delivery:'gesture',choices:['いっしょに行く','もうすこしみる']}},
       storage:memoryStorage(),startDelayMs:0,getCharacterProfiles:()=>mockCatProfiles(summary),
       requireCharacterProfile:true
     });
     const result=await director.start({characterId:'cat'});
-    assert.equal(result.mark,undefined,'writing is genuinely optional');
+    assert.equal(result.delivery,'gesture','writing is genuinely optional');
     director.end();
   }
   await visit('設定を確認する用の人物像A');

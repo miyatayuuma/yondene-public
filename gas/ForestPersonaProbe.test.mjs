@@ -10,10 +10,11 @@ const people=[FOREST_PROFILE_HEADERS,...[['人物像','架空の工作好きな�
 const sources=[['資料ID','根拠の種別','確認状態']];
 test('GAS adapter runs the production encounter and reuses its persisted state for revisits',async()=>{
   const transport=async(input,{prompt})=>({response:JSON.stringify({
-    text:prompt.closing?'（ねこは手をふった。）':'（ねこは道具をならべた。）',mark:null,
-    choices:prompt.closing?[]:['いっしょに見る','見ている']})});
+    text:prompt.closing?'（ねこは手をふった。）':'（ねこは道具をならべた。）',delivery:'gesture',
+    choices:prompt.closing?[]:prompt.context.repliesLeft===1?
+      [{label:'いっしょに見る',outcome:'木の下に 白い花がさいているよ。'}]:['いっしょに見る','見ている']})});
   const first=await probeConversation(people,sources,'cat',{transport});
-  assert.equal(first.trace.length,3);
+  assert.equal(first.trace.length,2);
   assert.equal(first.trace[0].prompt.context.sourceKind,'meet');
   assert.equal(first.frames.at(-1).result.conversationComplete,true);
   const second=await probeConversation(people,sources,'cat',{transport,storage:compactProbeStorage(first.storage)});
@@ -24,7 +25,7 @@ test('GAS adapter runs the production encounter and reuses its persisted state f
   assert.equal(second.trace[0].prompt.context.sourceKind,'ambient');
   assert.equal(second.progress.visits.cat,2);
 });
-test('bundled integrated queue records three real transport calls and state in the existing results shape',async()=>{
+test('bundled integrated queue records two transport calls and state in the existing results shape',async()=>{
   const rows=[['headers'],['integrated-request','cat','統合試験','','PENDING','','','','integrated-synthetic']];
   const results=[['headers']],marks=[],requests=[];
   const dataSheet=data=>({getDataRange:()=>({getDisplayValues:()=>data})});
@@ -38,17 +39,30 @@ test('bundled integrated queue records three real transport calls and state in t
     Utilities:{formatDate:()=> '2026-11-18'},UrlFetchApp:{fetch:(_url,options)=>{
       const input=JSON.parse(options.payload),prompt=JSON.parse(input.messages[1].content);requests.push(prompt);
       return {getResponseCode:()=>200,getContentText:()=>JSON.stringify({success:true,result:{response:JSON.stringify({
-        text:'（ねこは道具をならべた。）',mark:null,choices:prompt.closing?[]:['いっしょに見る','見ている']})}})};
+        text:'（ねこは道具をならべた。）',delivery:'gesture',choices:prompt.closing?[]:prompt.context.repliesLeft===1?
+      [{label:'いっしょに見る',outcome:'木の下に 白い花がさいているよ。'}]:['いっしょに見る','見ている']})}})};
     }}});
   vm.runInContext(readFileSync(new URL('./ForestPersonaProbe.gs',import.meta.url),'utf8'),ctx);
   await vm.runInContext('yondeneGemmaTestProcessQueue()',ctx);
-  assert.equal(requests.length,3);assert.equal(results[1].length,28);assert.equal(results[1][17],'PASS');
+  assert.equal(requests.length,2);assert.equal(results[1].length,28);assert.equal(results[1][17],'PASS');
   const saved=JSON.parse(results[1][15]);
-  assert.equal(saved.conversation.trace.length,3);
+  assert.equal(saved.conversation.trace.length,2);
   assert.equal(saved.conversation.progress.visits.cat,1);
   assert.equal(properties.YONDENE_GEMMA_TEST_ATTEMPTS_UTC_2026_11_18,undefined);
-  assert.equal(properties['YONDENE_GEMMA_TEST_ATTEMPTS_UTC_2026-11-18'],'3');
+  assert.equal(properties['YONDENE_GEMMA_TEST_ATTEMPTS_UTC_2026-11-18'],'2');
   assert.ok(marks.some(([row,col,value])=>row===2&&col===5&&value==='APPLIED'));
+  // A paired comparison must run even after exceeding the former daily limit of 76.
+  properties['YONDENE_GEMMA_TEST_ATTEMPTS_UTC_2026-11-18']='76';
+  rows[1][4]='APPLIED';
+  rows.push(['replay-request','cat','統合試験','','PENDING','','','','integrated-synthetic',
+    '','integrated-request','[0,0]','replay-opening']);
+  await vm.runInContext('yondeneGemmaTestProcessQueue()',ctx);
+  assert.equal(requests.length,3);
+  assert.equal(properties['YONDENE_GEMMA_TEST_ATTEMPTS_UTC_2026-11-18'],'77');
+  const replay=JSON.parse(results[2][15]).conversation;
+  assert.equal(replay.replayedOpeningId,'integrated-request');
+  assert.equal(replay.frames.at(-1).result.text,'木の下に 白い花がさいているよ。');
+
 });
 test('independent GAS probe uses the same parser, prompt and Worker input, with no real reading data',()=>{
   const p=probeInput(people,sources,'cat','架空の橋','道具をなおそう');
@@ -59,7 +73,7 @@ test('independent GAS probe uses the same parser, prompt and Worker input, with 
   assert.ok(sent.npc.voice.includes('友だちと道具をなおす'));
   assert.equal(sent.context.situation.evidence,'imagined');
   assert.equal('readerReflection' in sent.context,false);
-  assert.ok(sent.constraints.some(rule=>rule.includes('書かない場合はmark:null')));
+  assert.ok(sent.constraints.some(rule=>rule.includes('漢字はこの80字')));
 });
 test('generated Apps Script saves actual output and exact model input before marking one pending request applied',()=>{
   const output=[],marks=[],requests=[];
@@ -75,7 +89,7 @@ test('generated Apps Script saves actual output and exact model input before mar
     Utilities:{formatDate:()=> '2026-11-17'},
     UrlFetchApp:{fetch:(_url,options)=>{requests.push(JSON.parse(options.payload));return {
       getResponseCode:()=>200,getContentText:()=>JSON.stringify({success:true,result:{response:JSON.stringify({
-        text:'（ねこは木の下で道具をならべる。）',mark:null,choices:['いっしょに見る','またね']})}})};}}});
+        text:'（ねこは木の下で道具をならべる。）',delivery:'gesture',choices:['いっしょに見る','またね']})}})};}}});
   vm.runInContext(readFileSync(new URL('./ForestPersonaProbe.gs',import.meta.url),'utf8'),ctx);
   vm.runInContext('yondeneGemmaTestProcessQueue()',ctx);
   assert.equal(requests.length,1);assert.equal(output.length,1);assert.equal(output[0].length,28);
@@ -98,7 +112,7 @@ test('real mirror reflection uses the production selector and labels parent summ
     {mode:'mirror-reflection',mirror,now});
   const sent=JSON.parse(p.input.messages[1].content);
   assert.equal(sent.context.sourceKind,'review-reaction');
-  assert.match(sent.task,/readerReflectionの具体的な内容/);
+  assert.match(sent.task,/感想の具体的な一箇所/);
   assert.equal(sent.context.readerReflection.attribution,'parent-summary');
   assert.equal(sent.context.readerReflection.quote,reflection.quote);
   assert.equal(sent.context.readerReflection.bookTitle,'架空の読了本');
@@ -152,7 +166,7 @@ test('continuation reuses the same prompt builder, checks offered choices and re
   const previous={characterId:'cat',prompt:opening.prompt,bookId:opening.meta.bookId,
     reflectionId:opening.meta.reflectionId,attribution:'verbatim',turn:0,
     raw:JSON.stringify({text:'（ねこは枝を持って川べりへ行った。）',
-      mark:null,choices:['いっしょに行く','待っている']})};
+      delivery:'gesture',choices:['いっしょに行く','待っている']})};
   const reply=probeInput(people,sources,'cat','','',{mode:'continuation',mirror,
     previous,previousId:'fixture-previous',choice:'いっしょに行く',now});
   assert.equal(reply.prompt.mode,'reply');assert.equal(reply.prompt.closing,false);

@@ -173,11 +173,12 @@ export function mountBookForest({familyId,privateSprites=null,onClose=()=>{},dia
     }else{
       speaker.textContent=activeCharacter?.name||identity.displayName;
       twinHistory.hidden=true;twinHistory.replaceChildren();message.hidden=false;
-      message.textContent=typeof result?.text==='string'?result.text:'';
-      if(identity.characterId==='cat'&&result?.mark?.word){
-        message.textContent+='\n'+result.mark.word;
+      const line=typeof result?.text==='string'?result.text:'';
+      message.textContent=line;
+      if(result?.delivery==='written'){
+        message.prepend(el('small','bookForestWritingNote','（'+speaker.textContent+'は字を書いて見せた。）'));
       }
-      makeSpeechTarget(message,message.textContent,identity.characterId,session);
+      makeSpeechTarget(message,line,identity.characterId,session);
       chat.scrollTop=0;
     }
     // A seed counts as experienced only after a real conversation frame renders.

@@ -1,3 +1,4 @@
+import {forestEndingChoices,forestEndingNeedsReply} from '../../../reading-shelf-firebase/book-forest-ending.mjs';
 import {unsafeForestForaging} from '../../../reading-shelf-firebase/book-forest-output-safety.mjs';
 import {FOREST_AI_GENERATION_IDS,FOREST_ACTION_WRITING_IDS,FOREST_MULTI_SPEAKER_IDS,FOREST_ROSTER_REVISION,FOREST_DIALOGUE_PROTOCOL,canonicalForestMention} from '../../../reading-shelf-firebase/forest-character-registry.mjs';
 import {validateForestWrittenTurn,FOREST_WRITTEN_TURN_LIMIT} from '../../../reading-shelf-firebase/book-forest-gesture.mjs';
@@ -5,7 +6,7 @@ import {validateTwinTurns} from '../../../reading-shelf-firebase/book-forest-twi
 // よんでね 本の森: a small, owner-only proxy for the free Workers AI allowance.
 // No bookshelf data, Firebase private credentials, or Cloudflare API keys here.
 const MODEL='@cf/google/gemma-4-26b-a4b-it';
-export const FOREST_WORKER_VERSION='forest-dialogue-v24-profile2';
+export const FOREST_WORKER_VERSION='forest-dialogue-v26-profile2';
 const VERSION=FOREST_WORKER_VERSION;
 const JWKS_URL='https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com';
 const ORIGINS=new Set(['https://kodomo-reading-shelf-87f11.web.app',
@@ -104,45 +105,56 @@ export function readCompletion(result,{closing=false,mode='reply',characterId=''
   content=content.trim().replace(/^```(?:json)?\s*/iu,'').replace(/\s*```$/u,'');
   let parsed;
   try{parsed=JSON.parse(content)}catch{throw Error('Invalid model JSON')}
-  if(unsafeForestForaging(parsed,context))throw Error('Invalid model unsafe-foraging');
   const multi=MULTI_SPEAKER.has(characterId);
   const validatedTurns=multi?validateTwinTurns(parsed?.turns):null;
   const turns=validatedTurns?.map(turn=>({...turn,text:canonicalForestMention(turn.text,context.speakers)}));
   if(multi&&!turns)throw Error('Invalid model speaker turns');
-  if(turns&&closing)return {turns,choices:[]};
   const silent=ACTION_WRITING_IDS.has(characterId);
-  const written=silent?validateForestWrittenTurn(parsed?.text,parsed?.mark):null;
+  const written=silent?validateForestWrittenTurn(parsed?.text,parsed?.delivery):null;
   if(silent&&!written)throw Error('Invalid silent cat action');
-  const mark=written?.mark;
+  const lastChoices=!closing&&context.repliesLeft===1;
+  const safetyInput=written?{...parsed,text:written.text}:parsed;
+  if(unsafeForestForaging(lastChoices?{...safetyInput,choices:[]}:safetyInput,context))
+    throw Error('Invalid model unsafe-foraging');
+  if(turns&&closing)return {turns,choices:[]};
   const text=written?.text??canonicalForestMention(parsed?.text,context.speakers);
   if(closing){
-    if(typeof parsed?.text!=='string'||parsed.text.length>90)throw Error('Invalid closing line');
-    return {text,choices:[],...(mark?{mark}:{})};
+    if(!written&&(typeof parsed?.text!=='string'||parsed.text.length>90))throw Error('Invalid closing line');
+    return {text,choices:[],...(written?{delivery:written.delivery}:{})};
+  }
+  if(!multi&&mode==='opening'&&(typeof parsed.text!=='string'||!parsed.text.trim()))
+    throw Error('Opening line required');
+  if(!written&&parsed.text!==undefined&&(typeof parsed.text!=='string'||parsed.text.length>90))
+    throw Error('Invalid model text');
+  const line=turns?{turns}:{...(typeof text==='string'?{text}:{}),...(written?{delivery:written.delivery}:{})};
+  if(lastChoices){
+    const choices=forestEndingChoices(parsed.choices,{context,silent,multi,
+      line:turns?.map(turn=>turn.text).join(' ')??text});
+    if(!choices.length&&forestEndingNeedsReply(turns?.at(-1)?.text??text))throw Error('Invalid model unfinished ending');
+    return {...line,choices};
   }
   if(!Array.isArray(parsed?.choices)||parsed.choices.length<2||parsed.choices.length>3)
     throw Error('Invalid model output');
   const choices=parsed.choices.map(choice=>canonicalForestMention(typeof choice==='string'?choice:choice?.label,context.speakers));
   if(choices.some(choice=>typeof choice!=='string'||choice.length<2||choice.length>24))
     throw Error('Invalid model choices');
-  if(!multi&&mode==='opening'&&(typeof parsed.text!=='string'||!parsed.text.trim()))
-    throw Error('Opening line required');
-  if(parsed.text!==undefined&&(typeof parsed.text!=='string'||parsed.text.length>90))
-    throw Error('Invalid model text');
-  // Gemma may supply a third button despite the requested two. Keep its valid
-  // NPC line and normalize the UI-only choices instead of discarding the turn.
-  return {choices:choices.slice(0,2),...(turns?{turns}:typeof text==='string'?{text}:{}),
-    ...(mark?{mark}:{})};
+  return {...line,choices:choices.slice(0,2)};
 }
 
 export function forestGenerationInput(prompt){
   const actionWriting=ACTION_WRITING_IDS.has(prompt.npc.id);
   const multi=MULTI_SPEAKER.has(prompt.npc.id);
+  const lastChoices=prompt.context.repliesLeft===1;
+  const input=lastChoices?{...prompt,finalChecklist:
+    '各labelは子どもの質問。outcomeの最初で、その問いの「どこ・何・どう」を答える。次の行動を約束するだけの候補は書き直す。例：かくれるならどこ？ → 大きな木のうらなら、ぼうしまでかくせるよ。例：何を伝える？ → 橋のそばで青い羽を見つけたって伝えてね。'}:prompt;
   return {messages:[{role:'system',content:
         'あなたは児童向け「本の森」で登場人物の短い即興会話を助ける。'+
         '子どもの個人情報を質問しない。物語にない出来事を断定しない。'+
-        '日本語で自然に短く'+(actionWriting?'行動や書き言葉で伝える。':'話す。')+
+        '日本語で人物らしい短い会話を作る。'+
+        (actionWriting?
+          `このNPCの会話は、声や心の声を使わず、相手へ文字で伝える。通常は {"delivery":"written","text":"王さまなら 木の下にいるよ。"} の形で、相手が実際に読める文を返す。人物設定の身振りや筆記の記述は人物像の資料。会話は書く動作・道具の話から始めず、本人の関心や今の話題を伝える。質問には答え、感想には内容を受けた返事を書く。textは${FOREST_WRITTEN_TURN_LIMIT}字以内、ひらがな・カタカナ・小1配当漢字・句読点・空白。見守りや相づちなど、動作で伝わる返事に限りdelivery:"gesture"でtextに（うなずく）のような動作だけを入れる。`:'')+
         '生成する発話と選択肢の人名は、IDから推測せずcontext.npcDisplayNamesまたはcontext.speakersの表示名を使う。'+
-        '人物像は送信されたnpc.voiceの非公開台帳由来の設定を最優先し、設定を説明するだけの文にしない。'+
+        '人物像はnpc.voiceの非公開台帳由来の設定に従い、設定を説明するだけの文にしない。出力の書式はこの指示に従う。'+
         '各項目の根拠区分・監修状態・適用範囲と本文中の留保を守る。二次資料は原作本文ではない。'+
         '編集解釈・ゲーム演出・暫定採用は演技の手掛かりであり、原作の確定事実として語らない。'+
         'situationのplaceが今いる場所、presentNpcIdsが同席を確認できる人物。relatedNpcIdsは関係性で、今そばにいる証拠ではない。'+
@@ -157,19 +169,19 @@ export function forestGenerationInput(prompt){
         'mode=openingならcontext.sourceKind（meet/story/reflection/relay/ambient/review-reaction）とtaskを優先し、'+
         '台帳のnpcLineをコピーせず、本人の新しい反応とchoicesを2件作る。'+
         'mode=replyは新しい第一声ではなく直前の選択への応答。問いには短く答える。相づちや感想なら同意を言い換えず、人物らしい小さな反応で会話を一歩進める。'+
-        '通常の発話NPCのtextは65字以内。選択肢は子ども側の次の言葉や行動にする。'+
+        'NPCのtextは65字以内。'+
         (multi?
           '出力はturns:[{speakerSlot:1,text:"..."},{speakerSlot:2,text:"..."}]とchoices。各スロットを一度ずつ、順番は会話に合わせる。'+
           '名前はcontext.speakersで固定し、初対面では各自が自分の名前を名乗る。'+
           '二人目は一人目の言葉に反応する。発話に話者ラベルやかぎ括弧を付けず、各65字以内。子どもへの問いかけは二人目まで待つ。':'')+
-        (ACTION_WRITING_IDS.has(prompt.npc.id)?
-          'このNPCは非発話モード。人物像はnpc.voiceの非公開台帳由来の設定を優先し、ここで人物像を推測しない。'+
-          `textは全角丸括弧の短い行動描写。書くと描写したらmark.wordに実際の台詞を入れ、行動と台詞で${FOREST_WRITTEN_TURN_LIMIT}字以内。身振りだけの場面はmark:null。日本語の発声と心の声は禁止。`+
-          'mark={surface:noteまたはgroundまたはleaf,word:ひらがなと小学1年生までの漢字・読点句点・！？からなる1〜48文字}。'+
-          '書き言葉も話す人物と同様に相手の問いや選択に答えられる。':
-          '')+
-        'context.repliesLeftはこの発話の後で選択に返せる回数。closing=trueなら直前の選択に具体的に返す。一緒に探す選択なら、たとえばその場で見える手掛かりを一つ示す。次の行動の提案や約束、新たな質問は出さず、choicesは空配列。'},
-        {role:'user',content:JSON.stringify(prompt)}],
+        '現在の場面はsituation.placeに留める。森の小さな即興は目の前で起こることから選ぶ。移動や合流を済ませたふりはせず、よその場所は想像や思い出として話す。'+
+        '選択肢は今の話への子どもの言葉や行動を2つ。context.repliesLeftは選択後に返答できる回数。'+
+        (lastChoices?
+          '最後の候補は{label,outcome}。outcomeは選択後に表示する実際の台詞。' +
+          (multi?'各候補のspeakerSlotは話す一人の番号。':'')+
+          '最後の二択は子どもがNPCに聞きたいこと。例「どこを探す？」→「足もとの石の間だよ。」。遊びなら遊び方や想像上のかくれ場所、伝言なら届ける言葉、探索なら目の前の手掛かりを具体的に答える。NPCからは質問せず、移動や遊びの開始を約束しない。':
+          'closing=trueでは選ばれた言葉にその場で応え、新しい質問を出さず、choicesは空配列。')},
+        {role:'user',content:JSON.stringify(input)}],
       max_completion_tokens:320,temperature:.75,
       chat_template_kwargs:{enable_thinking:false}};
 }

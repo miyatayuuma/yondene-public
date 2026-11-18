@@ -38,7 +38,7 @@ test('production director selects a fresh read-only reflection only in its eligi
   const prompts=[];
   const live=createForestLiveDialogueDirector({base,generate:async prompt=>{
     prompts.push(prompt);
-    return {text:'（ねこは木の枝を持って小川へ向かった。）',mark:null,
+    return {text:'（ねこは木の枝を持って小川へ向かった。）',delivery:'gesture',
       choices:['いっしょに行く','見ている']};
   },storage:state,storageKey:'live',now:()=>now,requireCharacterProfile:true,
   getCharacterProfiles:()=>[profile],getBooks:()=>books,getCatalog:()=>[],

@@ -5,7 +5,7 @@ import {unsafeForestForaging} from './book-forest-output-safety.mjs';
 // An observed failure was a standalone promise to go, begin or prepare.
 // This catches that ending shape; whether a reply earns its choice also
 // depends on context and is checked on real conversations.
-const unfinished=/[？?][。！!]*$|(?:おしえて|教えて|かくる|ましょう|てみよう|ついてこい)(?:ね|よ)?[。！!]*$|(?:準備(?:を)?(?:する|しよう)|じゅんび(?:を)?(?:する|しよう)|(?:探し|さがし)に(?:行こう|いこう)|(?:始め|はじめ)(?:よう|る)|(?:今度|こんど)(?:やろう|しよう))(?:ね|よ|か|ぜ|ぞ|な)?[。！!]*$/u;
+const unfinished=/[？?][。！!]*$|(?:おしえて|教えて|かくる|ましょう|てみよう|ついてこい|(?:みせ|見せ)てあげる)(?:ね|よ)?[。！!]*$|(?:準備(?:を)?(?:する|しよう)|じゅんび(?:を)?(?:する|しよう)|(?:探し|さがし)に(?:行こう|いこう)|(?:始め|はじめ)(?:よう|る)|(?:今度|こんど)(?:やろう|しよう))(?:ね|よ|か|ぜ|ぞ|な)?[。！!]*$/u;
 
 export const forestEndingNeedsReply=text=>typeof text==='string'&&unfinished.test(text.replace(/[ 　]/gu,''));
 

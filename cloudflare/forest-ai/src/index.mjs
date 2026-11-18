@@ -144,6 +144,9 @@ export function readCompletion(result,{closing=false,mode='reply',characterId=''
 export function forestGenerationInput(prompt){
   const actionWriting=ACTION_WRITING_IDS.has(prompt.npc.id);
   const multi=MULTI_SPEAKER.has(prompt.npc.id);
+  const lastChoices=prompt.context.repliesLeft===1;
+  const input=lastChoices?{...prompt,finalChecklist:
+    '各labelは子どもの質問。outcomeの最初で、その問いの「どこ・何・どう」を答える。次の行動を約束するだけの候補は書き直す。例：かくれるならどこ？ → 大きな木のうらなら、ぼうしまでかくせるよ。例：何を伝える？ → 橋のそばで青い羽を見つけたって伝えてね。'}:prompt;
   return {messages:[{role:'system',content:
         'あなたは児童向け「本の森」で登場人物の短い即興会話を助ける。'+
         '子どもの個人情報を質問しない。物語にない出来事を断定しない。'+
@@ -173,12 +176,12 @@ export function forestGenerationInput(prompt){
           '二人目は一人目の言葉に反応する。発話に話者ラベルやかぎ括弧を付けず、各65字以内。子どもへの問いかけは二人目まで待つ。':'')+
         '現在の場面はsituation.placeに留める。森の小さな即興は目の前で起こることから選ぶ。移動や合流を済ませたふりはせず、よその場所は想像や思い出として話す。'+
         '選択肢は今の話への子どもの言葉や行動を2つ。context.repliesLeftは選択後に返答できる回数。'+
-        (prompt.context.repliesLeft===1?
+        (lastChoices?
           '最後の候補は{label,outcome}。outcomeは選択後に表示する実際の台詞。' +
           (multi?'各候補のspeakerSlotは話す一人の番号。':'')+
           '最後の二択は子どもがNPCに聞きたいこと。例「どこを探す？」→「足もとの石の間だよ。」。遊びなら遊び方や想像上のかくれ場所、伝言なら届ける言葉、探索なら目の前の手掛かりを具体的に答える。NPCからは質問せず、移動や遊びの開始を約束しない。':
           'closing=trueでは選ばれた言葉にその場で応え、新しい質問を出さず、choicesは空配列。')},
-        {role:'user',content:JSON.stringify(prompt)}],
+        {role:'user',content:JSON.stringify(input)}],
       max_completion_tokens:320,temperature:.75,
       chat_template_kwargs:{enable_thinking:false}};
 }

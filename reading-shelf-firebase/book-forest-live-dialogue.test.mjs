@@ -602,7 +602,7 @@ test('nonverbal NPC chooses reactions by context, with writing optional and no h
   assert.match(reflection.task,/readerReflection.*具体的な内容/u);
   assert.match(story.task,/確認済みの既読/u);
   assert.match(reply.task,/相手の選択/u);
-  assert.match(closing.task,/具体的な返事/u);
+  assert.match(closing.task,/その場で小さな結果/u);
   assert.notEqual(reflection.task,casual.task);
   assert.ok(reflection.constraints.some(line=>/書かない場合はmark:null/.test(line)));
   assert.ok(reflection.constraints.some(line=>/身振りだけで通じるとき/.test(line)));

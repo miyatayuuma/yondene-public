@@ -1,3 +1,4 @@
+import {forestEndingChoices} from '../../../reading-shelf-firebase/book-forest-ending.mjs';
 import {unsafeForestForaging} from '../../../reading-shelf-firebase/book-forest-output-safety.mjs';
 import {FOREST_AI_GENERATION_IDS,FOREST_ACTION_WRITING_IDS,FOREST_MULTI_SPEAKER_IDS,FOREST_ROSTER_REVISION,FOREST_DIALOGUE_PROTOCOL,canonicalForestMention} from '../../../reading-shelf-firebase/forest-character-registry.mjs';
 import {validateForestWrittenTurn,FOREST_WRITTEN_TURN_LIMIT} from '../../../reading-shelf-firebase/book-forest-gesture.mjs';
@@ -5,7 +6,7 @@ import {validateTwinTurns} from '../../../reading-shelf-firebase/book-forest-twi
 // よんでね 本の森: a small, owner-only proxy for the free Workers AI allowance.
 // No bookshelf data, Firebase private credentials, or Cloudflare API keys here.
 const MODEL='@cf/google/gemma-4-26b-a4b-it';
-export const FOREST_WORKER_VERSION='forest-dialogue-v25-profile2';
+export const FOREST_WORKER_VERSION='forest-dialogue-v26-profile2';
 const VERSION=FOREST_WORKER_VERSION;
 const JWKS_URL='https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com';
 const ORIGINS=new Set(['https://kodomo-reading-shelf-87f11.web.app',
@@ -111,7 +112,9 @@ export function readCompletion(result,{closing=false,mode='reply',characterId=''
   const silent=ACTION_WRITING_IDS.has(characterId);
   const written=silent?validateForestWrittenTurn(parsed?.text,parsed?.delivery):null;
   if(silent&&!written)throw Error('Invalid silent cat action');
-  if(unsafeForestForaging(written?{...parsed,text:written.text}:parsed,context))
+  const lastChoices=!closing&&context.repliesLeft===1;
+  const safetyInput=written?{...parsed,text:written.text}:parsed;
+  if(unsafeForestForaging(lastChoices?{...safetyInput,choices:[]}:safetyInput,context))
     throw Error('Invalid model unsafe-foraging');
   if(turns&&closing)return {turns,choices:[]};
   const text=written?.text??canonicalForestMention(parsed?.text,context.speakers);
@@ -119,24 +122,19 @@ export function readCompletion(result,{closing=false,mode='reply',characterId=''
     if(!written&&(typeof parsed?.text!=='string'||parsed.text.length>90))throw Error('Invalid closing line');
     return {text,choices:[],...(written?{delivery:written.delivery}:{})};
   }
+  if(!multi&&mode==='opening'&&(typeof parsed.text!=='string'||!parsed.text.trim()))
+    throw Error('Opening line required');
+  if(!written&&parsed.text!==undefined&&(typeof parsed.text!=='string'||parsed.text.length>90))
+    throw Error('Invalid model text');
+  const line=turns?{turns}:{...(typeof text==='string'?{text}:{}),...(written?{delivery:written.delivery}:{})};
+  if(lastChoices)return {...line,choices:forestEndingChoices(parsed.choices,{
+    context,silent,multi,line:turns?.map(turn=>turn.text).join(' ')??text})};
   if(!Array.isArray(parsed?.choices)||parsed.choices.length<2||parsed.choices.length>3)
     throw Error('Invalid model output');
   const choices=parsed.choices.map(choice=>canonicalForestMention(typeof choice==='string'?choice:choice?.label,context.speakers));
   if(choices.some(choice=>typeof choice!=='string'||choice.length<2||choice.length>24))
     throw Error('Invalid model choices');
-  if(!multi&&mode==='opening'&&(typeof parsed.text!=='string'||!parsed.text.trim()))
-    throw Error('Opening line required');
-  if(!written&&parsed.text!==undefined&&(typeof parsed.text!=='string'||parsed.text.length>90))
-    throw Error('Invalid model text');
-  const offered=choices.slice(0,2).map((label,i)=>{
-    const raw=context.repliesLeft===1?parsed.choices[i]?.outcome:null;
-    const outcome=typeof raw==='string'?raw.trim():'';
-    return outcome&&outcome.length<=60&&!/[\r\n{}<>]/u.test(outcome)?{label,outcome}:label;
-  });
-  // Gemma may supply a third button despite the requested two. Keep its valid
-  // NPC line and normalize the UI-only choices instead of discarding the turn.
-  return {choices:offered,...(turns?{turns}:typeof text==='string'?{text}:{}),
-    ...(written?{delivery:written.delivery}:{})};
+  return {...line,choices:choices.slice(0,2)};
 }
 
 export function forestGenerationInput(prompt){
@@ -171,8 +169,11 @@ export function forestGenerationInput(prompt){
           '二人目は一人目の言葉に反応する。発話に話者ラベルやかぎ括弧を付けず、各65字以内。子どもへの問いかけは二人目まで待つ。':'')+
         '現在の場面はsituation.placeに留める。森の小さな即興は目の前で起こることから選ぶ。移動や合流を済ませたふりはせず、よその場所は想像や思い出として話す。'+
         '選択肢は今の話への子どもの言葉や行動を2つ。context.repliesLeftは選択後に返答できる回数。'+
-        '残り1回なら各候補を{label,outcome}にする。outcomeは次の返答で渡す具体的な答えか、小さな反応・結果（60字以内）。たとえば音の質問には音の正体、共同作業には今できた一手を書く。移動や後の約束に頼らない。'+
-        'closing=trueではcontext.chosenLabelに具体的に応え、choiceOutcomeがあれば、それに沿った答えや結果をここで渡す。親しみのある短いひとことや静かな余韻でもよい。新しい質問や次の行動を要求せず、choicesは空配列。'},
+        (prompt.context.repliesLeft===1?
+          '最後の候補は{label,outcome}。outcomeは選択後に表示する実際の台詞。' +
+          (multi?'各候補のspeakerSlotは話す一人の番号。':'')+
+          '問いには答え、伝言なら渡す言葉を返す。遊びは「どこにかくれる？」のようにその場で答えられる問いか、想像と分かる小さな場面にする。準備・出発・次の約束で区切らない。':
+          'closing=trueでは選ばれた言葉にその場で応え、新しい質問を出さず、choicesは空配列。')},
         {role:'user',content:JSON.stringify(prompt)}],
       max_completion_tokens:320,temperature:.75,
       chat_template_kwargs:{enable_thinking:false}};

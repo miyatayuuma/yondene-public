@@ -35,9 +35,9 @@ const dialogue=createForestLiveDialogueDirector({
     if(prompt.npc.id==='twins')return {
       turns:prompt.mode==='opening'?[{speakerSlot:1,text:'わたしはあお。'},{speakerSlot:2,text:'わたしはそら。'}]:
         [{speakerSlot:2,text:'小川を見に行こう。'},{speakerSlot:1,text:'足もとに気をつけてね。'}],
-      choices:prompt.closing?[]:['いっしょに見る','またね']};
+      choices:prompt.closing?[]:prompt.context.repliesLeft===1?[{label:'水の音を聞く',outcome:'さらさらって聞こえたね。',speakerSlot:2}]:['いっしょに見る','またね']};
     return {text:prompt.mode==='opening'?'まるい木の実を見つけたよ。':'じゃあ、いっしょに見てみよう。',
-      choices:prompt.closing?[]:['いっしょに見る','ここで待つ']};
+      choices:prompt.closing?[]:prompt.context.repliesLeft===1?[{label:'いっしょに見る',outcome:'木の上に小さな鳥がいるよ。'}]:['いっしょに見る','ここで待つ']};
   }
 });
 """
@@ -97,7 +97,9 @@ try:
         expect(turns.nth(3).locator('.bookForestTwinName')).to_have_text('あお', timeout=15000)
         assert page.evaluate('testPrompts.at(-1).context.chosenLabel') == 'いっしょに見る'
         page.screenshot(path=out / 'twins.png')
-        page.get_by_role('button', name='またね', exact=True).click()
+        page.get_by_role('button', name='水の音を聞く', exact=True).click()
+        expect(turns.last.locator('.bookForestTwinName')).to_have_text('そら')
+        expect(turns.last.locator('.bookForestTwinText')).to_have_text('さらさらって聞こえたね。')
         expect(page.locator('.bookForestDismiss')).to_have_text('またね', timeout=15000)
         page.goto(url + '?fail=1')
         page.wait_for_function('window.forest !== undefined', timeout=90000)

@@ -47,7 +47,9 @@ function stack({books=[],catalog=[],reflections=[],cues=[],fail=false,limits={}}
       prompts.push(prompt);
       if(fail)throw Error('fixture unavailable');
       return {response:JSON.stringify({text:prompt.mode==='reply'?'木の実をさがしてみよう。':'あの木の実、まんまるだね。',
-        choices:prompt.closing?[]:['いっしょに見る','ここで待つ']})};
+        choices:prompt.closing?[]:prompt.context.repliesLeft===1?
+          [{label:'いっしょに見る',outcome:'ほら、足もとに丸い木の実が見えるよ。'},
+            {label:'ここで待つ',outcome:'ここなら葉の音がよく聞こえるね。'}]:['いっしょに見る','ここで待つ']})};
     }}};
   const fetchImpl=async(url,options={})=>handleRequest(new Request(url,{
     ...options,headers:{...options.headers,Origin:'https://kodomo-reading-shelf-87f11.web.app'}}),env,
@@ -77,6 +79,7 @@ test('zero-cue future NPC: real director -> provider -> Worker -> displayed open
   assert.equal(reply.text,'木の実をさがしてみよう。');
   const closing=await s.live.select({characterId:ids[0],choiceId:reply.choices[0].id});
   assert.equal(closing.conversationComplete,true);
+  assert.equal(closing.text,'ほら、足もとに丸い木の実が見えるよ。');
   assert.deepEqual(closing.choices,[]);
   const next=await s.visit(ids[0]);
   assert.ok(next.text);assert.equal(s.prompts.at(-1).context.sourceKind,'ambient');
@@ -185,6 +188,7 @@ test('review source stays attributed across replies and read->unread revokes it 
   books[0].status='unread';
   const result=await s.live.select({characterId:ids[0],choiceId:reply.choices[0].id});
   assert.equal(result.conversationComplete,true);
+  assert.doesNotMatch(result.text,/足もとに丸い木の実/);
   assert.equal(s.prompts.length,before);
   assert.ok(!s.local.getItem('forest-ai-local-v1:log').includes('保護者が記録した'));
 });

@@ -239,7 +239,7 @@ var ForestPersonaProbe = (() => {
     if (typeof text !== "string" || Array.isArray(speakers) && speakers.some((speaker) => speaker?.name?.includes?.("\u30CF\u30C1\u30D3\u30FC"))) return text;
     return text.replace(/(?<![ァ-ヿー])ハチビー(?![ァ-ヿー])/gu, FOREST_DISPLAY_NAMES.hachibee);
   }
-  var FOREST_DIALOGUE_PROTOCOL = "scene-dialogue-v25-profile2";
+  var FOREST_DIALOGUE_PROTOCOL = "scene-dialogue-v26-profile2";
   function forestMemoryBelongsToCharacter(memory, characterId) {
     const names = FOREST_ACTOR_NAMES[characterId] || [];
     return String(memory?.characters || "").split(/[\s,，、|;；]+/u).some((name) => names.includes(name));
@@ -1591,36 +1591,6 @@ var ForestPersonaProbe = (() => {
     };
   }
 
-  // reading-shelf-firebase/book-forest-output-safety.mjs
-  var plant = /(?:木の実|きのみ|きのこ|キノコ|茸|植物|しょくぶつ|草|葉|はっぱ|おちば|赤い実|青い実|(?:木|枝).{0,20}実|(?<![現事真確誠着充])実[がを])/u;
-  var unknown = /(?:知らない|しらない|未知|見たこと(?:が)?ない|名前.{0,8}(?:わから|不明)|正体.{0,8}(?:わから|不明)|何の|なんの|未確認|拾った|ひろった|見つけた|みつけた|道ばた)/u;
-  var consumption = /(?:食べ|たべ|味見|あじみ|口に|ひと[口くち]|おいし|美味|うまそう|食用|安全|だいじょうぶ|大丈夫)/u;
-  var refusal = /(?:食べ|たべ)(?:ないで|ちゃ(?:だめ|ダメ)|ては(?:だめ|いけ)|るの(?:は|を)やめ|ずに|ません)|(?:味見|あじみ)(?:しない|はしない)|(?:食べ|たべ)(?:られるか|ていいか|てよいか|られるとは).{0,16}(?:わから|知ら|不明|限ら|かぎら)|(?:食べ|たべ)(?:るの|ること|たら|ると).{0,8}(?:危な|危険|だめ|ダメ)|(?:食べ|たべ)ない$|(?:安全|大丈夫|だいじょうぶ).{0,4}(?:とは|か).{0,8}(?:わから|言え|いえ)/u;
-  var writingSurface = /(?:落ち葉|葉っぱ|はっぱ|おちば|葉)(?=(?:のうら|の裏|の上)?に[^。！？）」\x22]{0,24}(?:書[いきく]|か[いきく]))/gu;
-  var generalFoodSearch = /^(?:おいしい|美味しい)(?:もの|物)を[、 ]*(?:さが|探)そ(?:う|っか)[？?]?$/u;
-  var knownFood = /(?:パン|ぱん|おにぎり|弁当|べんとう|サンドイッチ|おやつ|クッキー|ケーキ|スープ)/u;
-  function unsafeForestForaging(output, context = {}) {
-    const background = JSON.stringify({
-      situation: context.situation,
-      topic: context.topic,
-      scene: context.today?.scene,
-      recentTurns: context.recentTurns,
-      chosenLabel: context.chosenLabel,
-      choiceOutcome: context.choiceOutcome
-    });
-    const utterances = Array.isArray(output?.turns) ? output.turns.map((turn) => turn?.text) : [];
-    const subject = background + " " + [output?.text, ...utterances].join(" ");
-    const wild = /(?:本の森|森の|林|野生|道ばた|拾|ひろ|生え|なっている)/u;
-    const riskyBackground = plant.test(subject) && (unknown.test(subject) || wild.test(subject));
-    const lines = [output?.text, ...utterances, ...Array.isArray(output?.choices) ? output.choices.flatMap((x) => typeof x === "string" ? [x] : [x?.label, x?.outcome]) : []];
-    return lines.some((line) => typeof line === "string" && line.split(/[。！!\n]/u).some((clause) => {
-      if (!consumption.test(clause) || refusal.test(clause)) return false;
-      if (knownFood.test(clause) && !plant.test(clause)) return false;
-      if (generalFoodSearch.test(clause.trim()) && !plant.test(subject.replace(writingSurface, ""))) return false;
-      return riskyBackground || plant.test(clause) && (unknown.test(clause) || wild.test(clause));
-    }));
-  }
-
   // reading-shelf-firebase/book-forest-gesture.mjs
   var FOREST_GRADE_ONE_KANJI = "\u4E00\u53F3\u96E8\u5186\u738B\u97F3\u4E0B\u706B\u82B1\u8C9D\u5B66\u6C17\u4E5D\u4F11\u7389\u91D1\u7A7A\u6708\u72AC\u898B\u4E94\u53E3\u6821\u5DE6\u4E09\u5C71\u5B50\u56DB\u7CF8\u5B57\u8033\u4E03\u8ECA\u624B\u5341\u51FA\u5973\u5C0F\u4E0A\u68EE\u4EBA\u6C34\u6B63\u751F\u9752\u5915\u77F3\u8D64\u5343\u5DDD\u5148\u65E9\u8349\u8DB3\u6751\u5927\u7537\u7AF9\u4E2D\u866B\u753A\u5929\u7530\u571F\u4E8C\u65E5\u5165\u5E74\u767D\u516B\u767E\u6587\u6728\u672C\u540D\u76EE\u7ACB\u529B\u6797\u516D";
   var GRADE_ONE_SET = /* @__PURE__ */ new Set([...FOREST_GRADE_ONE_KANJI]);
@@ -1652,6 +1622,61 @@ var ForestPersonaProbe = (() => {
     return null;
   }
 
+  // reading-shelf-firebase/book-forest-output-safety.mjs
+  var plant = /(?:木の実|きのみ|きのこ|キノコ|茸|植物|しょくぶつ|草|葉|はっぱ|おちば|赤い実|青い実|(?:木|枝).{0,20}実|(?<![現事真確誠着充])実[がを])/u;
+  var unknown = /(?:知らない|しらない|未知|見たこと(?:が)?ない|名前.{0,8}(?:わから|不明)|正体.{0,8}(?:わから|不明)|何の|なんの|未確認|拾った|ひろった|見つけた|みつけた|道ばた)/u;
+  var consumption = /(?:食べ|たべ|味見|あじみ|口に|ひと[口くち]|おいし|美味|うまそう|食用|安全|だいじょうぶ|大丈夫)/u;
+  var refusal = /(?:食べ|たべ)(?:ないで|ちゃ(?:だめ|ダメ)|ては(?:だめ|いけ)|るの(?:は|を)やめ|ずに|ません)|(?:味見|あじみ)(?:しない|はしない)|(?:食べ|たべ)(?:られるか|ていいか|てよいか|られるとは).{0,16}(?:わから|知ら|不明|限ら|かぎら)|(?:食べ|たべ)(?:るの|ること|たら|ると).{0,8}(?:危な|危険|だめ|ダメ)|(?:食べ|たべ)ない$|(?:安全|大丈夫|だいじょうぶ).{0,4}(?:とは|か).{0,8}(?:わから|言え|いえ)/u;
+  var writingSurface = /(?:落ち葉|葉っぱ|はっぱ|おちば|葉)(?=(?:のうら|の裏|の上)?に[^。！？）」\x22]{0,24}(?:書[いきく]|か[いきく]))/gu;
+  var generalFoodSearch = /^(?:おいしい|美味しい)(?:もの|物)を[、 ]*(?:さが|探)そ(?:う|っか)[？?]?$/u;
+  var knownFood = /(?:パン|ぱん|おにぎり|弁当|べんとう|サンドイッチ|おやつ|クッキー|ケーキ|スープ)/u;
+  function unsafeForestForaging(output, context = {}) {
+    const background = JSON.stringify({
+      situation: context.situation,
+      topic: context.topic,
+      scene: context.today?.scene,
+      recentTurns: context.recentTurns,
+      chosenLabel: context.chosenLabel
+    });
+    const utterances = Array.isArray(output?.turns) ? output.turns.map((turn) => turn?.text) : [];
+    const subject = background + " " + [output?.text, ...utterances].join(" ");
+    const wild = /(?:本の森|森の|林|野生|道ばた|拾|ひろ|生え|なっている)/u;
+    const riskyBackground = plant.test(subject) && (unknown.test(subject) || wild.test(subject));
+    const lines = [output?.text, ...utterances, ...Array.isArray(output?.choices) ? output.choices.flatMap((x) => typeof x === "string" ? [x] : [x?.label, x?.outcome]) : []];
+    return lines.some((line) => typeof line === "string" && line.split(/[。！!\n]/u).some((clause) => {
+      if (!consumption.test(clause) || refusal.test(clause)) return false;
+      if (knownFood.test(clause) && !plant.test(clause)) return false;
+      if (generalFoodSearch.test(clause.trim()) && !plant.test(subject.replace(writingSurface, ""))) return false;
+      return riskyBackground || plant.test(clause) && (unknown.test(clause) || wild.test(clause));
+    }));
+  }
+
+  // reading-shelf-firebase/book-forest-ending.mjs
+  var unfinished = /[？?]$|(?:準備(?:を)?(?:する|しよう)|じゅんび(?:を)?(?:する|しよう)|(?:探し|さがし)に(?:行こう|いこう)|(?:始め|はじめ)(?:よう|る)|(?:今度|こんど)(?:やろう|しよう))(?:ね|よ|か|ぜ|ぞ|な)?[。！!]*$/u;
+  function forestEndingChoices(choices, { context = {}, silent = false, multi = false, line = "", validLine: validLine3 = () => true } = {}) {
+    if (!Array.isArray(choices)) return [];
+    const offered = [];
+    for (const choice of choices.slice(0, 3)) {
+      if (typeof choice?.label !== "string" || typeof choice.outcome !== "string") continue;
+      const label = canonicalForestMention(choice.label.trim(), context.speakers);
+      const outcome = canonicalForestMention(choice.outcome.trim(), context.speakers);
+      if (label.length < 2 || label.length > 24 || /[\r\n{}<>「」]/u.test(label) || outcome.length < 2 || outcome.length > (silent ? 140 : 90) || /[{}<>]/u.test(outcome) || !silent && /[\r\n]/u.test(outcome) || offered.some((c) => c.label === label)) continue;
+      const speakerSlot = choice.speakerSlot;
+      if (multi && speakerSlot !== 1 && speakerSlot !== 2) continue;
+      const written = silent ? validateForestWrittenTurn(outcome, choice.delivery ?? "written") : null;
+      if (silent ? !written : !validLine3(outcome)) continue;
+      const text = written?.text ?? outcome;
+      if (unfinished.test(text.replace(/[ 　]/gu, "")) || text === line || offered.some((c) => c.outcome === text)) continue;
+      if (unsafeForestForaging(
+        { text, choices: [label] },
+        { ...context, chosenLabel: label, recentTurns: [...context.recentTurns || [], { npc: line }] }
+      )) continue;
+      offered.push({ label, outcome: text, ...multi ? { speakerSlot } : {}, ...written ? { delivery: written.delivery } : {} });
+      if (offered.length === 2) break;
+    }
+    return offered;
+  }
+
   // reading-shelf-firebase/book-forest-live-dialogue.mjs
   var CHARACTERS2 = new Set(FOREST_CHARACTER_IDS);
   var MULTI_SPEAKER = new Set(FOREST_MULTI_SPEAKER_IDS);
@@ -1660,7 +1685,7 @@ var ForestPersonaProbe = (() => {
   var ACTION_WRITING_IDS2 = new Set(FOREST_ACTION_WRITING_IDS);
   var safeEnd = (id, comma = false) => ACTION_WRITING_IDS2.has(id) ? "\uFF08\u306D\u3053\u306F\u3057\u3063\u307D\u3092\u3086\u3063\u304F\u308A\u3075\u3063\u305F\u3002\uFF09" : GOODBYE[id] || (comma ? "\u307E\u305F\u3001\u68EE\u3067\u4F1A\u304A\u3046\u306D\u3002" : "\u307E\u305F\u68EE\u3067\u4F1A\u304A\u3046\u306D\u3002");
   var WRONG_FIRST_PERSON = FOREST_WRONG_FIRST_PERSON;
-  var FOREST_PROMPT_VERSION = "forest-scene-generation-v26-planned-profile2";
+  var FOREST_PROMPT_VERSION = "forest-scene-generation-v27-profile2";
   var PROMPT_VERSION = FOREST_PROMPT_VERSION;
   var clean3 = (value) => typeof value === "string" ? value.trim().replace(/\s+/gu, " ") : "";
   function readJson(storage, key, fallback) {
@@ -1713,24 +1738,34 @@ var ForestPersonaProbe = (() => {
     const turns = rawTurns?.map((turn) => ({ ...turn, text: canonicalForestMention(turn.text, context.speakers) }));
     const written = gesture ? validateForestWrittenTurn(text, data.delivery) : null;
     if (multi && !turns || gesture && !written || !multi && !gesture && requireLine && !validLine2(characterId, text)) return null;
-    if (unsafeForestForaging(written ? { ...data, text: written.text } : data, context)) return null;
+    const lastChoices = !closing && context.repliesLeft === 1;
+    const safetyInput = written ? { ...data, text: written.text } : data;
+    if (unsafeForestForaging(lastChoices ? { ...safetyInput, choices: [] } : safetyInput, context)) return null;
     const line = turns ? { text: turns.map((turn) => turn.text).join(" "), turns } : written || { text };
     if (closing) return { ...line, labels: [] };
+    if (lastChoices) {
+      const endings = forestEndingChoices(data.choices, {
+        context,
+        silent: gesture,
+        multi,
+        line: line.text,
+        validLine: (value) => validLine2(characterId, value)
+      });
+      return { ...line, labels: endings.map((choice) => choice.label), endings };
+    }
     const candidates = Array.isArray(data.choices) ? data.choices.slice(0, 3) : [];
     const byLabel = /* @__PURE__ */ new Map();
     for (const choice of candidates) {
       const label = canonicalForestMention(clean3(typeof choice === "string" ? choice : choice?.label), context.speakers);
       if (label.length < 2 || label.length > 24 || /[\r\n{}<>「」]/u.test(label) || byLabel.has(label)) continue;
-      const outcome = context.repliesLeft === 1 ? clean3(choice?.outcome) : "";
-      byLabel.set(label, outcome.length <= 60 && !/[{}<>]/u.test(outcome) ? outcome : "");
+      byLabel.set(label, true);
     }
     const labels = [...byLabel.keys()].slice(0, 2);
     if (labels.length < 2) {
       if (!requireLine) return null;
       return { ...line, labels: gesture ? ["\u3082\u3046\u3059\u3053\u3057\u307F\u308B", "\u307E\u305F\u306D"] : ["\u3082\u3046\u5C11\u3057\u805E\u304F", "\u307E\u305F\u306D"] };
     }
-    const outcomes = labels.map((label) => byLabel.get(label));
-    return { ...line, text: requireLine ? line.text : null, labels, ...outcomes.some(Boolean) ? { outcomes } : {} };
+    return { ...line, text: requireLine ? line.text : null, labels };
   }
   function promptScene(scene, sourceKind) {
     if (!scene) return {};
@@ -1761,8 +1796,7 @@ var ForestPersonaProbe = (() => {
     situation = null,
     twinNames = null,
     repliesLeft = closing ? 0 : 2,
-    handoffTo = "",
-    choiceOutcome = ""
+    handoffTo = ""
   }) {
     const guide = forestCharacterVoiceGuide(characterProfile);
     const npc = {
@@ -1781,7 +1815,6 @@ var ForestPersonaProbe = (() => {
       npcDisplayNames: FOREST_DISPLAY_NAMES,
       ...twinNames ? { speakers: [{ slot: 1, name: twinNames.firstName }, { slot: 2, name: twinNames.secondName }] } : {},
       ...handoffTo ? { handoffTo: FOREST_DISPLAY_NAMES[handoffTo] } : {},
-      ...choiceOutcome ? { choiceOutcome } : {},
       chosenLabel: clean3(chosenLabel).slice(0, 24),
       ...situation ? { situation } : {},
       recentTurns: history.slice(-4),
@@ -1797,6 +1830,12 @@ var ForestPersonaProbe = (() => {
         relatedEncounter: dailyContext.relatedEncounter
       } } : {},
       ...recentLines.length ? { avoidRecentLines: recentLines.slice(-3) } : {}
+    };
+    const endingShape = {
+      label: "\u5B50\u3069\u3082\u306E\u8A00\u8449",
+      outcome: "\u9078\u3070\u308C\u305F\u3068\u304D\u305D\u306E\u307E\u307E\u898B\u305B\u308B\u3001\u5177\u4F53\u7684\u306A\u8FD4\u4E8B",
+      ...twinNames ? { speakerSlot: 1 } : {},
+      ...nonverbal ? { delivery: "written" } : {}
     };
     const finishTask = handoffTo ? "\u9078\u629E\u3092\u53D7\u3051\u3066\u3001\u76F8\u624B\u306B\u4F1A\u3063\u305F\u3068\u304D\u306B\u6E21\u305B\u308B\u8A00\u8449\u3092\u3053\u3053\u3067\u4F1D\u3048\u308B\u3002\u76F8\u624B\u306F\u307E\u3060\u540C\u5E2D\u3057\u3066\u3044\u306A\u3044" : "\u9078\u3070\u308C\u305F\u554F\u3044\u3084\u884C\u52D5\u306B\u5177\u4F53\u7684\u306B\u5FDC\u3048\u3001\u3053\u306E\u8FD4\u4E8B\u3060\u3051\u3067\u3072\u3068\u533A\u5207\u308A\u3064\u3051\u308B";
     const firstLineTask = {
@@ -1827,7 +1866,7 @@ var ForestPersonaProbe = (() => {
         ...closing ? [
           "\u8CEA\u554F\u306A\u3089\u7B54\u3048\u3092\u8A00\u3044\u5207\u308B\u3002\u884C\u52D5\u306A\u3089\u3001\u3053\u306E\u5834\u3067\u4E00\u624B\u9032\u3093\u3060\u7D50\u679C\u307E\u3067\u8FD4\u3059\u3002\u300C\u3088\u3057\u3001\u59CB\u3081\u3088\u3046\u300D\u3067\u6B62\u3081\u306A\u3044\u3002\u79FB\u52D5\u304C\u5FC5\u8981\u306A\u9078\u629E\u3067\u3082\u3001\u3053\u3053\u3067\u5206\u304B\u308B\u3053\u3068\u3084\u4F1D\u3048\u3089\u308C\u308B\u8A00\u8449\u3092\u4E00\u3064\u8FD4\u3059\u3002\u65B0\u3057\u3044\u554F\u3044\u306F\u51FA\u3055\u305Achoices:[]"
         ] : repliesLeft === 1 ? [
-          "\u3053\u308C\u304C\u6700\u5F8C\u306E\u4E8C\u629E\u3002\u5404\u5019\u88DC\u306B\u3001\u6B21\u306E\u4E00\u7B54\u3067\u5B50\u3069\u3082\u304C\u53D7\u3051\u53D6\u308C\u308B\u5177\u4F53\u7684\u306A\u7B54\u3048\u3084\u7D50\u679C\u3092outcome\u306B\u6DFB\u3048\u308B\u3002\u305D\u306E\u5834\u3067\u5B8C\u4E86\u3059\u308B\u4E00\u624B\u306B\u7D5E\u308A\u3001\u7D04\u675F\u3084\u767A\u6848\u3060\u3051\u306Eoutcome\u306F\u4F5C\u3089\u306A\u3044"
+          "\u3053\u306E\u672C\u6587\u3060\u3051\u3067\u3082\u4E00\u533A\u5207\u308A\u3064\u304F\u3088\u3046\u306B\u3059\u308B\u3002\u6700\u5F8C\u306E\u5404\u5019\u88DC\u306Eoutcome\u306B\u306F\u3001\u9078\u3093\u3060\u5B50\u306B\u305D\u306E\u307E\u307E\u898B\u305B\u308B\u7B54\u3048\u3092\u5165\u308C\u308B"
         ] : []
       ],
       output: { format: "JSON", shape: {
@@ -1835,10 +1874,7 @@ var ForestPersonaProbe = (() => {
           text: mode === "choices" ? "\u7701\u7565" : "NPC\u306E\u8FD4\u7B54\uFF0865\u5B57\u4EE5\u5185\uFF09",
           ...nonverbal && mode !== "choices" ? { delivery: "written" } : {}
         },
-        choices: closing ? [] : repliesLeft === 1 ? [
-          { label: "\u5B50\u3069\u3082\u306E\u8FD4\u7B54A", outcome: "\u6B21\u306E\u4E00\u7B54\u3067\u6E21\u3059\u5177\u4F53\u7684\u306A\u7B54\u3048\u3084\u7D50\u679CA" },
-          { label: "\u5B50\u3069\u3082\u306E\u8FD4\u7B54B", outcome: "\u6B21\u306E\u4E00\u7B54\u3067\u6E21\u3059\u5177\u4F53\u7684\u306A\u7B54\u3048\u3084\u7D50\u679CB" }
-        ] : ["\u5B50\u3069\u3082\u304C\u9078\u3076\u8FD4\u7B54A", "\u5B50\u3069\u3082\u304C\u9078\u3076\u8FD4\u7B54B"]
+        choices: closing ? [] : repliesLeft === 1 ? [endingShape, { ...endingShape, ...twinNames ? { speakerSlot: 2 } : {} }] : ["\u5B50\u3069\u3082\u304C\u9078\u3076\u8FD4\u7B54A", "\u5B50\u3069\u3082\u304C\u9078\u3076\u8FD4\u7B54B"]
       } }
     };
   }
@@ -1908,7 +1944,7 @@ var ForestPersonaProbe = (() => {
       sessionCount++;
       return true;
     }
-    async function request(characterId, mode, npcLine, chosenLabel = "", closing = false, topic = null, sourceKind = "", reviewSpotlight = null, { handoffTo = "", choiceOutcome = "" } = {}) {
+    async function request(characterId, mode, npcLine, chosenLabel = "", closing = false, topic = null, sourceKind = "", reviewSpotlight = null, { handoffTo = "" } = {}) {
       if (!reserve()) return null;
       const previousLogs = readJson(storage, logKey, []);
       const recentLines = (Array.isArray(previousLogs) ? previousLogs : []).filter((entry) => entry?.characterId === characterId && ["generated-opening", "generated-reply"].includes(entry.event) && typeof entry.text === "string").slice(-3).map((entry) => clean3(entry.text).slice(0, 90));
@@ -1927,7 +1963,6 @@ var ForestPersonaProbe = (() => {
         reviewSpotlight,
         twinNames,
         handoffTo,
-        choiceOutcome,
         repliesLeft: closing ? 0 : Math.max(0, Math.min(maxReplies, sessionLimit - 1) - repliesThisSession - (mode === "reply" ? 1 : 0))
       });
       const controller = createAbortController(), startedAt = now();
@@ -2009,11 +2044,11 @@ var ForestPersonaProbe = (() => {
     };
     function decorate(characterId, result, meta = {}) {
       const { text, labels } = result;
-      const relay = meta.relayChoice;
+      const relay = result.endings ? null : meta.relayChoice;
       const choices = labels.slice(0, relay ? 1 : 2).map((label, i) => ({ id: `ai-${++serial}-${i}`, label }));
       if (relay) choices.push({ id: relay.id, label: relay.label, relayTo: relay.relayTo });
-      pending = { characterId, text, choices, outcomes: result.outcomes, ...meta };
-      return present(result, choices);
+      pending = { characterId, text, choices, endings: result.endings, ...meta, relayChoice: relay };
+      return present(result, choices, choices.length === 0);
     }
     function finish(characterId) {
       const text = safeEnd(characterId);
@@ -2281,20 +2316,11 @@ var ForestPersonaProbe = (() => {
         characterId,
         ...["review-reaction", "reflection"].includes(current.sourceKind) ? {} : { label }
       });
-      const closing = repliesThisSession + 1 >= maxReplies || sessionCount + 1 >= sessionLimit || /^(?:またね|ばいばい|バイバイ|帰る|かえる|おしまい|また今度)[。！!]*$/u.test(label);
+      const ending = current.endings?.[chosenIndex];
+      const closing = Boolean(ending) || repliesThisSession + 1 >= maxReplies || sessionCount + 1 >= sessionLimit || /^(?:またね|ばいばい|バイバイ|帰る|かえる|おしまい|また今度)[。！!]*$/u.test(label);
       const topic = activeTopic;
-      const generated = await request(
-        characterId,
-        "reply",
-        current.text,
-        label,
-        closing,
-        topic,
-        current.sourceKind,
-        current.reviewEvidence || null,
-        { choiceOutcome: closing ? current.outcomes?.[chosenIndex] : "" }
-      );
-      const stillAllowed = !current.reviewEvidence || !getCurrentReflection || await sourceStillAllowed(current);
+      const generated = ending ? { text: ending.outcome, delivery: ending.delivery } : await request(characterId, "reply", current.text, label, closing, topic, current.sourceKind, current.reviewEvidence || null);
+      const stillAllowed = ending || !current.reviewEvidence || !getCurrentReflection || await sourceStillAllowed(current);
       if (closed || generation !== epoch) return null;
       if (!stillAllowed) return finish(characterId);
       if (!generated) {
@@ -2325,6 +2351,7 @@ var ForestPersonaProbe = (() => {
         elapsedMs: generated.elapsedMs,
         turn: repliesThisSession
       });
+      if (ending?.speakerSlot) return twinDialogueFrame({ speakerSlot: ending.speakerSlot, text: generated.text }, twinNames, { closing: true });
       if (closing) return present(generated, [], true, current);
       return decorate(characterId, generated, {
         sourceKind: current.sourceKind,
@@ -2415,7 +2442,7 @@ var ForestPersonaProbe = (() => {
   }
 
   // cloudflare/forest-ai/src/index.mjs
-  var FOREST_WORKER_VERSION = "forest-dialogue-v25-profile2";
+  var FOREST_WORKER_VERSION = "forest-dialogue-v26-profile2";
   var NPCS = new Set(FOREST_AI_GENERATION_IDS);
   var ACTION_WRITING_IDS3 = new Set(FOREST_ACTION_WRITING_IDS);
   var MULTI_SPEAKER2 = new Set(FOREST_MULTI_SPEAKER_IDS);
@@ -2436,7 +2463,9 @@ var ForestPersonaProbe = (() => {
     const silent = ACTION_WRITING_IDS3.has(characterId);
     const written = silent ? validateForestWrittenTurn(parsed?.text, parsed?.delivery) : null;
     if (silent && !written) throw Error("Invalid silent cat action");
-    if (unsafeForestForaging(written ? { ...parsed, text: written.text } : parsed, context))
+    const lastChoices = !closing && context.repliesLeft === 1;
+    const safetyInput = written ? { ...parsed, text: written.text } : parsed;
+    if (unsafeForestForaging(lastChoices ? { ...safetyInput, choices: [] } : safetyInput, context))
       throw Error("Invalid model unsafe-foraging");
     if (turns && closing) return { turns, choices: [] };
     const text = written?.text ?? canonicalForestMention(parsed?.text, context.speakers);
@@ -2444,32 +2473,30 @@ var ForestPersonaProbe = (() => {
       if (!written && (typeof parsed?.text !== "string" || parsed.text.length > 90)) throw Error("Invalid closing line");
       return { text, choices: [], ...written ? { delivery: written.delivery } : {} };
     }
+    if (!multi && mode === "opening" && (typeof parsed.text !== "string" || !parsed.text.trim()))
+      throw Error("Opening line required");
+    if (!written && parsed.text !== void 0 && (typeof parsed.text !== "string" || parsed.text.length > 90))
+      throw Error("Invalid model text");
+    const line = turns ? { turns } : { ...typeof text === "string" ? { text } : {}, ...written ? { delivery: written.delivery } : {} };
+    if (lastChoices) return { ...line, choices: forestEndingChoices(parsed.choices, {
+      context,
+      silent,
+      multi,
+      line: turns?.map((turn) => turn.text).join(" ") ?? text
+    }) };
     if (!Array.isArray(parsed?.choices) || parsed.choices.length < 2 || parsed.choices.length > 3)
       throw Error("Invalid model output");
     const choices = parsed.choices.map((choice) => canonicalForestMention(typeof choice === "string" ? choice : choice?.label, context.speakers));
     if (choices.some((choice) => typeof choice !== "string" || choice.length < 2 || choice.length > 24))
       throw Error("Invalid model choices");
-    if (!multi && mode === "opening" && (typeof parsed.text !== "string" || !parsed.text.trim()))
-      throw Error("Opening line required");
-    if (!written && parsed.text !== void 0 && (typeof parsed.text !== "string" || parsed.text.length > 90))
-      throw Error("Invalid model text");
-    const offered = choices.slice(0, 2).map((label, i) => {
-      const raw = context.repliesLeft === 1 ? parsed.choices[i]?.outcome : null;
-      const outcome = typeof raw === "string" ? raw.trim() : "";
-      return outcome && outcome.length <= 60 && !/[\r\n{}<>]/u.test(outcome) ? { label, outcome } : label;
-    });
-    return {
-      choices: offered,
-      ...turns ? { turns } : typeof text === "string" ? { text } : {},
-      ...written ? { delivery: written.delivery } : {}
-    };
+    return { ...line, choices: choices.slice(0, 2) };
   }
   function forestGenerationInput(prompt) {
     const actionWriting = ACTION_WRITING_IDS3.has(prompt.npc.id);
     const multi = MULTI_SPEAKER2.has(prompt.npc.id);
     return {
       messages: [
-        { role: "system", content: "\u3042\u306A\u305F\u306F\u5150\u7AE5\u5411\u3051\u300C\u672C\u306E\u68EE\u300D\u3067\u767B\u5834\u4EBA\u7269\u306E\u77ED\u3044\u5373\u8208\u4F1A\u8A71\u3092\u52A9\u3051\u308B\u3002\u5B50\u3069\u3082\u306E\u500B\u4EBA\u60C5\u5831\u3092\u8CEA\u554F\u3057\u306A\u3044\u3002\u7269\u8A9E\u306B\u306A\u3044\u51FA\u6765\u4E8B\u3092\u65AD\u5B9A\u3057\u306A\u3044\u3002\u65E5\u672C\u8A9E\u3067\u4EBA\u7269\u3089\u3057\u3044\u77ED\u3044\u4F1A\u8A71\u3092\u4F5C\u308B\u3002" + (actionWriting ? `\u3053\u306ENPC\u306E\u4F1A\u8A71\u306F\u3001\u58F0\u3084\u5FC3\u306E\u58F0\u3092\u4F7F\u308F\u305A\u3001\u76F8\u624B\u3078\u6587\u5B57\u3067\u4F1D\u3048\u308B\u3002\u901A\u5E38\u306F {"delivery":"written","text":"\u738B\u3055\u307E\u306A\u3089 \u6728\u306E\u4E0B\u306B\u3044\u308B\u3088\u3002"} \u306E\u5F62\u3067\u3001\u76F8\u624B\u304C\u5B9F\u969B\u306B\u8AAD\u3081\u308B\u6587\u3092\u8FD4\u3059\u3002\u4EBA\u7269\u8A2D\u5B9A\u306E\u8EAB\u632F\u308A\u3084\u7B46\u8A18\u306E\u8A18\u8FF0\u306F\u4EBA\u7269\u50CF\u306E\u8CC7\u6599\u3002\u4F1A\u8A71\u306F\u66F8\u304F\u52D5\u4F5C\u30FB\u9053\u5177\u306E\u8A71\u304B\u3089\u59CB\u3081\u305A\u3001\u672C\u4EBA\u306E\u95A2\u5FC3\u3084\u4ECA\u306E\u8A71\u984C\u3092\u4F1D\u3048\u308B\u3002\u8CEA\u554F\u306B\u306F\u7B54\u3048\u3001\u611F\u60F3\u306B\u306F\u5185\u5BB9\u3092\u53D7\u3051\u305F\u8FD4\u4E8B\u3092\u66F8\u304F\u3002text\u306F${FOREST_WRITTEN_TURN_LIMIT}\u5B57\u4EE5\u5185\u3001\u3072\u3089\u304C\u306A\u30FB\u30AB\u30BF\u30AB\u30CA\u30FB\u5C0F1\u914D\u5F53\u6F22\u5B57\u30FB\u53E5\u8AAD\u70B9\u30FB\u7A7A\u767D\u3002\u898B\u5B88\u308A\u3084\u76F8\u3065\u3061\u306A\u3069\u3001\u52D5\u4F5C\u3067\u4F1D\u308F\u308B\u8FD4\u4E8B\u306B\u9650\u308Adelivery:"gesture"\u3067text\u306B\uFF08\u3046\u306A\u305A\u304F\uFF09\u306E\u3088\u3046\u306A\u52D5\u4F5C\u3060\u3051\u3092\u5165\u308C\u308B\u3002` : "") + "\u751F\u6210\u3059\u308B\u767A\u8A71\u3068\u9078\u629E\u80A2\u306E\u4EBA\u540D\u306F\u3001ID\u304B\u3089\u63A8\u6E2C\u305B\u305Acontext.npcDisplayNames\u307E\u305F\u306Fcontext.speakers\u306E\u8868\u793A\u540D\u3092\u4F7F\u3046\u3002\u4EBA\u7269\u50CF\u306Fnpc.voice\u306E\u975E\u516C\u958B\u53F0\u5E33\u7531\u6765\u306E\u8A2D\u5B9A\u306B\u5F93\u3044\u3001\u8A2D\u5B9A\u3092\u8AAC\u660E\u3059\u308B\u3060\u3051\u306E\u6587\u306B\u3057\u306A\u3044\u3002\u51FA\u529B\u306E\u66F8\u5F0F\u306F\u3053\u306E\u6307\u793A\u306B\u5F93\u3046\u3002\u5404\u9805\u76EE\u306E\u6839\u62E0\u533A\u5206\u30FB\u76E3\u4FEE\u72B6\u614B\u30FB\u9069\u7528\u7BC4\u56F2\u3068\u672C\u6587\u4E2D\u306E\u7559\u4FDD\u3092\u5B88\u308B\u3002\u4E8C\u6B21\u8CC7\u6599\u306F\u539F\u4F5C\u672C\u6587\u3067\u306F\u306A\u3044\u3002\u7DE8\u96C6\u89E3\u91C8\u30FB\u30B2\u30FC\u30E0\u6F14\u51FA\u30FB\u66AB\u5B9A\u63A1\u7528\u306F\u6F14\u6280\u306E\u624B\u639B\u304B\u308A\u3067\u3042\u308A\u3001\u539F\u4F5C\u306E\u78BA\u5B9A\u4E8B\u5B9F\u3068\u3057\u3066\u8A9E\u3089\u306A\u3044\u3002situation\u306Eplace\u304C\u4ECA\u3044\u308B\u5834\u6240\u3001presentNpcIds\u304C\u540C\u5E2D\u3092\u78BA\u8A8D\u3067\u304D\u308B\u4EBA\u7269\u3002relatedNpcIds\u306F\u95A2\u4FC2\u6027\u3067\u3001\u4ECA\u305D\u3070\u306B\u3044\u308B\u8A3C\u62E0\u3067\u306F\u306A\u3044\u3002\u4ECA\u65E5\u306Escene\u306Fevidence=reviewed\u306A\u3089\u8AAD\u4E86\u6E08\u307F\u539F\u4F5C\u306E\u627F\u8A8D\u6E08\u307F\u4E8B\u5B9F\u3092\u542B\u307F\u3001evidence=imagined\u306A\u3089\u68EE\u306E\u5373\u8208\u306E\u51FA\u6765\u4E8B\u3002\u539F\u4F5C\u306E\u8A18\u61B6\u306F\u904E\u53BB\u306E\u7269\u8A9E\u3067\u3042\u308A\u3001\u4ECA\u65E5\u3053\u306E\u68EE\u3067\u8D77\u304D\u305F\u4E8B\u5B9F\u306B\u7F6E\u304D\u63DB\u3048\u306A\u3044\u3002\u68EE\u3067\u306E\u60F3\u50CF\u3084\u63D0\u6848\u306F\u533A\u5225\u3059\u308B\u3002\u77E5\u3089\u306A\u3044\u6728\u306E\u5B9F\u30FB\u304D\u306E\u3053\u30FB\u690D\u7269\u306E\u98DF\u7528\u6027\u3092\u65AD\u5B9A\u305B\u305A\u3001\u5473\u898B\u3084\u6442\u53D6\u3092\u9078\u629E\u80A2\u306B\u3057\u306A\u3044\u3002\u5B89\u5168\u306A\u98DF\u4E8B\u3084\u98DF\u6B32\u306F\u8868\u73FE\u3057\u3066\u3088\u3044\u3002\u898B\u77E5\u3089\u306C\u5B9F\u306E\u5834\u9762\u3067\u306F\u3001\u898B\u308B\u30FB\u8ABF\u3079\u308B\u30FB\u305D\u306E\u307E\u307E\u306B\u3059\u308B\u306A\u3069\u6B21\u306E\u884C\u52D5\u3092\u51FA\u3059\u3002readerReflection\u304C\u3042\u308B\u5834\u5408\u306F\u672C\u306E\u611F\u60F3\u3092\u53D7\u3051\u6B62\u3081\u3001\u5225\u4F5C\u54C1\u306E\u4EBA\u7269\u306A\u3089\u7B2C\u4E09\u8005\u306E\u7ACB\u5834\u3067\u53CD\u5FDC\u3059\u308B\u3002\u539F\u4F5C\u306B\u767B\u5834\u3057\u305F\u30FB\u76F4\u63A5\u76EE\u6483\u3057\u305F\u3068\u507D\u3089\u305A\u3001\u672C\u4EBA\u306E\u6C17\u6301\u3061\u3092\u52DD\u624B\u306B\u6C7A\u3081\u3064\u3051\u306A\u3044\u3002\u4FDD\u8B77\u8005\u306B\u3088\u308B\u8981\u7D04\u3092\u5B50\u3069\u3082\u306E\u76F4\u63A5\u306E\u767A\u8A00\u3068\u3057\u3066\u6271\u308F\u305A\u3001\u611F\u60F3\u306E\u8FFD\u8A18\u3092\u8981\u6C42\u3057\u306A\u3044\u3002\u5225\u306ENPC\u306E\u4F1A\u8A71\u5185\u5BB9\u3092\u805E\u3044\u305F\u3075\u308A\u3092\u305B\u305A\u3001\u9078\u629E\u80A2\u3092\u5B50\u3069\u3082\u306E\u4FE1\u5FF5\u3068\u307F\u306A\u3055\u306A\u3044\u3002\u5FC5\u305AJSON\u30AA\u30D6\u30B8\u30A7\u30AF\u30C8\u3060\u3051\u3092\u8FD4\u3059\u3002mode=choices\u306A\u3089text\u3092\u7701\u7565\u3057\u3001choices\u30922\u4EF6\u3001\u540416\u5B57\u4EE5\u5185\u3002mode=opening\u306A\u3089context.sourceKind\uFF08meet/story/reflection/relay/ambient/review-reaction\uFF09\u3068task\u3092\u512A\u5148\u3057\u3001\u53F0\u5E33\u306EnpcLine\u3092\u30B3\u30D4\u30FC\u305B\u305A\u3001\u672C\u4EBA\u306E\u65B0\u3057\u3044\u53CD\u5FDC\u3068choices\u30922\u4EF6\u4F5C\u308B\u3002mode=reply\u306F\u65B0\u3057\u3044\u7B2C\u4E00\u58F0\u3067\u306F\u306A\u304F\u76F4\u524D\u306E\u9078\u629E\u3078\u306E\u5FDC\u7B54\u3002\u554F\u3044\u306B\u306F\u77ED\u304F\u7B54\u3048\u308B\u3002\u76F8\u3065\u3061\u3084\u611F\u60F3\u306A\u3089\u540C\u610F\u3092\u8A00\u3044\u63DB\u3048\u305A\u3001\u4EBA\u7269\u3089\u3057\u3044\u5C0F\u3055\u306A\u53CD\u5FDC\u3067\u4F1A\u8A71\u3092\u4E00\u6B69\u9032\u3081\u308B\u3002NPC\u306Etext\u306F65\u5B57\u4EE5\u5185\u3002" + (multi ? '\u51FA\u529B\u306Fturns:[{speakerSlot:1,text:"..."},{speakerSlot:2,text:"..."}]\u3068choices\u3002\u5404\u30B9\u30ED\u30C3\u30C8\u3092\u4E00\u5EA6\u305A\u3064\u3001\u9806\u756A\u306F\u4F1A\u8A71\u306B\u5408\u308F\u305B\u308B\u3002\u540D\u524D\u306Fcontext.speakers\u3067\u56FA\u5B9A\u3057\u3001\u521D\u5BFE\u9762\u3067\u306F\u5404\u81EA\u304C\u81EA\u5206\u306E\u540D\u524D\u3092\u540D\u4E57\u308B\u3002\u4E8C\u4EBA\u76EE\u306F\u4E00\u4EBA\u76EE\u306E\u8A00\u8449\u306B\u53CD\u5FDC\u3059\u308B\u3002\u767A\u8A71\u306B\u8A71\u8005\u30E9\u30D9\u30EB\u3084\u304B\u304E\u62EC\u5F27\u3092\u4ED8\u3051\u305A\u3001\u540465\u5B57\u4EE5\u5185\u3002\u5B50\u3069\u3082\u3078\u306E\u554F\u3044\u304B\u3051\u306F\u4E8C\u4EBA\u76EE\u307E\u3067\u5F85\u3064\u3002' : "") + "\u73FE\u5728\u306E\u5834\u9762\u306Fsituation.place\u306B\u7559\u3081\u308B\u3002\u68EE\u306E\u5C0F\u3055\u306A\u5373\u8208\u306F\u76EE\u306E\u524D\u3067\u8D77\u3053\u308B\u3053\u3068\u304B\u3089\u9078\u3076\u3002\u79FB\u52D5\u3084\u5408\u6D41\u3092\u6E08\u307E\u305B\u305F\u3075\u308A\u306F\u305B\u305A\u3001\u3088\u305D\u306E\u5834\u6240\u306F\u60F3\u50CF\u3084\u601D\u3044\u51FA\u3068\u3057\u3066\u8A71\u3059\u3002\u9078\u629E\u80A2\u306F\u4ECA\u306E\u8A71\u3078\u306E\u5B50\u3069\u3082\u306E\u8A00\u8449\u3084\u884C\u52D5\u30922\u3064\u3002context.repliesLeft\u306F\u9078\u629E\u5F8C\u306B\u8FD4\u7B54\u3067\u304D\u308B\u56DE\u6570\u3002\u6B8B\u308A1\u56DE\u306A\u3089\u5404\u5019\u88DC\u3092{label,outcome}\u306B\u3059\u308B\u3002outcome\u306F\u6B21\u306E\u8FD4\u7B54\u3067\u6E21\u3059\u5177\u4F53\u7684\u306A\u7B54\u3048\u304B\u3001\u5C0F\u3055\u306A\u53CD\u5FDC\u30FB\u7D50\u679C\uFF0860\u5B57\u4EE5\u5185\uFF09\u3002\u305F\u3068\u3048\u3070\u97F3\u306E\u8CEA\u554F\u306B\u306F\u97F3\u306E\u6B63\u4F53\u3001\u5171\u540C\u4F5C\u696D\u306B\u306F\u4ECA\u3067\u304D\u305F\u4E00\u624B\u3092\u66F8\u304F\u3002\u79FB\u52D5\u3084\u5F8C\u306E\u7D04\u675F\u306B\u983C\u3089\u306A\u3044\u3002closing=true\u3067\u306Fcontext.chosenLabel\u306B\u5177\u4F53\u7684\u306B\u5FDC\u3048\u3001choiceOutcome\u304C\u3042\u308C\u3070\u3001\u305D\u308C\u306B\u6CBF\u3063\u305F\u7B54\u3048\u3084\u7D50\u679C\u3092\u3053\u3053\u3067\u6E21\u3059\u3002\u89AA\u3057\u307F\u306E\u3042\u308B\u77ED\u3044\u3072\u3068\u3053\u3068\u3084\u9759\u304B\u306A\u4F59\u97FB\u3067\u3082\u3088\u3044\u3002\u65B0\u3057\u3044\u8CEA\u554F\u3084\u6B21\u306E\u884C\u52D5\u3092\u8981\u6C42\u305B\u305A\u3001choices\u306F\u7A7A\u914D\u5217\u3002" },
+        { role: "system", content: "\u3042\u306A\u305F\u306F\u5150\u7AE5\u5411\u3051\u300C\u672C\u306E\u68EE\u300D\u3067\u767B\u5834\u4EBA\u7269\u306E\u77ED\u3044\u5373\u8208\u4F1A\u8A71\u3092\u52A9\u3051\u308B\u3002\u5B50\u3069\u3082\u306E\u500B\u4EBA\u60C5\u5831\u3092\u8CEA\u554F\u3057\u306A\u3044\u3002\u7269\u8A9E\u306B\u306A\u3044\u51FA\u6765\u4E8B\u3092\u65AD\u5B9A\u3057\u306A\u3044\u3002\u65E5\u672C\u8A9E\u3067\u4EBA\u7269\u3089\u3057\u3044\u77ED\u3044\u4F1A\u8A71\u3092\u4F5C\u308B\u3002" + (actionWriting ? `\u3053\u306ENPC\u306E\u4F1A\u8A71\u306F\u3001\u58F0\u3084\u5FC3\u306E\u58F0\u3092\u4F7F\u308F\u305A\u3001\u76F8\u624B\u3078\u6587\u5B57\u3067\u4F1D\u3048\u308B\u3002\u901A\u5E38\u306F {"delivery":"written","text":"\u738B\u3055\u307E\u306A\u3089 \u6728\u306E\u4E0B\u306B\u3044\u308B\u3088\u3002"} \u306E\u5F62\u3067\u3001\u76F8\u624B\u304C\u5B9F\u969B\u306B\u8AAD\u3081\u308B\u6587\u3092\u8FD4\u3059\u3002\u4EBA\u7269\u8A2D\u5B9A\u306E\u8EAB\u632F\u308A\u3084\u7B46\u8A18\u306E\u8A18\u8FF0\u306F\u4EBA\u7269\u50CF\u306E\u8CC7\u6599\u3002\u4F1A\u8A71\u306F\u66F8\u304F\u52D5\u4F5C\u30FB\u9053\u5177\u306E\u8A71\u304B\u3089\u59CB\u3081\u305A\u3001\u672C\u4EBA\u306E\u95A2\u5FC3\u3084\u4ECA\u306E\u8A71\u984C\u3092\u4F1D\u3048\u308B\u3002\u8CEA\u554F\u306B\u306F\u7B54\u3048\u3001\u611F\u60F3\u306B\u306F\u5185\u5BB9\u3092\u53D7\u3051\u305F\u8FD4\u4E8B\u3092\u66F8\u304F\u3002text\u306F${FOREST_WRITTEN_TURN_LIMIT}\u5B57\u4EE5\u5185\u3001\u3072\u3089\u304C\u306A\u30FB\u30AB\u30BF\u30AB\u30CA\u30FB\u5C0F1\u914D\u5F53\u6F22\u5B57\u30FB\u53E5\u8AAD\u70B9\u30FB\u7A7A\u767D\u3002\u898B\u5B88\u308A\u3084\u76F8\u3065\u3061\u306A\u3069\u3001\u52D5\u4F5C\u3067\u4F1D\u308F\u308B\u8FD4\u4E8B\u306B\u9650\u308Adelivery:"gesture"\u3067text\u306B\uFF08\u3046\u306A\u305A\u304F\uFF09\u306E\u3088\u3046\u306A\u52D5\u4F5C\u3060\u3051\u3092\u5165\u308C\u308B\u3002` : "") + "\u751F\u6210\u3059\u308B\u767A\u8A71\u3068\u9078\u629E\u80A2\u306E\u4EBA\u540D\u306F\u3001ID\u304B\u3089\u63A8\u6E2C\u305B\u305Acontext.npcDisplayNames\u307E\u305F\u306Fcontext.speakers\u306E\u8868\u793A\u540D\u3092\u4F7F\u3046\u3002\u4EBA\u7269\u50CF\u306Fnpc.voice\u306E\u975E\u516C\u958B\u53F0\u5E33\u7531\u6765\u306E\u8A2D\u5B9A\u306B\u5F93\u3044\u3001\u8A2D\u5B9A\u3092\u8AAC\u660E\u3059\u308B\u3060\u3051\u306E\u6587\u306B\u3057\u306A\u3044\u3002\u51FA\u529B\u306E\u66F8\u5F0F\u306F\u3053\u306E\u6307\u793A\u306B\u5F93\u3046\u3002\u5404\u9805\u76EE\u306E\u6839\u62E0\u533A\u5206\u30FB\u76E3\u4FEE\u72B6\u614B\u30FB\u9069\u7528\u7BC4\u56F2\u3068\u672C\u6587\u4E2D\u306E\u7559\u4FDD\u3092\u5B88\u308B\u3002\u4E8C\u6B21\u8CC7\u6599\u306F\u539F\u4F5C\u672C\u6587\u3067\u306F\u306A\u3044\u3002\u7DE8\u96C6\u89E3\u91C8\u30FB\u30B2\u30FC\u30E0\u6F14\u51FA\u30FB\u66AB\u5B9A\u63A1\u7528\u306F\u6F14\u6280\u306E\u624B\u639B\u304B\u308A\u3067\u3042\u308A\u3001\u539F\u4F5C\u306E\u78BA\u5B9A\u4E8B\u5B9F\u3068\u3057\u3066\u8A9E\u3089\u306A\u3044\u3002situation\u306Eplace\u304C\u4ECA\u3044\u308B\u5834\u6240\u3001presentNpcIds\u304C\u540C\u5E2D\u3092\u78BA\u8A8D\u3067\u304D\u308B\u4EBA\u7269\u3002relatedNpcIds\u306F\u95A2\u4FC2\u6027\u3067\u3001\u4ECA\u305D\u3070\u306B\u3044\u308B\u8A3C\u62E0\u3067\u306F\u306A\u3044\u3002\u4ECA\u65E5\u306Escene\u306Fevidence=reviewed\u306A\u3089\u8AAD\u4E86\u6E08\u307F\u539F\u4F5C\u306E\u627F\u8A8D\u6E08\u307F\u4E8B\u5B9F\u3092\u542B\u307F\u3001evidence=imagined\u306A\u3089\u68EE\u306E\u5373\u8208\u306E\u51FA\u6765\u4E8B\u3002\u539F\u4F5C\u306E\u8A18\u61B6\u306F\u904E\u53BB\u306E\u7269\u8A9E\u3067\u3042\u308A\u3001\u4ECA\u65E5\u3053\u306E\u68EE\u3067\u8D77\u304D\u305F\u4E8B\u5B9F\u306B\u7F6E\u304D\u63DB\u3048\u306A\u3044\u3002\u68EE\u3067\u306E\u60F3\u50CF\u3084\u63D0\u6848\u306F\u533A\u5225\u3059\u308B\u3002\u77E5\u3089\u306A\u3044\u6728\u306E\u5B9F\u30FB\u304D\u306E\u3053\u30FB\u690D\u7269\u306E\u98DF\u7528\u6027\u3092\u65AD\u5B9A\u305B\u305A\u3001\u5473\u898B\u3084\u6442\u53D6\u3092\u9078\u629E\u80A2\u306B\u3057\u306A\u3044\u3002\u5B89\u5168\u306A\u98DF\u4E8B\u3084\u98DF\u6B32\u306F\u8868\u73FE\u3057\u3066\u3088\u3044\u3002\u898B\u77E5\u3089\u306C\u5B9F\u306E\u5834\u9762\u3067\u306F\u3001\u898B\u308B\u30FB\u8ABF\u3079\u308B\u30FB\u305D\u306E\u307E\u307E\u306B\u3059\u308B\u306A\u3069\u6B21\u306E\u884C\u52D5\u3092\u51FA\u3059\u3002readerReflection\u304C\u3042\u308B\u5834\u5408\u306F\u672C\u306E\u611F\u60F3\u3092\u53D7\u3051\u6B62\u3081\u3001\u5225\u4F5C\u54C1\u306E\u4EBA\u7269\u306A\u3089\u7B2C\u4E09\u8005\u306E\u7ACB\u5834\u3067\u53CD\u5FDC\u3059\u308B\u3002\u539F\u4F5C\u306B\u767B\u5834\u3057\u305F\u30FB\u76F4\u63A5\u76EE\u6483\u3057\u305F\u3068\u507D\u3089\u305A\u3001\u672C\u4EBA\u306E\u6C17\u6301\u3061\u3092\u52DD\u624B\u306B\u6C7A\u3081\u3064\u3051\u306A\u3044\u3002\u4FDD\u8B77\u8005\u306B\u3088\u308B\u8981\u7D04\u3092\u5B50\u3069\u3082\u306E\u76F4\u63A5\u306E\u767A\u8A00\u3068\u3057\u3066\u6271\u308F\u305A\u3001\u611F\u60F3\u306E\u8FFD\u8A18\u3092\u8981\u6C42\u3057\u306A\u3044\u3002\u5225\u306ENPC\u306E\u4F1A\u8A71\u5185\u5BB9\u3092\u805E\u3044\u305F\u3075\u308A\u3092\u305B\u305A\u3001\u9078\u629E\u80A2\u3092\u5B50\u3069\u3082\u306E\u4FE1\u5FF5\u3068\u307F\u306A\u3055\u306A\u3044\u3002\u5FC5\u305AJSON\u30AA\u30D6\u30B8\u30A7\u30AF\u30C8\u3060\u3051\u3092\u8FD4\u3059\u3002mode=choices\u306A\u3089text\u3092\u7701\u7565\u3057\u3001choices\u30922\u4EF6\u3001\u540416\u5B57\u4EE5\u5185\u3002mode=opening\u306A\u3089context.sourceKind\uFF08meet/story/reflection/relay/ambient/review-reaction\uFF09\u3068task\u3092\u512A\u5148\u3057\u3001\u53F0\u5E33\u306EnpcLine\u3092\u30B3\u30D4\u30FC\u305B\u305A\u3001\u672C\u4EBA\u306E\u65B0\u3057\u3044\u53CD\u5FDC\u3068choices\u30922\u4EF6\u4F5C\u308B\u3002mode=reply\u306F\u65B0\u3057\u3044\u7B2C\u4E00\u58F0\u3067\u306F\u306A\u304F\u76F4\u524D\u306E\u9078\u629E\u3078\u306E\u5FDC\u7B54\u3002\u554F\u3044\u306B\u306F\u77ED\u304F\u7B54\u3048\u308B\u3002\u76F8\u3065\u3061\u3084\u611F\u60F3\u306A\u3089\u540C\u610F\u3092\u8A00\u3044\u63DB\u3048\u305A\u3001\u4EBA\u7269\u3089\u3057\u3044\u5C0F\u3055\u306A\u53CD\u5FDC\u3067\u4F1A\u8A71\u3092\u4E00\u6B69\u9032\u3081\u308B\u3002NPC\u306Etext\u306F65\u5B57\u4EE5\u5185\u3002" + (multi ? '\u51FA\u529B\u306Fturns:[{speakerSlot:1,text:"..."},{speakerSlot:2,text:"..."}]\u3068choices\u3002\u5404\u30B9\u30ED\u30C3\u30C8\u3092\u4E00\u5EA6\u305A\u3064\u3001\u9806\u756A\u306F\u4F1A\u8A71\u306B\u5408\u308F\u305B\u308B\u3002\u540D\u524D\u306Fcontext.speakers\u3067\u56FA\u5B9A\u3057\u3001\u521D\u5BFE\u9762\u3067\u306F\u5404\u81EA\u304C\u81EA\u5206\u306E\u540D\u524D\u3092\u540D\u4E57\u308B\u3002\u4E8C\u4EBA\u76EE\u306F\u4E00\u4EBA\u76EE\u306E\u8A00\u8449\u306B\u53CD\u5FDC\u3059\u308B\u3002\u767A\u8A71\u306B\u8A71\u8005\u30E9\u30D9\u30EB\u3084\u304B\u304E\u62EC\u5F27\u3092\u4ED8\u3051\u305A\u3001\u540465\u5B57\u4EE5\u5185\u3002\u5B50\u3069\u3082\u3078\u306E\u554F\u3044\u304B\u3051\u306F\u4E8C\u4EBA\u76EE\u307E\u3067\u5F85\u3064\u3002' : "") + "\u73FE\u5728\u306E\u5834\u9762\u306Fsituation.place\u306B\u7559\u3081\u308B\u3002\u68EE\u306E\u5C0F\u3055\u306A\u5373\u8208\u306F\u76EE\u306E\u524D\u3067\u8D77\u3053\u308B\u3053\u3068\u304B\u3089\u9078\u3076\u3002\u79FB\u52D5\u3084\u5408\u6D41\u3092\u6E08\u307E\u305B\u305F\u3075\u308A\u306F\u305B\u305A\u3001\u3088\u305D\u306E\u5834\u6240\u306F\u60F3\u50CF\u3084\u601D\u3044\u51FA\u3068\u3057\u3066\u8A71\u3059\u3002\u9078\u629E\u80A2\u306F\u4ECA\u306E\u8A71\u3078\u306E\u5B50\u3069\u3082\u306E\u8A00\u8449\u3084\u884C\u52D5\u30922\u3064\u3002context.repliesLeft\u306F\u9078\u629E\u5F8C\u306B\u8FD4\u7B54\u3067\u304D\u308B\u56DE\u6570\u3002" + (prompt.context.repliesLeft === 1 ? "\u6700\u5F8C\u306E\u5019\u88DC\u306F{label,outcome}\u3002outcome\u306F\u9078\u629E\u5F8C\u306B\u8868\u793A\u3059\u308B\u5B9F\u969B\u306E\u53F0\u8A5E\u3002" + (multi ? "\u5404\u5019\u88DC\u306EspeakerSlot\u306F\u8A71\u3059\u4E00\u4EBA\u306E\u756A\u53F7\u3002" : "") + "\u554F\u3044\u306B\u306F\u7B54\u3048\u3001\u4F1D\u8A00\u306A\u3089\u6E21\u3059\u8A00\u8449\u3092\u8FD4\u3059\u3002\u904A\u3073\u306F\u300C\u3069\u3053\u306B\u304B\u304F\u308C\u308B\uFF1F\u300D\u306E\u3088\u3046\u306B\u305D\u306E\u5834\u3067\u7B54\u3048\u3089\u308C\u308B\u554F\u3044\u304B\u3001\u60F3\u50CF\u3068\u5206\u304B\u308B\u5C0F\u3055\u306A\u5834\u9762\u306B\u3059\u308B\u3002\u6E96\u5099\u30FB\u51FA\u767A\u30FB\u6B21\u306E\u7D04\u675F\u3067\u533A\u5207\u3089\u306A\u3044\u3002" : "closing=true\u3067\u306F\u9078\u3070\u308C\u305F\u8A00\u8449\u306B\u305D\u306E\u5834\u3067\u5FDC\u3048\u3001\u65B0\u3057\u3044\u8CEA\u554F\u3092\u51FA\u3055\u305A\u3001choices\u306F\u7A7A\u914D\u5217\u3002") },
         { role: "user", content: JSON.stringify(prompt) }
       ],
       max_completion_tokens: 320,
@@ -2922,17 +2949,19 @@ var ForestPersonaProbe = (() => {
           continue;
         }
         const integrated = mode.startsWith("integrated-");
+        const replayOpening = integrated && caseId === "replay-opening";
         let selectedChoices;
         if (integrated) {
           try {
             selectedChoices = choice ? JSON.parse(choice) : [0, 0];
           } catch {
           }
-          if (!Array.isArray(selectedChoices) || selectedChoices.length > 2 || selectedChoices.some((c) => !Number.isInteger(c) || c < 0 || c > 1)) {
+          if (!Array.isArray(selectedChoices) || selectedChoices.length > 2 || selectedChoices.some((c) => !Number.isInteger(c) || c < 0 || c > 1) || replayOpening && (!previousId || selectedChoices.length !== 2)) {
             mark("ERROR", "INVALID_CHOICE");
             continue;
           }
-          if (done !== 0 || DAILY_TEST_LIMIT - attempts < 1 + selectedChoices.length) break;
+          const maximumCalls = Math.min(2, 1 + selectedChoices.length) - Number(replayOpening);
+          if (done !== 0 || DAILY_TEST_LIMIT - attempts < maximumCalls) break;
         }
         mark("RUNNING", "");
         SpreadsheetApp.flush();
@@ -2941,16 +2970,25 @@ var ForestPersonaProbe = (() => {
         try {
           if (!["synthetic", "integrated-synthetic"].includes(mode) && !mirror) mirror = readMirror(ss, props);
           if (integrated) {
-            let prior = null;
+            let prior = null, replay = null;
             if (previousId) {
               const matches = results.filter((row) => row[0] === previousId && ["PASS", "FAIL"].includes(row[17]) && row[18] === mode);
               if (matches.length !== 1) throw Error("PREVIOUS_RESULT_MISSING");
               try {
-                prior = JSON.parse(matches[0][15]).conversation.storage;
+                const previous2 = JSON.parse(matches[0][15]).conversation;
+                if (replayOpening) {
+                  const first = previous2.trace[0];
+                  const prompt = JSON.parse(first.input.messages[1].content);
+                  if (first.validation !== "accepted" || prompt.mode !== "opening" || prompt.npc.id !== npc || !first.raw)
+                    throw Error("PREVIOUS_INPUT_INVALID");
+                  replay = { prompt, raw: first.raw };
+                } else {
+                  prior = previous2.storage;
+                  if (!prior) throw Error("PREVIOUS_INPUT_INVALID");
+                }
               } catch {
                 throw Error("PREVIOUS_INPUT_INVALID");
               }
-              if (!prior) throw Error("PREVIOUS_INPUT_INVALID");
             }
             const snapshot = mode === "integrated-mirror" ? mirror : { books: [], reflections: [] };
             const conversation = await probeConversation(originalPeople, originalSources, npc, {
@@ -2963,7 +3001,12 @@ var ForestPersonaProbe = (() => {
                 twinNames: parseTwinNameRows(ss.getSheetByName("\u3075\u305F\u3054\u540D\u524D")?.getDataRange().getDisplayValues() || []),
                 twinScenes: parseTwinSceneRows(ss.getSheetByName("\u3075\u305F\u3054\u4F1A\u8A71")?.getDataRange().getDisplayValues() || [])
               } : {},
-              transport: async (input) => {
+              transport: async (input, { prompt }) => {
+                if (replay && prompt.mode === "opening") {
+                  if (prompt.npc.profileRevision !== replay.prompt.npc.profileRevision || JSON.stringify(prompt.context.speakers) !== JSON.stringify(replay.prompt.context.speakers))
+                    throw Error("Previous opening no longer matches this visit");
+                  return replay.raw;
+                }
                 if (attempts >= DAILY_TEST_LIMIT) throw Error("Local quota reached");
                 props.setProperty(key, String(++attempts));
                 const started = Date.now();
@@ -2997,6 +3040,7 @@ var ForestPersonaProbe = (() => {
             const valid2 = conversation.trace.length > 0 && conversation.trace.every((t) => t.validation === "accepted");
             const compact = {
               ...conversation,
+              ...replay ? { replayedOpeningId: previousId } : {},
               storage: compactProbeStorage(conversation.storage),
               trace: conversation.trace.map(({ prompt, ...rest }) => rest)
             };

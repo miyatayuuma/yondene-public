@@ -9,7 +9,7 @@ const generalFoodSearch=/^(?:おいしい|美味しい)(?:もの|物)を[、 ]*(
 const knownFood=/(?:パン|ぱん|おにぎり|弁当|べんとう|サンドイッチ|おやつ|クッキー|ケーキ|スープ)/u;
 export function unsafeForestForaging(output,context={}){
   const background=JSON.stringify({situation:context.situation,topic:context.topic,
-    scene:context.today?.scene,recentTurns:context.recentTurns,chosenLabel:context.chosenLabel,choiceOutcome:context.choiceOutcome});
+    scene:context.today?.scene,recentTurns:context.recentTurns,chosenLabel:context.chosenLabel});
   const utterances=Array.isArray(output?.turns)?output.turns.map(turn=>turn?.text):[];
   const subject=background+' '+[output?.text,...utterances].join(' ');
   // A wild plant is unverified by default. The model need not say

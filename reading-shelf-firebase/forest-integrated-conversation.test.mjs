@@ -19,28 +19,45 @@ const raw=({prompt})=>({response:JSON.stringify({
     prompt.closing?'続きはまた会ったときにね。':prompt.mode==='reply'?
       'あの曲がり角まで見に行こう。':'向こうの道が気になるな。',
   ...(prompt.npc.id==='cat'?{delivery:'gesture'}:{}),
-  choices:prompt.closing?[]:['いっしょに見る','ここで待つ']})});
+  choices:prompt.closing?[]:prompt.context.repliesLeft===1?
+    [{label:'いっしょに見る',outcome:'木の下に 白い花がさいているよ。'},
+      {label:'ここで待つ',outcome:'風の音がよくきこえるね。'}]:['いっしょに見る','ここで待つ']})});
 const defaults={now:()=>now,getCharacterProfiles:()=>profiles,
   getBooks:()=>[book],getCatalog:()=>[memory],transport:async(input,args)=>raw(args)};
 
 test('complete production path: first encounter, choice, reply, end and related NPC visit',async()=>{
   const run=await runForestConversationScenario({...defaults,
     visits:[{characterId:'kiki',choices:[0,0]},{characterId:'jiji',choices:[0]}]});
-  assert.deepEqual(run.trace.map(t=>t.prompt.mode),['opening','reply','reply','opening','reply']);
+  assert.deepEqual(run.trace.map(t=>t.prompt.mode),['opening','reply','opening','reply']);
   assert.equal(run.trace[0].prompt.context.situation.firstEncounter,true);
   assert.equal(run.frames[2].result.conversationComplete,true);
   assert.deepEqual(run.frames[2].result.choices,[]);
   assert.equal(run.trace[1].prompt.context.chosenLabel,'いっしょに見る');
-  assert.equal(run.trace[3].prompt.context.today.previousNpc,'kiki');
+  assert.equal(run.trace[2].prompt.context.today.previousNpc,'kiki');
   assert.equal(run.progress.visits.kiki,1);
   assert.ok(run.trace.every(t=>t.validation==='accepted'&&t.inputFingerprint.length===16));
+});
+
+test('unusable final pairs do not offer a promise or discard an otherwise valid reply',()=>{
+  const context={repliesLeft:1,situation:{place:'本の森'}};
+  const options={characterId:'kiki',mode:'reply',context,requireLine:true};
+  const main='木のそばなら声がよく聞こえるね。';
+  const bad=[{label:'かくれんぼしよう',outcome:'わたしたち、かく準備をするね！'},'あとで行く'];
+  const good={label:'かくれるならどこ？',outcome:'想像なら、あの大きな木のうらにかくれるよ。'};
+  for(const [choices,expected] of [[bad,[]],[[...bad,good],[good]]]){
+    const parsed=readCompletion({response:JSON.stringify({text:main,choices})},options);
+    assert.deepEqual(parsed.choices,expected);
+    assert.deepEqual(validateLiveForestOutput({text:main,choices},options).endings,expected);
+  }
+  const unsafe={label:'木の実を食べてみよう',outcome:'森の木の実はおいしいよ。'};
+  assert.deepEqual(readCompletion({response:JSON.stringify({text:main,choices:[unsafe,good]})},options).choices,[good]);
 });
 
 test('story grounding survives both replies; old memories can return after intervening encounters',async()=>{
   const run=await runForestConversationScenario({...defaults,
     visits:Array.from({length:9},()=>({characterId:'kiki',choices:[0,0]}))});
   const story=run.trace.filter(t=>t.prompt.context.sourceKind==='story');
-  assert.ok(story.length>=6,'one approved memory must not become permanently ineligible');
+  assert.ok(story.length>=4,'one approved memory must not become permanently ineligible');
   assert.ok(story.every(t=>t.prompt.context.topic?.fact===memory.text));
   const ambient=run.trace.filter(t=>t.prompt.context.sourceKind==='ambient');
   assert.ok(ambient.length>0);
@@ -174,21 +191,23 @@ test('a model-format success rejected by the real browser validator is not a pip
 const twinNames=[{id:'sample-pair',schemaVersion:1,approval:'approved',firstName:'あお',secondName:'そら'}];
 const twinDefaults={...defaults,getTwinNames:()=>twinNames,
   getCharacterProfiles:()=>[...profiles,profileFixture({id:'twins'})]};
-const twinRaw=(closing=false)=>({response:JSON.stringify({
+const twinRaw=(closing=false,repliesLeft=2)=>({response:JSON.stringify({
   turns:[{speakerSlot:1,text:'あっ、小川だ。'},{speakerSlot:2,text:'水の音がするね。'}],
-  choices:closing?[]:['耳をすます','橋を見たい']})});
+  choices:closing?[]:repliesLeft===1?
+    [{label:'耳をすます',outcome:'葉っぱがさらさら鳴っているね。',speakerSlot:1},
+      {label:'橋はどんな色？',outcome:'水の上に茶色い橋が見えるよ。',speakerSlot:2}]:['耳をすます','橋を見たい']})});
 
 test('twins use the shared generator through opening, choices, closing and a persisted revisit',async()=>{
-  const transport=async(_input,args)=>args.prompt.npc.id==='twins'?twinRaw(args.prompt.closing):raw(args);
+  const transport=async(_input,args)=>args.prompt.npc.id==='twins'?twinRaw(args.prompt.closing,args.prompt.context.repliesLeft):raw(args);
   const first=await runForestConversationScenario({...twinDefaults,transport,
     visits:[{characterId:'twins',choices:[0,1]},{characterId:'skipper',choices:[0]}]});
-  assert.deepEqual(first.frames.slice(0,6).map(f=>f.result?.speakerName),['あお','そら','あお','そら','あお','そら']);
+  assert.deepEqual(first.frames.slice(0,5).map(f=>f.result?.speakerName),['あお','そら','あお','そら','そら']);
   assert.equal(first.frames[0].result.choices.length,0);
   assert.equal(first.frames[1].result.choices.length,2);
-  assert.equal(first.frames[5].result.conversationComplete,true);
+  assert.equal(first.frames[4].result.conversationComplete,true);
   assert.equal(first.trace[1].prompt.context.chosenLabel,'耳をすます');
   assert.equal(first.trace[1].prompt.context.recentTurns[0].turns[1].speakerSlot,2);
-  assert.equal(first.trace[3].prompt.context.today.previousNpc,'twins');
+  assert.equal(first.trace[2].prompt.context.today.previousNpc,'twins');
   assert.equal(first.progress.visits.twins,1);
   const second=await runForestConversationScenario({...twinDefaults,transport,
     storage:scenarioStorage(first.storage),
@@ -239,26 +258,25 @@ test('registered names, written cat replies and the remaining reply count surviv
       if(npc.id==='cat')return {response:JSON.stringify({
         text:mode==='opening'?'（そっと紙を出して書いた。）\nキキと ジジが見つけた木だよ。 どこに小さなとりがいるか、下からそっと見てみよう。':closing?'（ねこはとなりにすわった。）':'あの白い花の上だよ。とりもこちらを見ているね。',
         delivery:closing?'gesture':'written',
-        choices:closing?[]:['いっしょに見る','ここですわる']})};
+        choices:mode==='opening'?['いっしょに見る','ここですわる']:[{label:'しずかに見ている',outcome:'（ねこはとなりにすわった。）',delivery:'gesture'}]})};
       return {response:JSON.stringify({
         text:closing?'ほら、切り株のかげに丸い石があったぞ。':mode==='opening'
           ?'切り株のかげに、何かあるぞ。':'葉っぱをどけると、丸いものが見えるぞ。',
         choices:closing?[]:mode==='opening'?['ハチビーはどう思う？','一緒に見てみよう']:
-          [{label:'丸いものって何？',outcome:'切り株のかげで見つけた丸い石だと答える'},
-            {label:'一緒に見てみよう',outcome:'目の前の石を指さす'}]})};
+          [{label:'丸いものって何？',outcome:'切り株のかげにあった丸い石だよ。'},
+            {label:'一緒に見てみよう',outcome:'ほら、石の表に白い線があるぞ。'}]})};
     }});
-  assert.deepEqual(run.trace.map(t=>t.prompt.context.repliesLeft),[2,1,0,2,1,0]);
+  assert.deepEqual(run.trace.map(t=>t.prompt.context.repliesLeft),[2,1,2,1]);
   assert.equal(run.trace[0].prompt.npc.displayName,'ハチベエ');
-  assert.equal(run.trace[3].prompt.context.npcDisplayNames.hachibee,'ハチベエ');
+  assert.equal(run.trace[2].prompt.context.npcDisplayNames.hachibee,'ハチベエ');
   assert.equal(run.frames[0].result.choices[0].label,'ハチベエはどう思う？');
   assert.equal(run.trace[1].prompt.context.chosenLabel,'ハチベエはどう思う？');
-  assert.equal(run.trace[2].prompt.context.chosenLabel,'丸いものって何？');
-  assert.equal(run.trace[2].prompt.context.choiceOutcome,'切り株のかげで見つけた丸い石だと答える');
+  assert.equal(run.frames[2].result.text,'切り株のかげにあった丸い石だよ。');
   assert.deepEqual(Object.keys(run.frames[1].result.choices[0]).sort(),['id','label']);
   assert.equal(run.frames[2].result.conversationComplete,true);
   assert.equal(run.frames[3].result.delivery,'written');
   assert.match(run.frames[3].result.text,/^キキと ジジ/u);
-  assert.deepEqual(run.trace[4].prompt.context.recentTurns[0],{
+  assert.deepEqual(run.trace[3].prompt.context.recentTurns[0],{
     npc:run.frames[3].result.text,delivery:'written'});
   assert.equal(run.frames[4].result.delivery,'written');
   assert.equal(run.frames[5].result.delivery,'gesture');

@@ -11,9 +11,10 @@ const sources=[['資料ID','根拠の種別','確認状態']];
 test('GAS adapter runs the production encounter and reuses its persisted state for revisits',async()=>{
   const transport=async(input,{prompt})=>({response:JSON.stringify({
     text:prompt.closing?'（ねこは手をふった。）':'（ねこは道具をならべた。）',delivery:'gesture',
-    choices:prompt.closing?[]:['いっしょに見る','見ている']})});
+    choices:prompt.closing?[]:prompt.context.repliesLeft===1?
+      [{label:'いっしょに見る',outcome:'木の下に 白い花がさいているよ。'}]:['いっしょに見る','見ている']})});
   const first=await probeConversation(people,sources,'cat',{transport});
-  assert.equal(first.trace.length,3);
+  assert.equal(first.trace.length,2);
   assert.equal(first.trace[0].prompt.context.sourceKind,'meet');
   assert.equal(first.frames.at(-1).result.conversationComplete,true);
   const second=await probeConversation(people,sources,'cat',{transport,storage:compactProbeStorage(first.storage)});
@@ -24,7 +25,7 @@ test('GAS adapter runs the production encounter and reuses its persisted state f
   assert.equal(second.trace[0].prompt.context.sourceKind,'ambient');
   assert.equal(second.progress.visits.cat,2);
 });
-test('bundled integrated queue records three real transport calls and state in the existing results shape',async()=>{
+test('bundled integrated queue records two transport calls and state in the existing results shape',async()=>{
   const rows=[['headers'],['integrated-request','cat','統合試験','','PENDING','','','','integrated-synthetic']];
   const results=[['headers']],marks=[],requests=[];
   const dataSheet=data=>({getDataRange:()=>({getDisplayValues:()=>data})});
@@ -38,17 +39,30 @@ test('bundled integrated queue records three real transport calls and state in t
     Utilities:{formatDate:()=> '2026-11-18'},UrlFetchApp:{fetch:(_url,options)=>{
       const input=JSON.parse(options.payload),prompt=JSON.parse(input.messages[1].content);requests.push(prompt);
       return {getResponseCode:()=>200,getContentText:()=>JSON.stringify({success:true,result:{response:JSON.stringify({
-        text:'（ねこは道具をならべた。）',delivery:'gesture',choices:prompt.closing?[]:['いっしょに見る','見ている']})}})};
+        text:'（ねこは道具をならべた。）',delivery:'gesture',choices:prompt.closing?[]:prompt.context.repliesLeft===1?
+      [{label:'いっしょに見る',outcome:'木の下に 白い花がさいているよ。'}]:['いっしょに見る','見ている']})}})};
     }}});
   vm.runInContext(readFileSync(new URL('./ForestPersonaProbe.gs',import.meta.url),'utf8'),ctx);
   await vm.runInContext('yondeneGemmaTestProcessQueue()',ctx);
-  assert.equal(requests.length,3);assert.equal(results[1].length,28);assert.equal(results[1][17],'PASS');
+  assert.equal(requests.length,2);assert.equal(results[1].length,28);assert.equal(results[1][17],'PASS');
   const saved=JSON.parse(results[1][15]);
-  assert.equal(saved.conversation.trace.length,3);
+  assert.equal(saved.conversation.trace.length,2);
   assert.equal(saved.conversation.progress.visits.cat,1);
   assert.equal(properties.YONDENE_GEMMA_TEST_ATTEMPTS_UTC_2026_11_18,undefined);
-  assert.equal(properties['YONDENE_GEMMA_TEST_ATTEMPTS_UTC_2026-11-18'],'3');
+  assert.equal(properties['YONDENE_GEMMA_TEST_ATTEMPTS_UTC_2026-11-18'],'2');
   assert.ok(marks.some(([row,col,value])=>row===2&&col===5&&value==='APPLIED'));
+  // A paired comparison reuses the saved opening; only the new last choices count against quota.
+  properties['YONDENE_GEMMA_TEST_ATTEMPTS_UTC_2026-11-18']='75';
+  rows[1][4]='APPLIED';
+  rows.push(['replay-request','cat','統合試験','','PENDING','','','','integrated-synthetic',
+    '','integrated-request','[0,0]','replay-opening']);
+  await vm.runInContext('yondeneGemmaTestProcessQueue()',ctx);
+  assert.equal(requests.length,3);
+  assert.equal(properties['YONDENE_GEMMA_TEST_ATTEMPTS_UTC_2026-11-18'],'76');
+  const replay=JSON.parse(results[2][15]).conversation;
+  assert.equal(replay.replayedOpeningId,'integrated-request');
+  assert.equal(replay.frames.at(-1).result.text,'木の下に 白い花がさいているよ。');
+
 });
 test('independent GAS probe uses the same parser, prompt and Worker input, with no real reading data',()=>{
   const p=probeInput(people,sources,'cat','架空の橋','道具をなおそう');

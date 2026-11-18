@@ -56,13 +56,17 @@ async function transport(input,{prompt,signal}){
     const body=await response.json();if(body.success===false)throw Error('Model provider error');
     return body.result;
   }
+  const choices=prompt.closing?[]:prompt.context.repliesLeft===1?
+    [{label:'いっしょに見る',outcome:'小川の水がきらきらしているね。',speakerSlot:2},
+      {label:'ここで待つ',outcome:'ここだと水の音がよくきこえるね。',speakerSlot:1}]:
+    ['いっしょに見る','ここで待つ'];
   if(prompt.context.speakers)return {response:JSON.stringify({
     turns:[{speakerSlot:1,text:'あっ、小川だ。'},{speakerSlot:2,text:'水の音がするね。'}],
-    choices:prompt.closing?[]:['いっしょに見る','ここで待つ']})};
+    choices})};
   return {response:JSON.stringify({text:prompt.npc.id==='cat'?'（ねこはとなりにすわった。）':
     prompt.closing?'続きはまた会ったときにね。':prompt.mode==='reply'?'あの曲がり角まで見に行こう。':
     '向こうの道が気になるな。',...(prompt.npc.id==='cat'&&prompt.output?.shape?.delivery?{delivery:'gesture'}:{}),
-    choices:prompt.closing?[]:['いっしょに見る','ここで待つ']})};
+    choices})};
 }
 const visits=data.visits||[...ids.map(characterId=>({characterId,choices:[]})),
   ...Array.from({length:6},()=>({characterId:'kiki',choices:[0,0]})),

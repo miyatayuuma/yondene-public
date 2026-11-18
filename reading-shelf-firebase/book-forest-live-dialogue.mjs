@@ -1,6 +1,7 @@
 import {FOREST_CHARACTER_IDS,FOREST_SELF_NAMES,FOREST_GOODBYES,FOREST_WRONG_FIRST_PERSON,
   FOREST_ACTION_WRITING_IDS,FOREST_MULTI_SPEAKER_IDS,FOREST_DIALOGUE_PROTOCOL,FOREST_DISPLAY_NAMES,canonicalForestMention} from './forest-character-registry.mjs';
 import {validateTwinTurns,twinDialogueFrame} from './book-forest-twins.mjs';
+import {forestEndingChoices} from './book-forest-ending.mjs';
 import {unsafeForestForaging} from './book-forest-output-safety.mjs';
 import {isCurrentForestReflection,forestReflectionArchiveCutoff} from './book-forest-reflection-spotlight.mjs';
 import {validateForestWrittenTurn,FOREST_GRADE_ONE_KANJI} from './book-forest-gesture.mjs';
@@ -18,7 +19,7 @@ const ACTION_WRITING_IDS=new Set(FOREST_ACTION_WRITING_IDS);
 const safeEnd=(id,comma=false)=>ACTION_WRITING_IDS.has(id)?
   '（ねこはしっぽをゆっくりふった。）':GOODBYE[id]||(comma?'また、森で会おうね。':'また森で会おうね。');
 const WRONG_FIRST_PERSON=FOREST_WRONG_FIRST_PERSON;
-export const FOREST_PROMPT_VERSION='forest-scene-generation-v26-planned-profile2';
+export const FOREST_PROMPT_VERSION='forest-scene-generation-v27-profile2';
 const PROMPT_VERSION=FOREST_PROMPT_VERSION;
 const clean=value=>typeof value==='string'?value.trim().replace(/\s+/gu,' '):'';
 function readJson(storage,key,fallback){
@@ -64,16 +65,22 @@ export function validateLiveForestOutput(raw,{characterId,requireLine=false,clos
   const turns=rawTurns?.map(turn=>({...turn,text:canonicalForestMention(turn.text,context.speakers)}));
   const written=gesture?validateForestWrittenTurn(text,data.delivery):null;
   if(multi&&!turns||gesture&&!written||!multi&&!gesture&&requireLine&&!validLine(characterId,text))return null;
-  if(unsafeForestForaging(written?{...data,text:written.text}:data,context))return null;
+  const lastChoices=!closing&&context.repliesLeft===1;
+  const safetyInput=written?{...data,text:written.text}:data;
+  if(unsafeForestForaging(lastChoices?{...safetyInput,choices:[]}:safetyInput,context))return null;
   const line=turns?{text:turns.map(turn=>turn.text).join(' '),turns}:written||{text};
   if(closing)return {...line,labels:[]};
+  if(lastChoices){
+    const endings=forestEndingChoices(data.choices,{context,silent:gesture,multi,line:line.text,
+      validLine:value=>validLine(characterId,value)});
+    return {...line,labels:endings.map(choice=>choice.label),endings};
+  }
   const candidates=Array.isArray(data.choices)?data.choices.slice(0,3):[];
   const byLabel=new Map();
   for(const choice of candidates){
     const label=canonicalForestMention(clean(typeof choice==='string'?choice:choice?.label),context.speakers);
     if(label.length<2||label.length>24||/[\r\n{}<>「」]/u.test(label)||byLabel.has(label))continue;
-    const outcome=context.repliesLeft===1?clean(choice?.outcome):'';
-    byLabel.set(label,outcome.length<=60&&!/[{}<>]/u.test(outcome)?outcome:'');
+    byLabel.set(label,true);
   }
   const labels=[...byLabel.keys()].slice(0,2);
   // Keep a valid NPC line playable if the model returned unusable buttons.
@@ -81,8 +88,7 @@ export function validateLiveForestOutput(raw,{characterId,requireLine=false,clos
     if(!requireLine)return null;
     return {...line,labels:gesture?['もうすこしみる','またね']:['もう少し聞く','またね']};
   }
-  const outcomes=labels.map(label=>byLabel.get(label));
-  return {...line,text:requireLine?line.text:null,labels,...(outcomes.some(Boolean)?{outcomes}:{})};
+  return {...line,text:requireLine?line.text:null,labels};
 }
 
 function promptScene(scene,sourceKind){
@@ -95,7 +101,7 @@ function promptScene(scene,sourceKind){
 }
 
 export function promptFor({characterId,mode,chosenLabel='',history=[],closing=false,topic=null,
-  characterProfile=null,sourceKind='',dailyContext=null,recentLines=[],reviewSpotlight=null,situation=null,twinNames=null,repliesLeft=closing?0:2,handoffTo='',choiceOutcome=''}){
+  characterProfile=null,sourceKind='',dailyContext=null,recentLines=[],reviewSpotlight=null,situation=null,twinNames=null,repliesLeft=closing?0:2,handoffTo=''}){
   const guide=forestCharacterVoiceGuide(characterProfile);
   const npc={id:characterId,displayName:FOREST_DISPLAY_NAMES[characterId],voice:guide,profileSchemaVersion:2,
     profileRevision:guide?characterProfile.revision:'',profileVersion:guide?characterProfile.version:''};
@@ -107,7 +113,6 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
   const context={npcLine:'',sourceKind,repliesLeft,npcDisplayNames:FOREST_DISPLAY_NAMES,
     ...(twinNames?{speakers:[{slot:1,name:twinNames.firstName},{slot:2,name:twinNames.secondName}]}:{}),
     ...(handoffTo?{handoffTo:FOREST_DISPLAY_NAMES[handoffTo]}:{}),
-    ...(choiceOutcome?{choiceOutcome}:{}),
     chosenLabel:clean(chosenLabel).slice(0,24),...(situation?{situation}:{}),
     recentTurns:history.slice(-4),...(topic?{topic}:{}),
     ...(reviewSpotlight?{readerReflection:Object.fromEntries(
@@ -118,6 +123,8 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
       metNpcCount:dailyContext.metNpcCount,
       relatedEncounter:dailyContext.relatedEncounter}}:{}),
     ...(recentLines.length?{avoidRecentLines:recentLines.slice(-3)}:{})};
+  const endingShape={label:'子どもの言葉',outcome:'選ばれたときそのまま見せる、具体的な返事',
+    ...(twinNames?{speakerSlot:1}:{}),...(nonverbal?{delivery:'written'}:{})};
   const finishTask=handoffTo?
     '選択を受けて、相手に会ったときに渡せる言葉をここで伝える。相手はまだ同席していない':
     '選ばれた問いや行動に具体的に応え、この返事だけでひと区切りつける';
@@ -153,7 +160,7 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
       ...(closing?[
         '質問なら答えを言い切る。行動なら、この場で一手進んだ結果まで返す。「よし、始めよう」で止めない。移動が必要な選択でも、ここで分かることや伝えられる言葉を一つ返す。新しい問いは出さずchoices:[]'
       ]:repliesLeft===1?[
-        'これが最後の二択。各候補に、次の一答で子どもが受け取れる具体的な答えや結果をoutcomeに添える。その場で完了する一手に絞り、約束や発案だけのoutcomeは作らない'
+        'この本文だけでも一区切りつくようにする。最後の各候補のoutcomeには、選んだ子にそのまま見せる答えを入れる'
       ]:[])
     ],
     output:{format:'JSON',shape:{...(twinNames?
@@ -161,8 +168,7 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
       {text:mode==='choices'?'省略':'NPCの返答（65字以内）',
         ...(nonverbal&&mode!=='choices'?{delivery:'written'}:{})}),
       choices:closing?[]:repliesLeft===1?
-        [{label:'子どもの返答A',outcome:'次の一答で渡す具体的な答えや結果A'},
-          {label:'子どもの返答B',outcome:'次の一答で渡す具体的な答えや結果B'}]:
+        [endingShape,{...endingShape,...(twinNames?{speakerSlot:2}:{})}]:
         ['子どもが選ぶ返答A','子どもが選ぶ返答B']}}
   };
 }
@@ -210,7 +216,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     return true;
   }
   async function request(characterId,mode,npcLine,chosenLabel='',closing=false,topic=null,
-    sourceKind='',reviewSpotlight=null,{handoffTo='',choiceOutcome=''}={}){
+    sourceKind='',reviewSpotlight=null,{handoffTo=''}={}){
     if(!reserve())return null;
     const previousLogs=readJson(storage,logKey,[]);
     const recentLines=(Array.isArray(previousLogs)?previousLogs:[]).filter(entry=>entry?.characterId===characterId&&
@@ -219,7 +225,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     const context=promptFor({characterId,mode,chosenLabel,history,closing,topic,
       characterProfile:activeCharacterProfile,sourceKind,
       dailyContext:reviewSpotlight||sourceKind==='review-reaction'?null:activeDaily,situation:activeSituation,
-      recentLines,reviewSpotlight,twinNames,handoffTo,choiceOutcome,
+      recentLines,reviewSpotlight,twinNames,handoffTo,
       repliesLeft:closing?0:Math.max(0,Math.min(maxReplies,sessionLimit-1)-repliesThisSession-(mode==='reply'?1:0))});
     const controller=createAbortController(),startedAt=now();
     inflight={controller,characterId,mode,startedAt};
@@ -263,11 +269,11 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
       ...(result.delivery?{delivery:result.delivery}:{})};
   function decorate(characterId,result,meta={}){
     const {text,labels}=result;
-    const relay=meta.relayChoice;
+    const relay=result.endings?null:meta.relayChoice;
     const choices=labels.slice(0,relay?1:2).map((label,i)=>({id:`ai-${++serial}-${i}`,label}));
     if(relay)choices.push({id:relay.id,label:relay.label,relayTo:relay.relayTo});
-    pending={characterId,text,choices,outcomes:result.outcomes,...meta};
-    return present(result,choices);
+    pending={characterId,text,choices,endings:result.endings,...meta,relayChoice:relay};
+    return present(result,choices,choices.length===0);
   }
   function finish(characterId){
     const text=safeEnd(characterId);
@@ -476,13 +482,13 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     history.push({playerChoice:label});history=history.slice(-4);
     record({event:'selected-offered-choice',characterId,
       ...(['review-reaction','reflection'].includes(current.sourceKind)?{}:{label})});
-    const closing=repliesThisSession+1>=maxReplies||sessionCount+1>=sessionLimit||
+    const ending=current.endings?.[chosenIndex];
+    const closing=Boolean(ending)||repliesThisSession+1>=maxReplies||sessionCount+1>=sessionLimit||
       /^(?:またね|ばいばい|バイバイ|帰る|かえる|おしまい|また今度)[。！!]*$/u.test(label);
     const topic=activeTopic;
-    const generated=await request(characterId,'reply',current.text,label,closing,topic,
-      current.sourceKind,current.reviewEvidence||null,
-      {choiceOutcome:closing?current.outcomes?.[chosenIndex]:''});
-    const stillAllowed=!current.reviewEvidence||!getCurrentReflection||await sourceStillAllowed(current);
+    const generated=ending?{text:ending.outcome,delivery:ending.delivery}:
+      await request(characterId,'reply',current.text,label,closing,topic,current.sourceKind,current.reviewEvidence||null);
+    const stillAllowed=ending||!current.reviewEvidence||!getCurrentReflection||await sourceStillAllowed(current);
     if(closed||generation!==epoch)return null;
     if(!stillAllowed)return finish(characterId);
     if(!generated){
@@ -503,6 +509,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
         activeDaily?.scene?.kind||'ambient',
       closing,modelId,promptVersion:PROMPT_VERSION,
       elapsedMs:generated.elapsedMs,turn:repliesThisSession});
+    if(ending?.speakerSlot)return twinDialogueFrame({speakerSlot:ending.speakerSlot,text:generated.text},twinNames,{closing:true});
     if(closing)return present(generated,[],true,current);
     return decorate(characterId,generated,{
       sourceKind:current.sourceKind,

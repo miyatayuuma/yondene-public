@@ -29,6 +29,10 @@ jobs:
         run: |
           node scripts/build-forest-voice-lab.mjs
           git diff --exit-code -- reading-shelf-firebase/forest-voice-lab.html
+      - name: Verify the Gemma test bundle matches shared generation code
+        run: |
+          node scripts/build-forest-persona-probe.mjs
+          git diff --exit-code -- gas/ForestPersonaProbe.gs
       - name: Test Cloudflare forest AI Worker without external API calls
         run: node --test cloudflare/forest-ai/src/index.test.mjs
       - name: Verify Worker bundle includes the shared character registry

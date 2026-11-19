@@ -145,9 +145,9 @@ test('Health reports all supported generators, including non-speaking cat',async
   const response=await handleRequest(request('/health',{method:'GET'}),{
     OWNER_UID:ownerUid,AI:{run:async()=>({})}});
   assert.equal(response.status,200);
-  assert.equal(response.headers.get('X-Forest-AI-Version'),'forest-dialogue-v26-profile2');
+  assert.equal(response.headers.get('X-Forest-AI-Version'),'forest-dialogue-v38-profile2');
   assert.deepEqual((({profileRevision,...rest})=>rest)(await response.json()),{
-    model:'@cf/google/gemma-4-26b-a4b-it',version:'forest-dialogue-v26-profile2',
+    model:'@cf/google/gemma-4-26b-a4b-it',version:'forest-dialogue-v38-profile2',
     registryRevision:FOREST_ROSTER_REVISION,protocolRevision:FOREST_DIALOGUE_PROTOCOL,
     supportedNpcCount:FOREST_AI_GENERATION_IDS.length,configured:true});
 });
@@ -180,8 +180,11 @@ test('all three Zukkoke NPC IDs are accepted as opening speakers by Worker',asyn
 });
 
 test('Worker sends written dialogue and silent gestures through one dialogue contract',async()=>{
-  const messages=[],opening={text:'キキと ジジは木の下だよ。雨がふるまえに、あそこですこし休もう。',
-    delivery:'written',choices:[{label:'ここで雨を見る',outcome:'雨の音が きこえてきたね。',delivery:'written'}]};
+  const messages=[],opening={text:'お城には古い時計があったよ。',
+    delivery:'written',choices:[
+      {label:'時計はどこ？',outcome:'お城の塔に、大きな時計があったよ。',delivery:'written'},
+      {label:'どんな音だった？',outcome:'正午になると鐘が鳴ったよ。',delivery:'written'}
+    ]};
   const closing={text:'（ねこはうなずいた。）',delivery:'gesture',choices:[]};
   const output=[opening,closing];
   const env={OWNER_UID:ownerUid,FIREBASE_PROJECT_ID:projectId,AI:{
@@ -199,14 +202,15 @@ test('Worker sends written dialogue and silent gestures through one dialogue con
   }
   assert.match(messages[0][0].content,/最後の候補は\{label,outcome\}/);
   assert.match(messages[0][0].content,/声や心の声を使わず/);
+  assert.match(messages[0][0].content,/小学1年生で習う漢字をできるだけ使い/);
   assert.match(messages[0][1].content,/非公開Sheetsの合成設定A/);
   assert.doesNotMatch(messages[0][0].content,/王さまの親友|家事・買い物/);
 });
 
-test('Worker rejects nonverbal speech and writing outside grade-one glyphs',async()=>{
+test('Worker rejects speech and writing-only narration for the silent cat',async()=>{
   const invalid=[
     {text:'ねこ「こんにちは！」',delivery:'gesture',choices:['みる','あそぶ']},
-    {text:'前の道に行こう',delivery:'written',choices:['みる','あそぶ']},
+    {text:'猫は地面に文字を書いた。',delivery:'written',choices:['みる','あそぶ']},
     {text:'（ねこは声を出して話しかけた。）',delivery:'gesture',choices:['みる','あそぶ']}
   ];
   const env={OWNER_UID:ownerUid,FIREBASE_PROJECT_ID:projectId,AI:{

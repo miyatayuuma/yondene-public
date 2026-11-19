@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
-import {probeInput,probeConversation,compactProbeStorage} from './ForestPersonaProbe.mjs';
+import {probeInput,probeConversation,compactProbeStorage,previewForestProfile} from './ForestPersonaProbe.mjs';
 import {FOREST_PROFILE_HEADERS} from '../reading-shelf-firebase/book-forest-character-profiles.mjs';
 const people=[FOREST_PROFILE_HEADERS,...[['人物像','架空の工作好きな相棒'],['口調','短く行動で表す'],
   ['禁止・注意','声を出さない'],['動機','友だちと道具をなおす'],['関係性','架空の親友']].map(([key,value])=>
@@ -39,14 +39,18 @@ test('bundled integrated queue records two transport calls and state in the exis
     Utilities:{formatDate:()=> '2026-11-18'},UrlFetchApp:{fetch:(_url,options)=>{
       const input=JSON.parse(options.payload),prompt=JSON.parse(input.messages[1].content);requests.push(prompt);
       return {getResponseCode:()=>200,getContentText:()=>JSON.stringify({success:true,result:{response:JSON.stringify({
-        text:'（ねこは道具をならべた。）',delivery:'gesture',choices:prompt.closing?[]:prompt.context.repliesLeft===1?
-      [{label:'いっしょに見る',outcome:'木の下に 白い花がさいているよ。'}]:['いっしょに見る','見ている']})}})};
+        text:'お城の鐘が聞こえるね。',delivery:'written',choices:prompt.closing?[]:prompt.context.repliesLeft===1?
+      [{label:'鐘はどこ？',outcome:'鐘はお城の塔にあるよ。'},
+        {label:'いつ鳴る？',outcome:'昼の十二時には鳴るよ。'}]:['お城の話を聞く','景色を見る']})}})};
     }}});
   vm.runInContext(readFileSync(new URL('./ForestPersonaProbe.gs',import.meta.url),'utf8'),ctx);
   await vm.runInContext('yondeneGemmaTestProcessQueue()',ctx);
   assert.equal(requests.length,2);assert.equal(results[1].length,28);assert.equal(results[1][17],'PASS');
   const saved=JSON.parse(results[1][15]);
   assert.equal(saved.conversation.trace.length,2);
+  assert.equal(saved.conversation.frames[0].result.text,'お城の鐘が聞こえるね。');
+  assert.equal(saved.conversation.frames[1].result.choices.length,2);
+  assert.equal(saved.conversation.frames.at(-1).result.text,'鐘はお城の塔にあるよ。');
   assert.equal(saved.conversation.progress.visits.cat,1);
   assert.equal(properties.YONDENE_GEMMA_TEST_ATTEMPTS_UTC_2026_11_18,undefined);
   assert.equal(properties['YONDENE_GEMMA_TEST_ATTEMPTS_UTC_2026-11-18'],'2');
@@ -61,7 +65,7 @@ test('bundled integrated queue records two transport calls and state in the exis
   assert.equal(properties['YONDENE_GEMMA_TEST_ATTEMPTS_UTC_2026-11-18'],'77');
   const replay=JSON.parse(results[2][15]).conversation;
   assert.equal(replay.replayedOpeningId,'integrated-request');
-  assert.equal(replay.frames.at(-1).result.text,'木の下に 白い花がさいているよ。');
+  assert.equal(replay.frames.at(-1).result.text,'鐘はお城の塔にあるよ。');
 
 });
 test('independent GAS probe uses the same parser, prompt and Worker input, with no real reading data',()=>{
@@ -73,7 +77,8 @@ test('independent GAS probe uses the same parser, prompt and Worker input, with 
   assert.ok(sent.npc.voice.includes('友だちと道具をなおす'));
   assert.equal(sent.context.situation.evidence,'imagined');
   assert.equal('readerReflection' in sent.context,false);
-  assert.ok(sent.constraints.some(rule=>rule.includes('漢字はこの80字')));
+  assert.match(p.input.messages[0].content,/小学1年生で習う漢字をできるだけ使い/);
+  assert.deepEqual(Object.keys(sent.output.shape).sort(),['choices','delivery','text']);
 });
 test('generated Apps Script saves actual output and exact model input before marking one pending request applied',()=>{
   const output=[],marks=[],requests=[];
@@ -191,4 +196,20 @@ test('compressed replay keeps the same last visible lines when recent review log
   entries.push({event:'generated-opening',characterId:'cat',readerContext:true});
   const compact=compactProbeStorage({'scenario:live:log':JSON.stringify(entries)});
   assert.deepEqual(JSON.parse(compact['scenario:live:log']).map(e=>e.text),['前の一言','次の一言','その次の一言']);
+});
+
+
+test('private profile preview changes only the requested persona and keeps its evidence',()=>{
+  const preview=JSON.stringify({npc:'cat',version:'fixture-next',fields:{口調:'短く気づいたことを伝える'}});
+  const updated=previewForestProfile(people,preview);
+  const old=people.find(row=>row[1]==='口調');
+  const next=updated.find(row=>row[1]==='口調');
+  assert.equal(old[2],'短く行動で表す');
+  assert.equal(next[2],'短く気づいたことを伝える');
+  assert.deepEqual(next.slice(3,7),old.slice(3,7));
+  assert.equal(next[7],'fixture-next');
+  assert.notEqual(probeInput(updated,sources,'cat','森の中','').profile.revision,
+    probeInput(people,sources,'cat','森の中','').profile.revision);
+  assert.throws(()=>previewForestProfile(people,JSON.stringify({
+    npc:'cat',version:'fixture-next',fields:{未知:'記入ミス'}})),/INVALID_PROFILE_PREVIEW/);
 });

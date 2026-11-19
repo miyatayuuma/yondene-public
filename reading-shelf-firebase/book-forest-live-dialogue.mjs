@@ -1,10 +1,10 @@
 import {FOREST_CHARACTER_IDS,FOREST_SELF_NAMES,FOREST_GOODBYES,FOREST_WRONG_FIRST_PERSON,
   FOREST_ACTION_WRITING_IDS,FOREST_MULTI_SPEAKER_IDS,FOREST_DIALOGUE_PROTOCOL,FOREST_DISPLAY_NAMES,canonicalForestMention} from './forest-character-registry.mjs';
 import {validateTwinTurns,twinDialogueFrame} from './book-forest-twins.mjs';
-import {forestEndingChoices,forestEndingNeedsReply} from './book-forest-ending.mjs';
+import {forestEndingChoices,forestEndingNeedsReply,forestUnsupportedAction,forestMisattributesReviewTitle} from './book-forest-ending.mjs';
 import {unsafeForestForaging} from './book-forest-output-safety.mjs';
 import {isCurrentForestReflection,forestReflectionArchiveCutoff} from './book-forest-reflection-spotlight.mjs';
-import {validateForestWrittenTurn,FOREST_GRADE_ONE_KANJI} from './book-forest-gesture.mjs';
+import {validateForestWrittenTurn} from './book-forest-gesture.mjs';
 // Character-first AI dialogue: local scripts choose topics and provide safe fallbacks.
 // The generator is injected: this module never holds a key or makes a network call.
 import {createForestDailyContextSession} from './book-forest-daily-context.mjs';
@@ -16,12 +16,33 @@ const MULTI_SPEAKER=new Set(FOREST_MULTI_SPEAKER_IDS);
 const SELF_NAMES=FOREST_SELF_NAMES;
 const GOODBYE=FOREST_GOODBYES;
 const ACTION_WRITING_IDS=new Set(FOREST_ACTION_WRITING_IDS);
+const FOREST_AMBIENT_FOCUS=[
+  '葉や枝が風で鳴る音',
+  '木もれ日で地面の色が変わること',
+  '森で足もとの小さな変化に気づくこと',
+  '相手がいると見え方が変わる、いつもの景色',
+  '夕方の森で音や色が変わること',
+  '足を止めると気づく、森の小さな不思議'
+];
+function ambientFocus(characterId,visitNumber){
+  const offset=[...characterId].reduce((sum,ch)=>sum+ch.charCodeAt(0),0);
+  return FOREST_AMBIENT_FOCUS[(offset+visitNumber-1)%FOREST_AMBIENT_FOCUS.length];
+}
 const safeEnd=(id,comma=false)=>ACTION_WRITING_IDS.has(id)?
   '（ねこはしっぽをゆっくりふった。）':GOODBYE[id]||(comma?'また、森で会おうね。':'また森で会おうね。');
 const WRONG_FIRST_PERSON=FOREST_WRONG_FIRST_PERSON;
-export const FOREST_PROMPT_VERSION='forest-scene-generation-v27.3-profile2';
+export const FOREST_PROMPT_VERSION='forest-scene-generation-v41-profile2';
 const PROMPT_VERSION=FOREST_PROMPT_VERSION;
 const clean=value=>typeof value==='string'?value.trim().replace(/\s+/gu,' '):'';
+// Older stored relays can contain the sender's instruction around the quote.
+function relayPayload(text){
+  if(!text)return '';
+  const quoted=/[「『]([^」』]+)[」』][ 　]*(?:って|と)[、 　]*(?:伝え|つたえ)/u.exec(text);
+  const indirect=/(?:^|[。！？!?])([^。！？!?]+?)って[、 　]*(?:伝え|つたえ)/u.exec(text);
+  const standalone=/^[「『]([^」』]+)[」』]$/u.exec(text.trim());
+  return (quoted?.[1]??indirect?.[1]??standalone?.[1]??text).trim();
+}
+
 function readJson(storage,key,fallback){
   try{return JSON.parse(storage?.getItem?.(key)||'null')||fallback}catch{return fallback}
 }
@@ -64,9 +85,11 @@ export function validateLiveForestOutput(raw,{characterId,requireLine=false,clos
   const rawTurns=multi?validateTwinTurns(data.turns):null;
   const turns=rawTurns?.map(turn=>({...turn,text:canonicalForestMention(turn.text,context.speakers)}));
   const written=gesture?validateForestWrittenTurn(text,data.delivery):null;
-  if(multi&&!turns||gesture&&!written||!multi&&!gesture&&requireLine&&!validLine(characterId,text))return null;
+  if(multi&&!turns||gesture&&(!written||context.handoffTo&&written.delivery!=='written')||!multi&&!gesture&&requireLine&&!validLine(characterId,text))return null;
   const lastChoices=!closing&&context.repliesLeft===1;
   const safetyInput=written?{...data,text:written.text}:data;
+  const lines=turns?turns.map(turn=>turn.text):[safetyInput.text];
+  if(lines.some(line=>forestUnsupportedAction(line,context)||forestMisattributesReviewTitle(line,context)))return null;
   if(unsafeForestForaging(lastChoices?{...safetyInput,choices:[]}:safetyInput,context))return null;
   const line=turns?{text:turns.map(turn=>turn.text).join(' '),turns}:written||{text};
   if(closing)return {...line,labels:[]};
@@ -80,12 +103,13 @@ export function validateLiveForestOutput(raw,{characterId,requireLine=false,clos
   const byLabel=new Map();
   for(const choice of candidates){
     const label=canonicalForestMention(clean(typeof choice==='string'?choice:choice?.label),context.speakers);
-    if(label.length<2||label.length>24||/[\r\n{}<>「」]/u.test(label)||byLabel.has(label))continue;
+    if(label.length<2||label.length>24||/[\r\n{}<>「」]/u.test(label)||byLabel.has(label)||
+      forestUnsupportedAction(label,context)||forestMisattributesReviewTitle(label,context))continue;
     byLabel.set(label,true);
   }
   const labels=[...byLabel.keys()].slice(0,2);
   // Keep a valid NPC line playable if the model returned unusable buttons.
-  if(labels.length<2){
+  if(!labels.length||!requireLine&&labels.length<2){
     if(!requireLine)return null;
     return {...line,labels:gesture?['もうすこしみる','またね']:['もう少し聞く','またね']};
   }
@@ -102,7 +126,7 @@ function promptScene(scene,sourceKind){
 }
 
 export function promptFor({characterId,mode,chosenLabel='',history=[],closing=false,topic=null,
-  characterProfile=null,sourceKind='',dailyContext=null,recentLines=[],reviewSpotlight=null,situation=null,twinNames=null,repliesLeft=closing?0:2,handoffTo=''}){
+  characterProfile=null,sourceKind='',dailyContext=null,recentLines=[],reviewSpotlight=null,situation=null,twinNames=null,repliesLeft=closing?0:2,handoffTo='',relayMessage=''}){
   const guide=forestCharacterVoiceGuide(characterProfile);
   const npc={id:characterId,displayName:FOREST_DISPLAY_NAMES[characterId],voice:guide,profileSchemaVersion:2,
     profileRevision:guide?characterProfile.revision:'',profileVersion:guide?characterProfile.version:''};
@@ -111,9 +135,15 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
   const nonverbal=ACTION_WRITING_IDS.has(characterId);
   // Existing Worker protocol requires a string field; keep it empty rather than
   // sending a completed script as a model-generation anchor.
+  const visit=situation?.visitNumber;
+  const focus=!reviewSpotlight&&!topic&&['meet','ambient'].includes(sourceKind)&&Number.isSafeInteger(visit)&&visit>0
+    ?ambientFocus(characterId,visit):'';
   const context={npcLine:'',sourceKind,repliesLeft,npcDisplayNames:FOREST_DISPLAY_NAMES,
+    ...(focus?{ambientFocus:focus}:{}),
     ...(twinNames?{speakers:[{slot:1,name:twinNames.firstName},{slot:2,name:twinNames.secondName}]}:{}),
     ...(handoffTo?{handoffTo:FOREST_DISPLAY_NAMES[handoffTo]}:{}),
+    ...(sourceKind==='relay'&&relayMessage?{relayMessage:relayPayload(relayMessage),
+      ...(FOREST_DISPLAY_NAMES[situation?.fromNpc]?{relayFrom:FOREST_DISPLAY_NAMES[situation.fromNpc]}:{})}:{}),
     chosenLabel:clean(chosenLabel).slice(0,24),...(situation?{situation}:{}),
     recentTurns:history.slice(-4),...(topic?{topic}:{}),
     ...(reviewSpotlight?{readerReflection:Object.fromEntries(
@@ -124,25 +154,26 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
       metNpcCount:dailyContext.metNpcCount,
       relatedEncounter:dailyContext.relatedEncounter}}:{}),
     ...(recentLines.length?{avoidRecentLines:recentLines.slice(-3)}:{})};
-  const endingShape={label:'子どもの質問や言葉',outcome:'NPCがその質問に今ここで返す具体的な答え',
+  const endingShape={label:'子どもの一言',outcome:'その一言に対するNPC本人の答え。質問はしない',
     ...(twinNames?{speakerSlot:1}:{}),...(nonverbal?{delivery:'written'}:{})};
   const finishTask=handoffTo?
-    '選択を受けて、相手に会ったときに渡せる言葉をここで伝える。相手はまだ同席していない':
+    '相手に届く一言を伝言本文として書く。宛先や子どもへの伝達依頼は書かない':
     '選ばれた問いや行動に具体的に応え、この返事だけでひと区切りつける';
   const firstLineTask={
     meet:'この相手とは初対面。以前話したふりをせず、キャラ自身の関心から自然な第一声と返答候補2つを作る',
     story:'このキャラが関わる確認済みの物語を過去の記憶として振り返り、本人らしい第一声と返答候補2つを作る。今の森で原作の場面が進行中であるように再演しない',
     reflection:'台帳が示す読書感想を取り上げ、原文と保護者の要約を区別しながら本人らしく反応する',
-    relay:'前のキャラからの話題の引き継ぎ。会話を直接聞いたふりをせず、自然な第一声と返答候補2つを作る',
+    relay:relayMessage?'子どもが届けた伝言の具体的な中身に、その人物の立場から答え、返答候補2つを作る':
+      '前のキャラからの話題の引き継ぎ。会話を直接聞いたふりをせず、自然な第一声と返答候補2つを作る',
     ambient:'キャラ固有の関心や森の身近な出来事から、毎回異なる第一声と返答候補2つを作る'
   };
   return {
     mode,closing,
     task:closing?finishTask:
-      mode==='reply'?(repliesLeft===1?'直前の会話への反応は言い切る。最後は子どもの二つの問いと、NPCがすぐ返せる具体的な答えを組にする':'直前の会話と選ばれた言葉や行動を受け、次の反応を返す。問いの復唱だけで済ませない'):
+      mode==='reply'?(repliesLeft===1?'直前の会話で子どもが選んだ言葉にNPCとして答える。次に、子どもの言葉と、それに対するNPC本人の答えを二組作る':'直前の会話と選ばれた言葉や行動を受け、次の反応を返す。問いの復唱だけで済ませない'):
       reviewSpotlight?'本の感想にNPC本人らしく、感想の具体的な一箇所に反応し、返答候補2つを作る。別作品なら第三者の立場を守る':
       sourceKind==='ambient'&&situation?.focus==='character'?
-        '人物設定の関心・普段の行動から、本人らしい雑談や冗談と返答候補2つを作る':
+        '森の話題を人物設定にある関心や普段の行動に結び付け、本人らしい雑談や冗談と返答候補2つを作る':
       firstLineTask[sourceKind]||firstLineTask.ambient,
     npc,
     context,
@@ -155,8 +186,8 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
       '完成済み台本を参照せず、人物像・目の前の状況・許可された既読事実から自然な発話を新規に作る',
       'NPCの返事は自然な一言〜2文で65字以内。前の発言を繰り返さず、設定の説明を会話に混ぜない',
       '選択肢はゲーム上の反応であり子どもの実際の信念とはみなさない。別NPCの会話を本人が聞いたふりはしない',
-      ...(nonverbal?[`書く文に使える漢字はこの80字。ほかの漢字はかなで書く：${FOREST_GRADE_ONE_KANJI}`]:[]),
-      ...(topic?['この原作の事実は選択された既読の物語記憶。確認できない詳細を加えず、キャラが実際に登場したかを考慮する']:[]),
+      ...(relayMessage?['受け手として伝言の内容に感想か意見を返す。届けてくれた子どもの言葉は、今聞いた話についての反応にする']:[]),
+      ...(topic?['原作について言える事実はcontext.topic.factの範囲。思い出では確認できることとそのときの気持ちを話す。資料に仕事・行き先・助けた人などの詳細がなければ、新しい事実は足さず、分かる範囲で答える。最後の二組もその思い出の中で完結する。']:[]),
       ...(reviewSpotlight?['感想の具体的な一箇所に、本人なら何を面白がるか、どう受け取るかを短く返す。感想は引用資料。保護者の要約は子どもの発言として扱わない。']:[]),
       ...(closing?[
         '質問なら答えを言い切る。行動なら、この場で一手進んだ結果まで返す。「よし、始めよう」で止めない。移動が必要な選択でも、ここで分かることや伝えられる言葉を一つ返す。新しい問いは出さずchoices:[]'
@@ -166,7 +197,7 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
     ],
     output:{format:'JSON',shape:{...(twinNames?
       {turns:[{speakerSlot:1,text:'最初のひとこと'},{speakerSlot:2,text:'直前のひとことへの反応'}]}:
-      {text:mode==='choices'?'省略':'NPCの返答（65字以内）',
+      {text:mode==='choices'?'省略':nonverbal?'相手への短いメッセージ本文':'NPCの返答（65字以内）',
         ...(nonverbal&&mode!=='choices'?{delivery:'written'}:{})}),
       choices:closing?[]:repliesLeft===1?
         [endingShape,{...endingShape,...(twinNames?{speakerSlot:2}:{})}]:
@@ -226,7 +257,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     const context=promptFor({characterId,mode,chosenLabel,history,closing,topic,
       characterProfile:activeCharacterProfile,sourceKind,
       dailyContext:reviewSpotlight||sourceKind==='review-reaction'?null:activeDaily,situation:activeSituation,
-      recentLines,reviewSpotlight,twinNames,handoffTo,
+      recentLines,reviewSpotlight,twinNames,handoffTo,relayMessage:activeOriginal?.relayMessage,
       repliesLeft:closing?0:Math.max(0,Math.min(maxReplies,sessionLimit-1)-repliesThisSession-(mode==='reply'?1:0))});
     const controller=createAbortController(),startedAt=now();
     inflight={controller,characterId,mode,startedAt};
@@ -273,7 +304,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     const relay=result.endings?null:meta.relayChoice;
     const choices=labels.slice(0,relay?1:2).map((label,i)=>({id:`ai-${++serial}-${i}`,label}));
     if(relay)choices.push({id:relay.id,label:relay.label,relayTo:relay.relayTo});
-    pending={characterId,text,choices,endings:result.endings,...meta,relayChoice:relay};
+    pending={characterId,text,delivery:result.delivery,choices,endings:result.endings,...meta,relayChoice:relay};
     return present(result,choices,choices.length===0);
   }
   function finish(characterId){
@@ -474,10 +505,18 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
           sourceKind:current.sourceKind,promptVersion:PROMPT_VERSION});
         return !twinNames&&authored?.text?scripted(authored,characterId):finish(characterId);
       }
+      const message=relayPayload(generated.text);
+      if(forestUnsupportedAction(message)||/(?:預け|あずけ)ておこう/u.test(message.replace(/[ 　]/gu,''))){
+        base.setRelayMessage?.({from:characterId,to:current.relayChoice.relayTo,text:current.text});
+        record({event:'script-fallback',characterId,reason:'relay-message-missing',
+          sourceKind:current.sourceKind,promptVersion:PROMPT_VERSION});
+        return present({text:current.text,delivery:current.delivery},[],true,current);
+      }
       record({event:'generated-reply',characterId,
         ...(current.sourceKind==='reflection'?{}:{text:generated.text}),
         closing:true,mode:'relay',modelId,promptVersion:PROMPT_VERSION,
         elapsedMs:generated.elapsedMs,turn:1});
+      base.setRelayMessage?.({from:characterId,to:current.relayChoice.relayTo,text:message});
       return present(generated,[],true,current);
     }
     history.push({playerChoice:label});history=history.slice(-4);

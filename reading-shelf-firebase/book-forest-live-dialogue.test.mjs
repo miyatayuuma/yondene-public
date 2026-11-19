@@ -50,7 +50,7 @@ test('generates contextual reply choices, then a character reply only after a ch
   const log=JSON.parse(storage.getItem('forest-ai-local-v1:log'));
   assert.deepEqual(log.map(x=>x.event),['generated-opening','selected-offered-choice','generated-reply']);
   assert.equal(log[0].text,first.text,'export can reconstruct the initial line');
-  assert.equal(log[0].promptVersion,'forest-scene-generation-v27.3-profile2');
+  assert.equal(log[0].promptVersion,'forest-scene-generation-v41-profile2');
   assert.equal(log[1].label,'風の音を聞く');
   director.end();
 });
@@ -149,7 +149,7 @@ test('bad LLM output is rejected, preserving approved fallback and avoiding fabr
     {characterId:'cat',requireLine:true}),null);
   assert.deepEqual(validateLiveForestOutput({text:'今日は森を歩くね。',choices:['どうして？','どうして？']},
     {characterId:'kiki',requireLine:true}),
-    {text:'今日は森を歩くね。',labels:['もう少し聞く','またね']});
+    {text:'今日は森を歩くね。',labels:['どうして？']});
   assert.equal(validateLiveForestOutput({text:'ふふ、そうね。わたしも気になるわ。',choices:['どうして？','見に行こう']},
     {characterId:'jiji',requireLine:true}),null,'Jiji must not become a generic female guide');
   assert.equal(validateLiveForestOutput({text:'ぼくはおなかがすいたよ。',choices:['何食べる？','さがそう']},
@@ -244,11 +244,12 @@ test('the next related NPC can react to the previous selected button and daily s
 });
 
 test('AI choices retain the approved handoff to a related NPC',async()=>{
-  const storage=memoryStorage();let generated=0,scriptedSelections=0;
+  const storage=memoryStorage();let generated=0,scriptedSelections=0,storedRelay;
   const authored={...base(),
     start:async()=>({text:'道の奥も気になるね。',sourceKind:'ambient',choices:[
       {id:'another-topic',label:'ほかの話も聞く'},
       {id:'visit-jiji',label:'ジジのところへ',relayTo:'jiji'}]}),
+    setRelayMessage:relay=>{storedRelay=relay;},
     select:async({choiceId})=>{
       assert.equal(choiceId,'visit-jiji');scriptedSelections++;
       return {text:'ジジも近くにいるよ。',choices:[]};
@@ -259,7 +260,7 @@ test('AI choices retain the approved handoff to a related NPC',async()=>{
         assert.equal(prompt.context.handoffTo,'ジジ');
         assert.equal(prompt.context.chosenLabel,'ジジのところへ');
         assert.equal(prompt.context.repliesLeft,0);
-        return {text:'ジジに会ったら、木の下の風が気持ちいいって伝えて。',choices:[]};
+        return {text:'ジジに会ったら、『木の下の風が気持ちいい』って伝えて。',choices:[]};
       }
       return {text:'ジジはどこかな。',
       choices:['ここで探す','別の道を見る']}}});
@@ -268,8 +269,9 @@ test('AI choices retain the approved handoff to a related NPC',async()=>{
   assert.equal(first.choices[0].label,'ここで探す');
   assert.equal(first.choices[1].label,'ジジのところへ');
   const result=await director.select({...identity,choiceId:'visit-jiji'});
-  assert.equal(result.text,'ジジに会ったら、木の下の風が気持ちいいって伝えて。');
+  assert.equal(result.text,'ジジに会ったら、『木の下の風が気持ちいい』って伝えて。');
   assert.equal(result.conversationComplete,true);
+  assert.equal(storedRelay.text,'木の下の風が気持ちいい');
   assert.equal(scriptedSelections,1);
   assert.equal(generated,2,'handoff is generated, with local state transition preserved');
 });
@@ -646,9 +648,9 @@ test('cat uses a private Sheets persona for nonverbal AI action and writing, nev
     },select:async()=>({text:'（ねこはすわっている。）',choices:[]}),end(){}},
     generate:async prompt=>{
       prompts.push(prompt);
-      return {text:'木の下にキキのリボンがあるよ。',delivery:'written',choices:[
-        {label:'しずかに見ている',outcome:'（ねこはうなずいた。）',delivery:'gesture'},
-        {label:'なにいろ？',outcome:'赤いリボンだよ。',delivery:'written'}]};
+      return {text:'お城の下にキキのリボンがあるよ。',delivery:'written',choices:[
+        {label:'なにいろ？',outcome:'夕焼けみたいな橙色だよ。',delivery:'written'},
+        {label:'しずかに見ている',outcome:'（ねこはうなずいた。）',delivery:'gesture'}]};
     },
     storage,startDelayMs:0,maxReplies:1,requireCharacterProfile:true,
     getCharacterProfiles:()=>mockCatProfiles()
@@ -658,15 +660,17 @@ test('cat uses a private Sheets persona for nonverbal AI action and writing, nev
   assert.equal(calls[0].generation,true);
   assert.equal(prompts.length,1,'silent cat also receives a generated first encounter');
   assert.ok(prompts[0].npc.voice.includes('人語を話さず'));
-  assert.ok(prompts[0].constraints.some(line=>line.includes('漢字はこの80字')));
+  assert.deepEqual(Object.keys(prompts[0].output.shape).sort(),['choices','delivery','text']);
   assert.match(prompts[0].npc.voice,/架空の相棒・テスト設定A/);
   assert.match(prompts[0].npc.voice,/家事・買い物/);
   assert.doesNotMatch(prompts[0].constraints.join('|'),/王さまとの友情|家事・買い物/, 'persona must come from Sheets only');
   assert.equal(opening.delivery,'written');
-  assert.equal(opening.text,'木の下にキキのリボンがあるよ。');
+  assert.equal(opening.text,'お城の下にキキのリボンがあるよ。');
+  assert.equal(opening.choices.length,2);
   const final=await director.select({...identity,choiceId:opening.choices[0].id});
   assert.equal(final.conversationComplete,true);
-  assert.equal(final.delivery,'gesture');
+  assert.equal(final.delivery,'written');
+  assert.equal(final.text,'夕焼けみたいな橙色だよ。');
   assert.equal(prompts.length,1);
   assert.deepEqual(final.choices,[]);
   director.end();
@@ -781,4 +785,25 @@ test('an automatic timeout is diagnosed, whereas player cancellation is not a mo
   const events=JSON.parse(storage.getItem('forest-ai-local-v1:log'));
   assert.ok(events.some(event=>event.event==='generation-failed'&&event.reason==='timeout'));
   assert.ok(events.some(event=>event.event==='script-fallback'&&event.reason==='generation-unavailable'));
+});
+
+
+test('cat writing counts content rather than reading spaces',()=>{
+  const message='しろい 花が さいているね。木の 下は すずしいよ。水の 音も きこえるし、小さな 虫も いる。雨が ふったら 木の 下で 休もうね。';
+  assert.ok(message.length>65);
+  assert.ok(message.replaceAll(' ','').length<=65);
+  const data={text:message,delivery:'written',choices:['花は なにいろ？','音を ききたい']};
+  const options={characterId:'cat',requireLine:true};
+  assert.equal(validateLiveForestOutput(data,options)?.text,message);
+  assert.equal(validateLiveForestOutput({...data,delivery:'gesture',text:'（はっぱに もじを かく。）'},options),null);
+  assert.equal(validateLiveForestOutput({...data,text:'おしろを おぼえているよ。'},options)?.text,
+    'おしろを おぼえているよ。');
+});
+
+test('closing choices keep an immediate answer and remove the invitation to move',()=>{
+  const result=validateLiveForestOutput({text:'木のうらならぼうしも見えないね。',choices:[
+    {label:'どこがいい？',outcome:'大きな石のかげ。小さくなれば見つかりにくいよ。'},
+    {label:'その先は？',outcome:'王さまと いっしょに いこう。わくわくするね。'}
+  ]},{characterId:'king',requireLine:true,context:{repliesLeft:1}});
+  assert.deepEqual(result.labels,['どこがいい？']);
 });

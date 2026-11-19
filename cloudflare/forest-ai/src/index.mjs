@@ -1,12 +1,12 @@
-import {forestEndingChoices,forestEndingNeedsReply} from '../../../reading-shelf-firebase/book-forest-ending.mjs';
+import {forestEndingChoices,forestEndingNeedsReply,forestUnsupportedAction,forestMisattributesReviewTitle} from '../../../reading-shelf-firebase/book-forest-ending.mjs';
 import {unsafeForestForaging} from '../../../reading-shelf-firebase/book-forest-output-safety.mjs';
 import {FOREST_AI_GENERATION_IDS,FOREST_ACTION_WRITING_IDS,FOREST_MULTI_SPEAKER_IDS,FOREST_ROSTER_REVISION,FOREST_DIALOGUE_PROTOCOL,canonicalForestMention} from '../../../reading-shelf-firebase/forest-character-registry.mjs';
-import {validateForestWrittenTurn,FOREST_WRITTEN_TURN_LIMIT} from '../../../reading-shelf-firebase/book-forest-gesture.mjs';
+import {validateForestWrittenTurn} from '../../../reading-shelf-firebase/book-forest-gesture.mjs';
 import {validateTwinTurns} from '../../../reading-shelf-firebase/book-forest-twins.mjs';
 // よんでね 本の森: a small, owner-only proxy for the free Workers AI allowance.
 // No bookshelf data, Firebase private credentials, or Cloudflare API keys here.
 const MODEL='@cf/google/gemma-4-26b-a4b-it';
-export const FOREST_WORKER_VERSION='forest-dialogue-v26-profile2';
+export const FOREST_WORKER_VERSION='forest-dialogue-v38-profile2';
 const VERSION=FOREST_WORKER_VERSION;
 const JWKS_URL='https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com';
 const ORIGINS=new Set(['https://kodomo-reading-shelf-87f11.web.app',
@@ -94,6 +94,8 @@ function validPrompt(prompt){
       prompt.npc.approvedExamples.length<=2&&prompt.npc.approvedExamples.every(line=>
         typeof line==='string'&&line.length<=100)))&&
     typeof prompt.context?.npcLine==='string'&&
+    (prompt.context.relayMessage===undefined||typeof prompt.context.relayMessage==='string'&&
+      prompt.context.relayMessage.length<=150)&&
     (!MULTI_SPEAKER.has(prompt.npc.id)||prompt.mode!=='choices'&&validSpeakers(prompt.context.speakers))&&
     Array.isArray(prompt.context.recentTurns)&&prompt.context.recentTurns.length<=4&&
     Array.isArray(prompt.constraints)&&prompt.constraints.length<=12&&
@@ -112,8 +114,12 @@ export function readCompletion(result,{closing=false,mode='reply',characterId=''
   const silent=ACTION_WRITING_IDS.has(characterId);
   const written=silent?validateForestWrittenTurn(parsed?.text,parsed?.delivery):null;
   if(silent&&!written)throw Error('Invalid silent cat action');
+  if(silent&&context.handoffTo&&written.delivery!=='written')throw Error('Invalid silent relay message');
   const lastChoices=!closing&&context.repliesLeft===1;
   const safetyInput=written?{...parsed,text:written.text}:parsed;
+  const lines=turns?turns.map(turn=>turn.text):[safetyInput?.text];
+  if(lines.some(line=>forestUnsupportedAction(line,context)||forestMisattributesReviewTitle(line,context)))
+    throw Error('Invalid model dialogue context');
   if(unsafeForestForaging(lastChoices?{...safetyInput,choices:[]}:safetyInput,context))
     throw Error('Invalid model unsafe-foraging');
   if(turns&&closing)return {turns,choices:[]};
@@ -138,51 +144,59 @@ export function readCompletion(result,{closing=false,mode='reply',characterId=''
   const choices=parsed.choices.map(choice=>canonicalForestMention(typeof choice==='string'?choice:choice?.label,context.speakers));
   if(choices.some(choice=>typeof choice!=='string'||choice.length<2||choice.length>24))
     throw Error('Invalid model choices');
-  return {...line,choices:choices.slice(0,2)};
+  return {...line,choices:choices.filter(label=>!forestUnsupportedAction(label,context)&&
+    !forestMisattributesReviewTitle(label,context)).slice(0,2)};
 }
 
 export function forestGenerationInput(prompt){
   const actionWriting=ACTION_WRITING_IDS.has(prompt.npc.id);
   const multi=MULTI_SPEAKER.has(prompt.npc.id);
   const lastChoices=prompt.context.repliesLeft===1;
-  const input=lastChoices?{...prompt,finalChecklist:
-    '各labelは子どもの質問。outcomeの最初で、その問いの「どこ・何・どう」を答える。次の行動を約束するだけの候補は書き直す。例：かくれるならどこ？ → 大きな木のうらなら、ぼうしまでかくせるよ。例：何を伝える？ → 橋のそばで青い羽を見つけたって伝えてね。'}:prompt;
   return {messages:[{role:'system',content:
         'あなたは児童向け「本の森」で登場人物の短い即興会話を助ける。'+
         '子どもの個人情報を質問しない。物語にない出来事を断定しない。'+
         '日本語で人物らしい短い会話を作る。'+
         (actionWriting?
-          `このNPCの会話は、声や心の声を使わず、相手へ文字で伝える。通常は {"delivery":"written","text":"王さまなら 木の下にいるよ。"} の形で、相手が実際に読める文を返す。人物設定の身振りや筆記の記述は人物像の資料。会話は書く動作・道具の話から始めず、本人の関心や今の話題を伝える。質問には答え、感想には内容を受けた返事を書く。textは${FOREST_WRITTEN_TURN_LIMIT}字以内、ひらがな・カタカナ・小1配当漢字・句読点・空白。見守りや相づちなど、動作で伝わる返事に限りdelivery:"gesture"でtextに（うなずく）のような動作だけを入れる。`:'')+
+          'このNPCは声や心の声を使わず、ふつうは文字で会話する。{"delivery":"written","text":"雨がふったら 木の下で休もう。"}。textは相手へのメッセージ本文だけ。かっこ書き、文字を書く場面、書く場所や道具は要らない。人物資料の「身振り」「筆記」は人物像の参考。書く言葉の内容は他の人物と同じように考え、本文と最後のoutcomeでは、ひらがなや小学1年生で習う漢字をできるだけ使い、自然に伝わる言葉を選ぶ。ひと目で意味が分かる身振りだけのときはdelivery:"gesture"、textは（うなずく）のような動きだけ。':'')+
         '生成する発話と選択肢の人名は、IDから推測せずcontext.npcDisplayNamesまたはcontext.speakersの表示名を使う。'+
         '人物像はnpc.voiceの非公開台帳由来の設定に従い、設定を説明するだけの文にしない。出力の書式はこの指示に従う。'+
         '各項目の根拠区分・監修状態・適用範囲と本文中の留保を守る。二次資料は原作本文ではない。'+
         '編集解釈・ゲーム演出・暫定採用は演技の手掛かりであり、原作の確定事実として語らない。'+
-        'situationのplaceが今いる場所、presentNpcIdsが同席を確認できる人物。relatedNpcIdsは関係性で、今そばにいる証拠ではない。'+
+        'situation.placeが現在地。presentNpcIdsにいない人物の現在の場所・予定・様子は不明なので、断定しない。'+
         '今日のsceneはevidence=reviewedなら読了済み原作の承認済み事実を含み、evidence=imaginedなら森の即興の出来事。'+
-        '原作の記憶は過去の物語であり、今日この森で起きた事実に置き換えない。森での想像や提案は区別する。'+
-        '知らない木の実・きのこ・植物の食用性を断定せず、味見や摂取を選択肢にしない。安全な食事や食欲は表現してよい。見知らぬ実の場面では、見る・調べる・そのままにするなど次の行動を出す。'+
-        'readerReflectionがある場合は本の感想を受け止め、別作品の人物なら第三者の立場で反応する。'+
+        '原作の記憶では登場人物が当時したことを話す。子どもは本の読者。原作の続きを今の予定にせず、今に重ねるときは「もし」と分かる形で話す。'+
+        '知らない木の実・きのこ・植物の食用性を断定せず、味見や摂取を選択肢にしない。安全な食事や食欲は表現してよい。見知らぬ実なら、食べないようはっきり伝える。選択肢は色や形についての言葉。「おいしそう」「どんな味？」は使わない。'+
+        (prompt.context.readerReflection?
+          'readerReflection.bookTitleは書誌上の書名。quoteは読者の感想で、その中のかぎ括弧や仮の名前も感想の一部。書名に使うのはbookTitleだけ。題名を復唱せず、感想の具体的なところに、その人らしく反応する。別作品なら第三者の立場で話す。':'')+
         '原作に登場した・直接目撃したと偽らず、本人の気持ちを勝手に決めつけない。'+
         '保護者による要約を子どもの直接の発言として扱わず、感想の追記を要求しない。'+
         '別のNPCの会話内容を聞いたふりをせず、選択肢を子どもの信念とみなさない。'+
+        (prompt.context.relayMessage?
+          '登場人物relayFromが送り手、あなたは受け手。子どもがいま届けたrelayMessageの内容に反応する。例：送り手が風の音を面白がったなら、受け手もその音に感想を返す。送り手への連絡や返伝は約束しない。':
+          'アプリが用意する伝言ボタン以外で伝言を頼まない。')+
+        (prompt.context.handoffTo?
+          '今の選択で子どもが伝言を預かる。textには、相手に届いてほしい一文をかぎ括弧で囲んで書く。例「風の音が城の門みたいだったぞ。」。子どもに対する返事や宛先は書かない。':'')+
         '必ずJSONオブジェクトだけを返す。mode=choicesならtextを省略し、choicesを2件、各16字以内。'+
         'mode=openingならcontext.sourceKind（meet/story/reflection/relay/ambient/review-reaction）とtaskを優先し、'+
         '台帳のnpcLineをコピーせず、本人の新しい反応とchoicesを2件作る。'+
         'mode=replyは新しい第一声ではなく直前の選択への応答。問いには短く答える。相づちや感想なら同意を言い換えず、人物らしい小さな反応で会話を一歩進める。'+
-        'NPCのtextは65字以内。'+
+        'NPCのtextは一言から二文、目安45字、上限65字。'+
         (multi?
           '出力はturns:[{speakerSlot:1,text:"..."},{speakerSlot:2,text:"..."}]とchoices。各スロットを一度ずつ、順番は会話に合わせる。'+
           '名前はcontext.speakersで固定し、初対面では各自が自分の名前を名乗る。'+
           '二人目は一人目の言葉に反応する。発話に話者ラベルやかぎ括弧を付けず、各65字以内。子どもへの問いかけは二人目まで待つ。':'')+
-        '現在の場面はsituation.placeに留める。森の小さな即興は目の前で起こることから選ぶ。移動や合流を済ませたふりはせず、よその場所は想像や思い出として話す。'+
-        '選択肢は今の話への子どもの言葉や行動を2つ。context.repliesLeftは選択後に返答できる回数。'+
+        'ここで起きるのは話すことだけ。移動、調査、合流、物の受け渡しは起こらない。よその場所は、昔の記憶や「もし〜なら」の話題に使う。'+
+        '第一声にcontext.ambientFocusがあれば、それを会話のきっかけにする。同じ景色でも、何を面白がるかは人物によって変わる。avoidRecentLinesに出た用事や物を繰り返さない。'+
+        '選択肢はその場で言葉にできる疑問や感想。移動・調査などを始める指示や、その先の段取りは選択肢にしない。'+
+        '選択肢は今の話への子どもの言葉を二つ。context.repliesLeftは選択後に返答できる回数。'+
         (lastChoices?
-          '最後の候補は{label,outcome}。outcomeは選択後に表示する実際の台詞。' +
+          '最後の候補は{label,outcome}を二組。labelは子どもの一言、outcomeはその一言を受けたNPC本人の台詞。一人称と口調は本文と同じ。'+
           (multi?'各候補のspeakerSlotは話す一人の番号。':'')+
-          '最後の二択は子どもがNPCに聞きたいこと。例「どこを探す？」→「足もとの石の間だよ。」。遊びなら遊び方や想像上のかくれ場所、伝言なら届ける言葉、探索なら目の前の手掛かりを具体的に答える。NPCからは質問せず、移動や遊びの開始を約束しない。':
+          '問いを返さず、選んだことへの答え・感想・面白い見立てを言い切って終える。新しい約束や調査は要らない。'+
+          'たとえば風の話なら、子ども「どんな音？」にNPC「葉っぱがこすれて、くしゃくしゃって鳴るよ。」。子ども「雨みたい」にNPC「ほんとだ。木も雨のまねが上手だね。」。':
           'closing=trueでは選ばれた言葉にその場で応え、新しい質問を出さず、choicesは空配列。')},
-        {role:'user',content:JSON.stringify(input)}],
-      max_completion_tokens:320,temperature:.75,
+        {role:'user',content:JSON.stringify(prompt)}],
+      max_completion_tokens:320,temperature:actionWriting?.55:.75,
       chat_template_kwargs:{enable_thinking:false}};
 }
 

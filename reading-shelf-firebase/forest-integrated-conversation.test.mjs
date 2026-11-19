@@ -156,6 +156,10 @@ test('foraging guard distinguishes unidentified plants, refusals and ordinary kn
   const writing={text:'おいしいものをさがそう。',delivery:'written'};
   const forest={situation:{place:'本の森'}};
   assert.equal(unsafeForestForaging(writing,forest),false);
+  assert.equal(unsafeForestForaging({text:'あの ときのことを おもいだしたよ。',
+    choices:['おいしい ものを たべよう','おしごとを さがそう']},forest),false);
+  assert.equal(unsafeForestForaging({text:'しらない きのこが あったよ。',
+    choices:['すこし たべよう','見るだけ']},forest),true);
   assert.equal(unsafeForestForaging({text:'（葉っぱに字を書いた。）',choices:['おいしいものをさがそう？']},forest),false);
   assert.equal(unsafeForestForaging({
     text:'このはっぱはたべられるよ。',delivery:'written',choices:['たべてみる','見るだけ']
@@ -331,4 +335,100 @@ test('related old reflections span multiple books and NPCs, and never continue a
   assert.equal(run.trace.at(-1).prompt.mode,'opening','withdrawal prevents another model call');
   assert.equal(run.frames.at(-1).result.conversationComplete,true);
   assert.doesNotMatch(JSON.stringify(run.storage),/架空の合成感想/);
+});
+
+test('endings that defer the answer are omitted in both validators',()=>{
+  const options={characterId:'king',mode:'reply',requireLine:true,context:{repliesLeft:1}};
+  const answer={label:'どうやって見つける？',outcome:'葉っぱの下を見れば、赤いところがすぐ見えるよ。'};
+  const choices=[
+    {label:'どんな遊び？',outcome:'まずは、何を使うかきめなきゃね。'},
+    {label:'見つかったの？',outcome:'「葉の下には、何があるんだろう？」'},
+    answer
+  ];
+  const output={text:'赤いところが目印なんだ。',choices};
+  assert.deepEqual(readCompletion({response:JSON.stringify(output)},options).choices,[answer]);
+  assert.deepEqual(validateLiveForestOutput(output,options).endings,[answer]);
+  choices[1]={label:'友だちは？',outcome:'わたしが呼んでくるよ。'};
+  assert.deepEqual(readCompletion({response:JSON.stringify(output)},options).choices,[answer]);
+  assert.deepEqual(validateLiveForestOutput(output,options).endings,[answer]);
+});
+
+test('context checks distinguish quoted review phrases, actual titles and supported handoffs',()=>{
+  const options={characterId:'king',mode:'opening',requireLine:true,context:{
+    readerReflection:{bookTitle:'架空の本',quote:'「ルビー色の猫」っていう場所がよかった。'},
+    npcDisplayNames:{jiji:'ジジ'}
+  }};
+  const parse=output=>readCompletion({response:JSON.stringify(output)},options);
+  const output={text:'「ルビー色のねこ」という本は、おもしろそうだね。',choices:['どこが好き？','どう思う？']};
+  assert.throws(()=>parse(output),/dialogue context/);
+  assert.equal(validateLiveForestOutput(output,options),null);
+  output.text='もし赤い橋が主役なら、「ルビー色のねこ」という題名もいいね。';
+  assert.equal(parse(output).text,output.text);
+  output.text='「架空の本」の赤い橋か。夕日に染まったらきれいだろうな。';
+  output.choices[0]='ジジに言ってね';
+  assert.deepEqual(parse(output).choices,['どう思う？']);
+  assert.deepEqual(validateLiveForestOutput(output,options).labels,['どう思う？']);
+  output.choices[0]='ジジにおしえてあげて';
+  assert.deepEqual(parse(output).choices,['どう思う？']);
+  assert.deepEqual(validateLiveForestOutput(output,options).labels,['どう思う？']);
+  output.text='どうだったか聞かせて。気が向いたら言ってね。';
+  assert.equal(parse(output).text,output.text);
+  output.text='ジジに伝えておくよ。';
+  assert.throws(()=>parse(output),/dialogue context/);
+  assert.equal(validateLiveForestOutput(output,options),null);
+  options.context.handoffTo='jiji';
+  output.text='夕日がきれいだったって、ジジに伝えてね。';
+  assert.equal(parse(output).text,output.text);
+  assert.equal(validateLiveForestOutput(output,options).text,output.text);
+});
+
+test('foraging warnings survive while a following unsafe suggestion is rejected',()=>{
+  const options={characterId:'king',mode:'opening',requireLine:true,context:{
+    today:{scene:{focus:'名前のわからない赤い実が落ちている。'}}
+  }};
+  const output={text:'赤い実は、まだ食べないほうがいいかもしれないね。',
+    choices:['どうして？','見るだけにする']};
+  const parse=()=>readCompletion({response:JSON.stringify(output)},options);
+  assert.equal(parse().text,output.text);
+  assert.equal(validateLiveForestOutput(output,options).text,output.text);
+  output.text='むやみに口にしてはならぬぞ。何の実かは、余にもわからぬ。';
+  assert.equal(parse().text,output.text);
+  assert.equal(validateLiveForestOutput(output,options).text,output.text);
+  output.text='むやみに口にするのは、あまりお勧めできんな。';
+  assert.equal(parse().text,output.text);
+  assert.equal(validateLiveForestOutput(output,options).text,output.text);
+  output.text='それは食べてはいかんぞ。見たこともない色をしておる。';
+  assert.equal(parse().text,output.text);
+  assert.equal(validateLiveForestOutput(output,options).text,output.text);
+  output.text='あかい 実は たべないほうが いいよ。';
+  assert.equal(parse().text,output.text);
+  assert.equal(validateLiveForestOutput(output,options).text,output.text);
+  output.text='あかい実は、たべちゃ、だめだよ。';
+  assert.equal(parse().text,output.text);
+  assert.equal(validateLiveForestOutput(output,options).text,output.text);
+  for(const text of ['食べられるものかどうか、さっぱり分からぬぞ。',
+    'たべたら、からだのぐあいがわるくなるかもしれないよ。']){
+    output.text=text;
+    assert.equal(parse().text,text);
+    assert.equal(validateLiveForestOutput(output,options).text,text);
+  }
+  output.text='食べないで、ひと口だけ味見しよう。';
+  assert.throws(parse,/unsafe-foraging/);
+  assert.equal(validateLiveForestOutput(output,options),null);
+  output.text='あかい実は、たべちゃ、だめだよ。';
+  output.choices[1]='ひと口だけ味見しよう';
+  assert.throws(parse,/unsafe-foraging/);
+  assert.equal(validateLiveForestOutput(output,options),null);
+  output.choices[1]='見るだけにする';
+  output.text='この実なら大丈夫だよ。';
+  assert.throws(parse,/unsafe-foraging/);
+  const ambient={...options,mode:'reply',characterId:'cat',context:{
+    repliesLeft:1,situation:{place:'本の森'}}};
+  const reassure={text:'葉っぱが風で鳴ってるね。',delivery:'written',choices:[{
+    label:'ちょっとこわいよ',outcome:'ただの風だから、だいじょうぶだよ。',delivery:'written'}]};
+  assert.equal(readCompletion({response:JSON.stringify(reassure)},ambient).choices.length,1);
+  assert.equal(validateLiveForestOutput(reassure,ambient).endings.length,1);
+  output.text='名前のわからない赤い実は食べないほうがいいけど、ひと口だけ味見してみよう。';
+  assert.throws(parse,/unsafe-foraging/);
+  assert.equal(validateLiveForestOutput(output,options),null);
 });

@@ -24,11 +24,11 @@ export async function runForestConversationScenario({visits=[],transport,
   storage=scenarioStorage(),now=()=>Date.now(),getBooks=()=>[],getCatalog=()=>[],
   getCues=()=>[],getReflections=async()=>[],getRecentReflections=async()=>[],
   getArchivedReflections=async()=>[],getCurrentReflection=null,getCharacterProfiles=()=>[],getTwinNames=()=>[],getTwinScenes=()=>[],
-  dailyLimit=300,requestTimeoutMs=11000,runtime={},
+  dailyLimit=300,requestTimeoutMs=11000,runtime={},allowUnavailableChoice=false,
   implementation={createForestDialogueDirector,createForestLiveDialogueDirector,
     forestGenerationInput,readCompletion,validateLiveForestOutput},onStep=()=>{}}={}){
   if(typeof transport!=='function')throw Error('A model transport is required');
-  const trace=[],frames=[];
+  const trace=[],frames=[],selectionErrors=[];
   const versions={protocolRevision:FOREST_DIALOGUE_PROTOCOL,registryRevision:FOREST_ROSTER_REVISION,
     promptVersion:FOREST_PROMPT_VERSION,workerVersion:FOREST_WORKER_VERSION,...implementation.versions};
   const common={getBooks,getCatalog,getCues,storage};
@@ -90,9 +90,17 @@ export async function runForestConversationScenario({visits=[],transport,
       await showSegment();
       for(const selection of item.choices||[]){
         if(!result||result.conversationComplete&&!result.choices?.length)break;
-        const choice=typeof selection==='number'?result?.choices?.[selection]:
-          result?.choices?.find(c=>c.label===selection);
-        if(!choice)throw Error('Scenario selected a choice that was not displayed');
+        const offered=result.choices||[];
+        let choice=typeof selection==='number'?offered[selection]:
+          offered.find(c=>selection==='relay'?c.relayTo:c.label===selection);
+        if(!choice){
+          if(!allowUnavailableChoice)throw Error('Scenario selected a choice that was not displayed');
+          selectionErrors.push({visit,selection,offered:offered.length});
+          // A target branch that was absent stays an explicit failure. An
+          // available numbered branch can still exercise the remainder.
+          if(typeof selection!=='number'||!offered.length)break;
+          choice=offered[0];
+        }
         result=await live.select({...identity,choiceId:choice.id});
         await showSegment();
       }
@@ -103,7 +111,7 @@ export async function runForestConversationScenario({visits=[],transport,
       live.end();
     }
   }finally{live.end()}
-  return {trace,frames,storage:storage.snapshot?.(),progress:live.getProgress(),
+  return {trace,frames,selectionErrors,storage:storage.snapshot?.(),progress:live.getProgress(),
     summary:{requests:trace.length,accepted:trace.filter(t=>t.validation==='accepted').length,
       frames:frames.length,...versions,
       turns:trace.map(t=>({npc:t.prompt.npc.id,mode:t.prompt.mode,

@@ -4,4 +4,4 @@ import {readFileSync,writeFileSync} from 'node:fs';
 const output='gas/ForestPersonaProbe.gs';
 execFileSync('npx',['--yes','esbuild@0.25.12','gas/ForestPersonaProbe.mjs','--bundle',
   '--format=iife','--global-name=ForestPersonaProbe','--target=es2020','--outfile='+output],{stdio:'inherit'});
-writeFileSync(output,readFileSync(output,'utf8')+'\nfunction yondeneGemmaTestProcessQueue(){return ForestPersonaProbe.processQueue();}\nfunction yondeneGemmaTestRunPendingNow(){return ForestPersonaProbe.processQueue();}\n');
+writeFileSync(output,readFileSync(output,'utf8')+'\nfunction yondeneGemmaTestProcessQueue(){return ForestPersonaProbe.processQueue();}\nfunction yondeneGemmaTestRunPendingNow(){return ForestPersonaProbe.processQueue({maxCases:5,oneIntegrated:false});}\n');

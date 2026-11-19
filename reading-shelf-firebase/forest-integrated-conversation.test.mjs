@@ -368,6 +368,9 @@ test('context checks distinguish quoted review phrases, actual titles and suppor
   output.choices[0]='ジジに言ってね';
   assert.deepEqual(parse(output).choices,['どう思う？']);
   assert.deepEqual(validateLiveForestOutput(output,options).labels,['どう思う？']);
+  output.choices[0]='ジジにおしえてあげて';
+  assert.deepEqual(parse(output).choices,['どう思う？']);
+  assert.deepEqual(validateLiveForestOutput(output,options).labels,['どう思う？']);
   output.text='どうだったか聞かせて。気が向いたら言ってね。';
   assert.equal(parse(output).text,output.text);
   output.text='ジジに伝えておくよ。';
@@ -381,13 +384,26 @@ test('context checks distinguish quoted review phrases, actual titles and suppor
 
 test('foraging warnings survive while a following unsafe suggestion is rejected',()=>{
   const options={characterId:'king',mode:'opening',requireLine:true,context:{
-    scene:{focus:'名前のわからない赤い実が落ちている。'}
+    today:{scene:{focus:'名前のわからない赤い実が落ちている。'}}
   }};
   const output={text:'赤い実は、まだ食べないほうがいいかもしれないね。',
     choices:['どうして？','見るだけにする']};
   const parse=()=>readCompletion({response:JSON.stringify(output)},options);
   assert.equal(parse().text,output.text);
   assert.equal(validateLiveForestOutput(output,options).text,output.text);
+  output.text='むやみに口にしてはならぬぞ。何の実かは、余にもわからぬ。';
+  assert.equal(parse().text,output.text);
+  assert.equal(validateLiveForestOutput(output,options).text,output.text);
+  output.text='むやみに口にするのは、あまりお勧めできんな。';
+  assert.equal(parse().text,output.text);
+  assert.equal(validateLiveForestOutput(output,options).text,output.text);
+  output.text='それは食べてはいかんぞ。見たこともない色をしておる。';
+  assert.equal(parse().text,output.text);
+  assert.equal(validateLiveForestOutput(output,options).text,output.text);
+  output.choices[1]='ひと口だけ味見しよう';
+  assert.throws(parse,/unsafe-foraging/);
+  assert.equal(validateLiveForestOutput(output,options),null);
+  output.choices[1]='見るだけにする';
   output.text='名前のわからない赤い実は食べないほうがいいけど、ひと口だけ味見してみよう。';
   assert.throws(parse,/unsafe-foraging/);
   assert.equal(validateLiveForestOutput(output,options),null);

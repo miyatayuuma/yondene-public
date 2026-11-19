@@ -7,10 +7,10 @@ import {unsafeForestForaging} from './book-forest-output-safety.mjs';
 // depends on context and is checked on real conversations.
 // A movement invitation with a comma or a sentence break before the verb
 // still promises a next action. A description of a possible location is fine.
-const openInvitation=/(?:^|[、]|へ|まで|に|ついて)(?:いこう|行こう|いきましょう|行きましょう|はじめよう|始めよう|おいで)(?:ね|よ|ぜ|ぞ|か)?$/u;
+const openInvitation=/(?:^|[、]|へ|まで|に|ついて)(?:(?:(?:ゆっくり)?(?:あるいて|歩いて))?(?:いこう|行こう|いきましょう|行きましょう)|はじめよう|始めよう|おいで)(?:ね|よ|ぜ|ぞ|か)?$/u;
 const unperformedAction=/(?:^|[。！!\n])(?:よし[、！!]|うん[、。])?[^。！!\n]{0,35}(?:正体を暴(?:く|いてやる)|(?:決め|きめ)(?:なきゃ|なくちゃ)|(?:確かめ|たしかめ|調べ|しらべ)(?:よう|てくる)|(?:準備|じゅんび)(?:を)?(?:してくる|しておく))(?=よ|ね|ぞ|ぜ|[。！!]|$)/u;
 const relayRequest=/(?:伝え|つたえ)(?:て(?:おく|おきます|おいて|くる|あげる|あげます|くれる|くれない|ね|よ)|とく|たい|よう|ましょう|て(?=[。！？!?]|$))/u;
-const sayingToSomeone=/(?:言っ|いっ)(?:て(?:おく|おきます|おいて|くる|あげる|あげます|くれる|くれない|ね|よ)|とく)/u;
+const sayingToSomeone=/(?:(?:言っ|いっ)(?:て(?:おく|おきます|おいて|くる|あげる|あげます|くれる|くれない|ね|よ)|とく)|(?:教え|おしえ)て(?:あげて|あげる|おく|くれる))/u;
 const offscreenAction=/(?:連れて|つれて)(?:行く|いく|くる)(?:よ|ね|ぜ|ぞ|から)?(?=[。！!」』）]|$)|(?:呼んで|よんで|持って|もって|取って|とって)(?:くる|きます)(?:よ|ね|ぜ|ぞ|から)?(?=[。！!」』）]|$)|(?:合流|ごうりゅう)し(?:よう|てくる)(?:よ|ね|ぜ|ぞ)?(?=[。！!」』）]|$)/u;
 
 export function forestUnsupportedAction(text,context={}){

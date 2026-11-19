@@ -50,7 +50,7 @@ test('generates contextual reply choices, then a character reply only after a ch
   const log=JSON.parse(storage.getItem('forest-ai-local-v1:log'));
   assert.deepEqual(log.map(x=>x.event),['generated-opening','selected-offered-choice','generated-reply']);
   assert.equal(log[0].text,first.text,'export can reconstruct the initial line');
-  assert.equal(log[0].promptVersion,'forest-scene-generation-v34-profile2');
+  assert.equal(log[0].promptVersion,'forest-scene-generation-v37-profile2');
   assert.equal(log[1].label,'風の音を聞く');
   director.end();
 });
@@ -244,11 +244,12 @@ test('the next related NPC can react to the previous selected button and daily s
 });
 
 test('AI choices retain the approved handoff to a related NPC',async()=>{
-  const storage=memoryStorage();let generated=0,scriptedSelections=0;
+  const storage=memoryStorage();let generated=0,scriptedSelections=0,storedRelay;
   const authored={...base(),
     start:async()=>({text:'道の奥も気になるね。',sourceKind:'ambient',choices:[
       {id:'another-topic',label:'ほかの話も聞く'},
       {id:'visit-jiji',label:'ジジのところへ',relayTo:'jiji'}]}),
+    setRelayMessage:relay=>{storedRelay=relay;},
     select:async({choiceId})=>{
       assert.equal(choiceId,'visit-jiji');scriptedSelections++;
       return {text:'ジジも近くにいるよ。',choices:[]};
@@ -259,7 +260,7 @@ test('AI choices retain the approved handoff to a related NPC',async()=>{
         assert.equal(prompt.context.handoffTo,'ジジ');
         assert.equal(prompt.context.chosenLabel,'ジジのところへ');
         assert.equal(prompt.context.repliesLeft,0);
-        return {text:'ジジに会ったら、木の下の風が気持ちいいって伝えて。',choices:[]};
+        return {text:'ジジに会ったら、『木の下の風が気持ちいい』って伝えて。',choices:[]};
       }
       return {text:'ジジはどこかな。',
       choices:['ここで探す','別の道を見る']}}});
@@ -268,8 +269,9 @@ test('AI choices retain the approved handoff to a related NPC',async()=>{
   assert.equal(first.choices[0].label,'ここで探す');
   assert.equal(first.choices[1].label,'ジジのところへ');
   const result=await director.select({...identity,choiceId:'visit-jiji'});
-  assert.equal(result.text,'ジジに会ったら、木の下の風が気持ちいいって伝えて。');
+  assert.equal(result.text,'ジジに会ったら、『木の下の風が気持ちいい』って伝えて。');
   assert.equal(result.conversationComplete,true);
+  assert.equal(storedRelay.text,'木の下の風が気持ちいい');
   assert.equal(scriptedSelections,1);
   assert.equal(generated,2,'handoff is generated, with local state transition preserved');
 });

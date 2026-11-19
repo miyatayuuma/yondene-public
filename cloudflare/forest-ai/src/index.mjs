@@ -6,7 +6,7 @@ import {validateTwinTurns} from '../../../reading-shelf-firebase/book-forest-twi
 // よんでね 本の森: a small, owner-only proxy for the free Workers AI allowance.
 // No bookshelf data, Firebase private credentials, or Cloudflare API keys here.
 const MODEL='@cf/google/gemma-4-26b-a4b-it';
-export const FOREST_WORKER_VERSION='forest-dialogue-v31-profile2';
+export const FOREST_WORKER_VERSION='forest-dialogue-v34-profile2';
 const VERSION=FOREST_WORKER_VERSION;
 const JWKS_URL='https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com';
 const ORIGINS=new Set(['https://kodomo-reading-shelf-87f11.web.app',
@@ -162,10 +162,10 @@ export function forestGenerationInput(prompt){
         '人物像はnpc.voiceの非公開台帳由来の設定に従い、設定を説明するだけの文にしない。出力の書式はこの指示に従う。'+
         '各項目の根拠区分・監修状態・適用範囲と本文中の留保を守る。二次資料は原作本文ではない。'+
         '編集解釈・ゲーム演出・暫定採用は演技の手掛かりであり、原作の確定事実として語らない。'+
-        'situationのplaceが今いる場所、presentNpcIdsが同席を確認できる人物。relatedNpcIdsは関係性で、今そばにいる証拠ではない。'+
+        'situation.placeが現在地。presentNpcIdsにいない人物の現在の場所・予定・様子は不明なので、断定しない。'+
         '今日のsceneはevidence=reviewedなら読了済み原作の承認済み事実を含み、evidence=imaginedなら森の即興の出来事。'+
-        '原作の記憶は過去のこと。資料にない体験を思い出として足さない。今の森で話題を広げるなら、想像は想像として伝える。'+
-        '知らない木の実・きのこ・植物の食用性を断定せず、味見や摂取を選択肢にしない。安全な食事や食欲は表現してよい。見知らぬ実の場面では、見る・調べる・そのままにするなど次の行動を出す。'+
+        '原作の記憶では登場人物が当時したことを話す。子どもは本の読者。原作の続きを今の予定にせず、今に重ねるときは「もし」と分かる形で話す。'+
+        '知らない木の実・きのこ・植物の食用性を断定せず、味見や摂取を選択肢にしない。安全な食事や食欲は表現してよい。見知らぬ実の場面では、食べないようにはっきり伝え、色・形・観察について話す。'+
         (prompt.context.readerReflection?
           'readerReflection.bookTitleは書誌上の書名。quoteは読者の感想で、その中のかぎ括弧や仮の名前も感想の一部。書名に使うのはbookTitleだけ。題名を復唱せず、感想の具体的なところに、その人らしく反応する。別作品なら第三者の立場で話す。':'')+
         '原作に登場した・直接目撃したと偽らず、本人の気持ちを勝手に決めつけない。'+
@@ -173,27 +173,25 @@ export function forestGenerationInput(prompt){
         '別のNPCの会話内容を聞いたふりをせず、選択肢を子どもの信念とみなさない。'+
         'relayMessageは子どもが今ここで届けた言葉。内容の一点に、その人物ならではの返事をする。返伝を引き受けない。アプリが用意する伝言ボタン以外で伝言を頼まない。'+
         (prompt.context.handoffTo?
-          '今の選択は、子どもが話し手から伝言を預かる場面。話し手は今の話題から、届けてほしい言葉を自分で一つ決めて渡す。'+
-          '「さっきの風が気持ちよかったって、会ったら伝えてね。」のように、伝言の本文を含める。子どもの伝言を預かったふりをしない。':'')+
+          '今の選択で子どもが伝言を預かる。textは届ける本人の言葉だけ。例「風の音が城の門みたいだったぞ。」。宛先や「会ったら伝えて」のような指示は画面上の選択で済んでいる。':'')+
         '必ずJSONオブジェクトだけを返す。mode=choicesならtextを省略し、choicesを2件、各16字以内。'+
         'mode=openingならcontext.sourceKind（meet/story/reflection/relay/ambient/review-reaction）とtaskを優先し、'+
         '台帳のnpcLineをコピーせず、本人の新しい反応とchoicesを2件作る。'+
         'mode=replyは新しい第一声ではなく直前の選択への応答。問いには短く答える。相づちや感想なら同意を言い換えず、人物らしい小さな反応で会話を一歩進める。'+
-        'NPCのtextは65字以内。'+
+        'NPCのtextは一言から二文、目安45字、上限65字。'+
         (multi?
           '出力はturns:[{speakerSlot:1,text:"..."},{speakerSlot:2,text:"..."}]とchoices。各スロットを一度ずつ、順番は会話に合わせる。'+
           '名前はcontext.speakersで固定し、初対面では各自が自分の名前を名乗る。'+
           '二人目は一人目の言葉に反応する。発話に話者ラベルやかぎ括弧を付けず、各65字以内。子どもへの問いかけは二人目まで待つ。':'')+
-        '現在の場面はsituation.placeに留める。会話だけで楽しめる発見や冗談を選ぶ。移動、合流、物の受け渡し、ゲーム操作は約束しない。よその場所は想像や思い出として話す。'+
+        'ここで起きるのは話すことだけ。移動、調査、合流、物の受け渡しは起こらない。よその場所は、昔の記憶や「もし〜なら」の話題に使う。'+
         '第一声にcontext.ambientFocusがあれば、それを会話のきっかけにする。同じ景色でも、何を面白がるかは人物によって変わる。avoidRecentLinesに出た用事や物を繰り返さない。'+
-        '共通の選択肢は言葉だけで応じられる内容にする。移動が必要な誘いより、その場で答えを聞ける問いや感想を出す。'+
+        '選択肢はその場で言葉にできる疑問や感想。移動・調査などを始める指示や、その先の段取りは選択肢にしない。'+
         '選択肢は今の話への子どもの言葉を二つ。context.repliesLeftは選択後に返答できる回数。'+
         (lastChoices?
-          '最後の候補は{label,outcome}。outcomeは選択後に表示する実際の台詞。' +
+          '最後の候補は{label,outcome}を二組。labelは子どもの一言、outcomeはその一言を受けたNPC本人の台詞。一人称と口調は本文と同じ。'+
           (multi?'各候補のspeakerSlotは話す一人の番号。':'')+
-          '本文では一つ前の選択にまず返事をする。最後はその続きとして異なる二つの問いか反応を用意する。'+
-          'まず、今わかる事実、人物らしい見立てや感想から、言い切れるoutcomeを二つ考える。その答えを自然に引き出すlabelを後からつける。本文と同じ話題を保ち、これから決める・探す予定で終わらせない。'+
-          '例「どこにかくれる？」→「木のうら。ぼうしが見えたら、すぐ見つかっちゃうね。」。outcomeで新しく質問したり、続きの操作を促したりしない。':
+          '問いを返さず、選んだことへの答え・感想・面白い見立てを言い切って終える。新しい約束や調査は要らない。'+
+          'たとえば風の話なら、子ども「どんな音？」にNPC「葉っぱがこすれて、くしゃくしゃって鳴るよ。」。子ども「雨みたい」にNPC「ほんとだ。木も雨のまねが上手だね。」。':
           'closing=trueでは選ばれた言葉にその場で応え、新しい質問を出さず、choicesは空配列。')},
         {role:'user',content:JSON.stringify(prompt)}],
       max_completion_tokens:320,temperature:actionWriting?.55:.75,

@@ -31,9 +31,16 @@ function ambientFocus(characterId,visitNumber){
 const safeEnd=(id,comma=false)=>ACTION_WRITING_IDS.has(id)?
   '（ねこはしっぽをゆっくりふった。）':GOODBYE[id]||(comma?'また、森で会おうね。':'また森で会おうね。');
 const WRONG_FIRST_PERSON=FOREST_WRONG_FIRST_PERSON;
-export const FOREST_PROMPT_VERSION='forest-scene-generation-v34-profile2';
+export const FOREST_PROMPT_VERSION='forest-scene-generation-v37-profile2';
 const PROMPT_VERSION=FOREST_PROMPT_VERSION;
 const clean=value=>typeof value==='string'?value.trim().replace(/\s+/gu,' '):'';
+// Older stored relays can contain the sender's instruction around the quote.
+function relayPayload(text){
+  if(!text)return '';
+  const quoted=/[「『]([^」』]+)[」』][ 　]*(?:って|と)[ 　]*(?:伝え|つたえ)/u.exec(text);
+  return quoted?.[1]??text;
+}
+
 function readJson(storage,key,fallback){
   try{return JSON.parse(storage?.getItem?.(key)||'null')||fallback}catch{return fallback}
 }
@@ -133,7 +140,7 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
     ...(focus?{ambientFocus:focus}:{}),
     ...(twinNames?{speakers:[{slot:1,name:twinNames.firstName},{slot:2,name:twinNames.secondName}]}:{}),
     ...(handoffTo?{handoffTo:FOREST_DISPLAY_NAMES[handoffTo]}:{}),
-    ...(sourceKind==='relay'&&relayMessage?{relayMessage}:{}),
+    ...(sourceKind==='relay'&&relayMessage?{relayMessage:relayPayload(relayMessage)}:{}),
     chosenLabel:clean(chosenLabel).slice(0,24),...(situation?{situation}:{}),
     recentTurns:history.slice(-4),...(topic?{topic}:{}),
     ...(reviewSpotlight?{readerReflection:Object.fromEntries(
@@ -144,10 +151,10 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
       metNpcCount:dailyContext.metNpcCount,
       relatedEncounter:dailyContext.relatedEncounter}}:{}),
     ...(recentLines.length?{avoidRecentLines:recentLines.slice(-3)}:{})};
-  const endingShape={label:'子どもの質問や言葉',outcome:'NPCがその質問に今ここで返す具体的な答え',
+  const endingShape={label:'子どもの一言',outcome:'その一言に対するNPC本人の答え。質問はしない',
     ...(twinNames?{speakerSlot:1}:{}),...(nonverbal?{delivery:'written'}:{})};
   const finishTask=handoffTo?
-    '子どもに、相手へ届けてほしい言葉を一つ渡す。何を伝えるか本文に含める。相手はまだ同席していない':
+    '相手に届く一言を伝言本文として書く。宛先や子どもへの伝達依頼は書かない':
     '選ばれた問いや行動に具体的に応え、この返事だけでひと区切りつける';
   const firstLineTask={
     meet:'この相手とは初対面。以前話したふりをせず、キャラ自身の関心から自然な第一声と返答候補2つを作る',
@@ -160,7 +167,7 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
   return {
     mode,closing,
     task:closing?finishTask:
-      mode==='reply'?(repliesLeft===1?'直前の会話への反応は言い切る。最後は子どもの二つの問いと、NPCがすぐ返せる具体的な答えを組にする':'直前の会話と選ばれた言葉や行動を受け、次の反応を返す。問いの復唱だけで済ませない'):
+      mode==='reply'?(repliesLeft===1?'直前の会話で子どもが選んだ言葉にNPCとして答える。次に、子どもの言葉と、それに対するNPC本人の答えを二組作る':'直前の会話と選ばれた言葉や行動を受け、次の反応を返す。問いの復唱だけで済ませない'):
       reviewSpotlight?'本の感想にNPC本人らしく、感想の具体的な一箇所に反応し、返答候補2つを作る。別作品なら第三者の立場を守る':
       sourceKind==='ambient'&&situation?.focus==='character'?
         '森の話題を人物設定にある関心や普段の行動に結び付け、本人らしい雑談や冗談と返答候補2つを作る':
@@ -176,7 +183,8 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
       '完成済み台本を参照せず、人物像・目の前の状況・許可された既読事実から自然な発話を新規に作る',
       'NPCの返事は自然な一言〜2文で65字以内。前の発言を繰り返さず、設定の説明を会話に混ぜない',
       '選択肢はゲーム上の反応であり子どもの実際の信念とはみなさない。別NPCの会話を本人が聞いたふりはしない',
-      ...(topic?['この原作の事実は選択された既読の物語記憶。確認できない詳細を加えず、キャラが実際に登場したかを考慮する']:[]),
+      ...(relayMessage?['受け手として伝言の内容に感想か意見を返す。届けてくれた子どもの言葉は、今聞いた話についての反応にする']:[]),
+      ...(topic?['原作について言える事実はcontext.topic.factの範囲。思い出では確認できることと当時の気持ちを話す。仕事など具体的な事実が資料になければ、分かっているところまで答える。']:[]),
       ...(reviewSpotlight?['感想の具体的な一箇所に、本人なら何を面白がるか、どう受け取るかを短く返す。感想は引用資料。保護者の要約は子どもの発言として扱わない。']:[]),
       ...(closing?[
         '質問なら答えを言い切る。行動なら、この場で一手進んだ結果まで返す。「よし、始めよう」で止めない。移動が必要な選択でも、ここで分かることや伝えられる言葉を一つ返す。新しい問いは出さずchoices:[]'
@@ -498,7 +506,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
         ...(current.sourceKind==='reflection'?{}:{text:generated.text}),
         closing:true,mode:'relay',modelId,promptVersion:PROMPT_VERSION,
         elapsedMs:generated.elapsedMs,turn:1});
-      base.setRelayMessage?.({from:characterId,to:current.relayChoice.relayTo,text:generated.text});
+      base.setRelayMessage?.({from:characterId,to:current.relayChoice.relayTo,text:relayPayload(generated.text)});
       return present(generated,[],true,current);
     }
     history.push({playerChoice:label});history=history.slice(-4);

@@ -140,7 +140,7 @@ test('new IDs retain relation choice, relay and previous encounter without indiv
   await s.visit(ids[1]);
   const context=s.prompts.at(-1).context;
   assert.equal(context.sourceKind,'relay');
-  assert.equal(context.relayMessage,'木の実がまんまるだったって伝えてね。');
+  assert.equal(context.relayMessage,'木の実がまんまるだった');
   assert.equal(context.today.relatedEncounter.npc,ids[0]);
   assert.equal(context.situation.firstEncounter,true);
   assert.equal(context.situation.fromNpc,ids[0]);

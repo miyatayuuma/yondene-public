@@ -6,7 +6,7 @@ import {validateTwinTurns} from '../../../reading-shelf-firebase/book-forest-twi
 // よんでね 本の森: a small, owner-only proxy for the free Workers AI allowance.
 // No bookshelf data, Firebase private credentials, or Cloudflare API keys here.
 const MODEL='@cf/google/gemma-4-26b-a4b-it';
-export const FOREST_WORKER_VERSION='forest-dialogue-v34-profile2';
+export const FOREST_WORKER_VERSION='forest-dialogue-v36-profile2';
 const VERSION=FOREST_WORKER_VERSION;
 const JWKS_URL='https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com';
 const ORIGINS=new Set(['https://kodomo-reading-shelf-87f11.web.app',
@@ -165,7 +165,7 @@ export function forestGenerationInput(prompt){
         'situation.placeが現在地。presentNpcIdsにいない人物の現在の場所・予定・様子は不明なので、断定しない。'+
         '今日のsceneはevidence=reviewedなら読了済み原作の承認済み事実を含み、evidence=imaginedなら森の即興の出来事。'+
         '原作の記憶では登場人物が当時したことを話す。子どもは本の読者。原作の続きを今の予定にせず、今に重ねるときは「もし」と分かる形で話す。'+
-        '知らない木の実・きのこ・植物の食用性を断定せず、味見や摂取を選択肢にしない。安全な食事や食欲は表現してよい。見知らぬ実の場面では、食べないようにはっきり伝え、色・形・観察について話す。'+
+        '知らない木の実・きのこ・植物の食用性を断定せず、味見や摂取を選択肢にしない。安全な食事や食欲は表現してよい。見知らぬ実なら、食べないようはっきり伝える。選択肢は色や形についての言葉。「おいしそう」「どんな味？」は使わない。'+
         (prompt.context.readerReflection?
           'readerReflection.bookTitleは書誌上の書名。quoteは読者の感想で、その中のかぎ括弧や仮の名前も感想の一部。書名に使うのはbookTitleだけ。題名を復唱せず、感想の具体的なところに、その人らしく反応する。別作品なら第三者の立場で話す。':'')+
         '原作に登場した・直接目撃したと偽らず、本人の気持ちを勝手に決めつけない。'+

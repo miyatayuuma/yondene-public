@@ -400,10 +400,21 @@ test('foraging warnings survive while a following unsafe suggestion is rejected'
   output.text='それは食べてはいかんぞ。見たこともない色をしておる。';
   assert.equal(parse().text,output.text);
   assert.equal(validateLiveForestOutput(output,options).text,output.text);
+  output.text='あかい 実は たべないほうが いいよ。';
+  assert.equal(parse().text,output.text);
+  assert.equal(validateLiveForestOutput(output,options).text,output.text);
   output.choices[1]='ひと口だけ味見しよう';
   assert.throws(parse,/unsafe-foraging/);
   assert.equal(validateLiveForestOutput(output,options),null);
   output.choices[1]='見るだけにする';
+  output.text='この実なら大丈夫だよ。';
+  assert.throws(parse,/unsafe-foraging/);
+  const ambient={...options,mode:'reply',characterId:'cat',context:{
+    repliesLeft:1,situation:{place:'本の森'}}};
+  const reassure={text:'葉っぱが風で鳴ってるね。',delivery:'written',choices:[{
+    label:'ちょっとこわいよ',outcome:'ただの風だから、だいじょうぶだよ。',delivery:'written'}]};
+  assert.equal(readCompletion({response:JSON.stringify(reassure)},ambient).choices.length,1);
+  assert.equal(validateLiveForestOutput(reassure,ambient).endings.length,1);
   output.text='名前のわからない赤い実は食べないほうがいいけど、ひと口だけ味見してみよう。';
   assert.throws(parse,/unsafe-foraging/);
   assert.equal(validateLiveForestOutput(output,options),null);

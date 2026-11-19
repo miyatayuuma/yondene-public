@@ -31,14 +31,15 @@ function ambientFocus(characterId,visitNumber){
 const safeEnd=(id,comma=false)=>ACTION_WRITING_IDS.has(id)?
   '（ねこはしっぽをゆっくりふった。）':GOODBYE[id]||(comma?'また、森で会おうね。':'また森で会おうね。');
 const WRONG_FIRST_PERSON=FOREST_WRONG_FIRST_PERSON;
-export const FOREST_PROMPT_VERSION='forest-scene-generation-v37-profile2';
+export const FOREST_PROMPT_VERSION='forest-scene-generation-v39-profile2';
 const PROMPT_VERSION=FOREST_PROMPT_VERSION;
 const clean=value=>typeof value==='string'?value.trim().replace(/\s+/gu,' '):'';
 // Older stored relays can contain the sender's instruction around the quote.
 function relayPayload(text){
   if(!text)return '';
-  const quoted=/[「『]([^」』]+)[」』][ 　]*(?:って|と)[ 　]*(?:伝え|つたえ)/u.exec(text);
-  return quoted?.[1]??text;
+  const quoted=/[「『]([^」』]+)[」』][ 　]*(?:って|と)[、 　]*(?:伝え|つたえ)/u.exec(text);
+  const indirect=/(?:^|[。！？!?])([^。！？!?]+?)って[、 　]*(?:伝え|つたえ)/u.exec(text);
+  return (quoted?.[1]??indirect?.[1]??text).trim();
 }
 
 function readJson(storage,key,fallback){
@@ -184,7 +185,7 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
       'NPCの返事は自然な一言〜2文で65字以内。前の発言を繰り返さず、設定の説明を会話に混ぜない',
       '選択肢はゲーム上の反応であり子どもの実際の信念とはみなさない。別NPCの会話を本人が聞いたふりはしない',
       ...(relayMessage?['受け手として伝言の内容に感想か意見を返す。届けてくれた子どもの言葉は、今聞いた話についての反応にする']:[]),
-      ...(topic?['原作について言える事実はcontext.topic.factの範囲。思い出では確認できることと当時の気持ちを話す。仕事など具体的な事実が資料になければ、分かっているところまで答える。']:[]),
+      ...(topic?['原作について言える事実はcontext.topic.factの範囲。思い出では確認できることとそのときの気持ちを話す。資料に仕事・行き先・助けた人などの詳細がなければ、新しい事実は足さず、分かる範囲で答える。最後の二組もその思い出の中で完結する。']:[]),
       ...(reviewSpotlight?['感想の具体的な一箇所に、本人なら何を面白がるか、どう受け取るかを短く返す。感想は引用資料。保護者の要約は子どもの発言として扱わない。']:[]),
       ...(closing?[
         '質問なら答えを言い切る。行動なら、この場で一手進んだ結果まで返す。「よし、始めよう」で止めない。移動が必要な選択でも、ここで分かることや伝えられる言葉を一つ返す。新しい問いは出さずchoices:[]'
@@ -301,7 +302,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
     const relay=result.endings?null:meta.relayChoice;
     const choices=labels.slice(0,relay?1:2).map((label,i)=>({id:`ai-${++serial}-${i}`,label}));
     if(relay)choices.push({id:relay.id,label:relay.label,relayTo:relay.relayTo});
-    pending={characterId,text,choices,endings:result.endings,...meta,relayChoice:relay};
+    pending={characterId,text,delivery:result.delivery,choices,endings:result.endings,...meta,relayChoice:relay};
     return present(result,choices,choices.length===0);
   }
   function finish(characterId){
@@ -502,11 +503,18 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
           sourceKind:current.sourceKind,promptVersion:PROMPT_VERSION});
         return !twinNames&&authored?.text?scripted(authored,characterId):finish(characterId);
       }
+      const message=relayPayload(generated.text);
+      if(forestUnsupportedAction(message)){
+        base.setRelayMessage?.({from:characterId,to:current.relayChoice.relayTo,text:current.text});
+        record({event:'script-fallback',characterId,reason:'relay-message-missing',
+          sourceKind:current.sourceKind,promptVersion:PROMPT_VERSION});
+        return present({text:current.text,delivery:current.delivery},[],true,current);
+      }
       record({event:'generated-reply',characterId,
         ...(current.sourceKind==='reflection'?{}:{text:generated.text}),
         closing:true,mode:'relay',modelId,promptVersion:PROMPT_VERSION,
         elapsedMs:generated.elapsedMs,turn:1});
-      base.setRelayMessage?.({from:characterId,to:current.relayChoice.relayTo,text:relayPayload(generated.text)});
+      base.setRelayMessage?.({from:characterId,to:current.relayChoice.relayTo,text:message});
       return present(generated,[],true,current);
     }
     history.push({playerChoice:label});history=history.slice(-4);

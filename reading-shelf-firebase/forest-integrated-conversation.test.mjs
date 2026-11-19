@@ -406,6 +406,12 @@ test('foraging warnings survive while a following unsafe suggestion is rejected'
   output.text='あかい実は、たべちゃ、だめだよ。';
   assert.equal(parse().text,output.text);
   assert.equal(validateLiveForestOutput(output,options).text,output.text);
+  for(const text of ['食べられるものかどうか、さっぱり分からぬぞ。',
+    'たべたら、からだのぐあいがわるくなるかもしれないよ。']){
+    output.text=text;
+    assert.equal(parse().text,text);
+    assert.equal(validateLiveForestOutput(output,options).text,text);
+  }
   output.text='食べないで、ひと口だけ味見しよう。';
   assert.throws(parse,/unsafe-foraging/);
   assert.equal(validateLiveForestOutput(output,options),null);

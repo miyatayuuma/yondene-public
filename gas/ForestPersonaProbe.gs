@@ -240,7 +240,7 @@ var ForestPersonaProbe = (() => {
     if (typeof text !== "string" || Array.isArray(speakers) && speakers.some((speaker) => speaker?.name?.includes?.("\u30CF\u30C1\u30D3\u30FC"))) return text;
     return text.replace(/(?<![ァ-ヿー])ハチビー(?![ァ-ヿー])/gu, FOREST_DISPLAY_NAMES.hachibee);
   }
-  var FOREST_DIALOGUE_PROTOCOL = "scene-dialogue-v37-profile2";
+  var FOREST_DIALOGUE_PROTOCOL = "scene-dialogue-v38-profile2";
   function forestMemoryBelongsToCharacter(memory, characterId) {
     const names = FOREST_ACTOR_NAMES[characterId] || [];
     return String(memory?.characters || "").split(/[\s,，、|;；]+/u).some((name) => names.includes(name));
@@ -1658,13 +1658,15 @@ var ForestPersonaProbe = (() => {
   var reassurance = /(?:安全|だいじょうぶ|大丈夫)/u;
   var directProhibition = /(?:食べ|たべ|口に[ 　]*し|(?:味見|あじみ)[ 　]*し)[ 　]*ては[ 　]*(?:だめ|ダメ|い(?:け(?:ない|ません|ぬ)|かん)|なら(?:ない|ぬ|ん))/u;
   var advisesAgainst = /(?:食べ|たべ|口に[ 　]*す|(?:味見|あじみ)[ 　]*す)るのは[、 　]*[^、。]{0,10}(?:勧め|すすめ)(?:でき(?:ない|ぬ|ん|ません)|ない)/u;
-  var refusal = /(?:食べ|たべ)(?:ないで|ない(?:ほう|方)が(?:いい|よい|安全)|ちゃ(?:だめ|ダメ)|るの(?:は|を)やめ|ずに|ません)|(?:味見|あじみ)(?:しない|はしない)|(?:食べ|たべ)(?:られるか|ていいか|てよいか|られるとは).{0,16}(?:わから|知ら|不明|限ら|かぎら)|(?:食べ|たべ)(?:るの|ること|たら|ると).{0,8}(?:危な|危険|だめ|ダメ)|(?:食べ|たべ)ない$|(?:安全|大丈夫|だいじょうぶ).{0,4}(?:とは|か).{0,8}(?:わから|言え|いえ)/u;
+  var refusal = /(?:食べ|たべ)(?:ないで|ない(?:ほう|方)が(?:いい|よい|安全)|ちゃ(?:だめ|ダメ)|るの(?:は|を)やめ|ずに|ません)|(?:味見|あじみ)(?:しない|はしない)|(?:食べ|たべ)ない$/u;
+  var uncertainEdibility = /(?:(?:食べ|たべ)(?:られる(?:もの)?か|て(?:いい|よい)か|られるとは)|(?:安全|大丈夫|だいじょうぶ)(?:だ)?(?:か|とは)).{0,16}(?:わから|分から|知ら|不明|限ら|かぎら|言え|いえ)/u;
+  var healthWarning = /(?:食べ|たべ)(?:るの|ること|たら|ると).{0,16}(?:危な|危険|だめ|ダメ|(?:具合|ぐあい|気分|きぶん)が(?:悪|わる)く)/u;
   var writingSurface = /(?:落ち葉|葉っぱ|はっぱ|おちば|葉)(?=(?:のうら|の裏|の上)?に[^。！？）」\x22]{0,24}(?:書[いきく]|か[いきく]))/gu;
   var generalFoodSearch = /^(?:おいしい|美味しい)(?:もの|物)を[、 ]*(?:さが|探)そ(?:う|っか)[？?]?$/u;
   var knownFood = /(?:パン|ぱん|おにぎり|弁当|べんとう|サンドイッチ|おやつ|クッキー|ケーキ|スープ)/u;
   function isRefusal(clause) {
     const phrase = clause.replace(/、/gu, "");
-    return directProhibition.test(phrase) || advisesAgainst.test(phrase) || refusal.test(phrase);
+    return directProhibition.test(phrase) || advisesAgainst.test(phrase) || refusal.test(phrase) || uncertainEdibility.test(phrase) || healthWarning.test(phrase);
   }
   function unsafeForestForaging(output, context = {}) {
     const background = JSON.stringify({
@@ -1785,7 +1787,7 @@ var ForestPersonaProbe = (() => {
   }
   var safeEnd = (id, comma = false) => ACTION_WRITING_IDS2.has(id) ? "\uFF08\u306D\u3053\u306F\u3057\u3063\u307D\u3092\u3086\u3063\u304F\u308A\u3075\u3063\u305F\u3002\uFF09" : GOODBYE[id] || (comma ? "\u307E\u305F\u3001\u68EE\u3067\u4F1A\u304A\u3046\u306D\u3002" : "\u307E\u305F\u68EE\u3067\u4F1A\u304A\u3046\u306D\u3002");
   var WRONG_FIRST_PERSON = FOREST_WRONG_FIRST_PERSON;
-  var FOREST_PROMPT_VERSION = "forest-scene-generation-v40-profile2";
+  var FOREST_PROMPT_VERSION = "forest-scene-generation-v41-profile2";
   var PROMPT_VERSION = FOREST_PROMPT_VERSION;
   var clean3 = (value) => typeof value === "string" ? value.trim().replace(/\s+/gu, " ") : "";
   function relayPayload(text) {
@@ -2574,7 +2576,7 @@ var ForestPersonaProbe = (() => {
   }
 
   // cloudflare/forest-ai/src/index.mjs
-  var FOREST_WORKER_VERSION = "forest-dialogue-v37-profile2";
+  var FOREST_WORKER_VERSION = "forest-dialogue-v38-profile2";
   var NPCS = new Set(FOREST_AI_GENERATION_IDS);
   var ACTION_WRITING_IDS3 = new Set(FOREST_ACTION_WRITING_IDS);
   var MULTI_SPEAKER2 = new Set(FOREST_MULTI_SPEAKER_IDS);

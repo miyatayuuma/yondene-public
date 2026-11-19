@@ -14,6 +14,10 @@ const refusal=/(?:食べ|たべ)(?:ないで|ない(?:ほう|方)が(?:いい|�
 const writingSurface=/(?:落ち葉|葉っぱ|はっぱ|おちば|葉)(?=(?:のうら|の裏|の上)?に[^。！？）」\x22]{0,24}(?:書[いきく]|か[いきく]))/gu;
 const generalFoodSearch=/^(?:おいしい|美味しい)(?:もの|物)を[、 ]*(?:さが|探)そ(?:う|っか)[？?]?$/u;
 const knownFood=/(?:パン|ぱん|おにぎり|弁当|べんとう|サンドイッチ|おやつ|クッキー|ケーキ|スープ)/u;
+function isRefusal(clause){
+  const phrase=clause.replace(/、/gu,'');
+  return directProhibition.test(phrase)||advisesAgainst.test(phrase)||refusal.test(phrase);
+}
 export function unsafeForestForaging(output,context={}){
   const background=JSON.stringify({situation:context.situation,topic:context.topic,
     scene:context.today?.scene,recentTurns:context.recentTurns,chosenLabel:context.chosenLabel});
@@ -28,9 +32,17 @@ export function unsafeForestForaging(output,context={}){
     output.choices.flatMap(x=>typeof x==='string'?[x]:[x?.label,x?.outcome]):[])];
   return lines.some(line=>typeof line==='string'&&line.replace(/[ 　]/gu,'')
     .split(/[。！!\n]|(?:けれども?|けど|、でも)、*/u).some(clause=>{
-    if(!(consumption.test(clause)||edibilityContext&&reassurance.test(clause))||directProhibition.test(clause)||advisesAgainst.test(clause)||refusal.test(clause))return false;
+    if(!(consumption.test(clause)||edibilityContext&&reassurance.test(clause)))return false;
     if(knownFood.test(clause)&&!refersToPlant(clause))return false;
     if(generalFoodSearch.test(clause.trim())&&!refersToPlant(subject.replace(writingSurface,'')))return false;
-    return riskyBackground||(refersToPlant(clause)&&(unknown.test(clause)||wild.test(clause)));
+    if(!(riskyBackground||(refersToPlant(clause)&&(unknown.test(clause)||wild.test(clause)))))return false;
+    if(!isRefusal(clause))return true;
+    // A refusal in the first phrase must not mask a later invitation to taste.
+    const phrases=clause.split('、');
+    return phrases.some((phrase,index)=>{
+      const next=phrases[index+1]||'';
+      return consumption.test(phrase)&&!isRefusal(phrase)&&
+        (consumption.test(next)||!isRefusal(phrase+next));
+    });
   }));
 }

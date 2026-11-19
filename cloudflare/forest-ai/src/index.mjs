@@ -6,7 +6,7 @@ import {validateTwinTurns} from '../../../reading-shelf-firebase/book-forest-twi
 // よんでね 本の森: a small, owner-only proxy for the free Workers AI allowance.
 // No bookshelf data, Firebase private credentials, or Cloudflare API keys here.
 const MODEL='@cf/google/gemma-4-26b-a4b-it';
-export const FOREST_WORKER_VERSION='forest-dialogue-v36-profile2';
+export const FOREST_WORKER_VERSION='forest-dialogue-v37-profile2';
 const VERSION=FOREST_WORKER_VERSION;
 const JWKS_URL='https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com';
 const ORIGINS=new Set(['https://kodomo-reading-shelf-87f11.web.app',
@@ -171,9 +171,11 @@ export function forestGenerationInput(prompt){
         '原作に登場した・直接目撃したと偽らず、本人の気持ちを勝手に決めつけない。'+
         '保護者による要約を子どもの直接の発言として扱わず、感想の追記を要求しない。'+
         '別のNPCの会話内容を聞いたふりをせず、選択肢を子どもの信念とみなさない。'+
-        'relayMessageは子どもが今ここで届けた言葉。内容の一点に、その人物ならではの返事をする。返伝を引き受けない。アプリが用意する伝言ボタン以外で伝言を頼まない。'+
+        (prompt.context.relayMessage?
+          '登場人物relayFromが送り手、あなたは受け手。子どもがいま届けたrelayMessageの内容に反応する。例：送り手が風の音を面白がったなら、受け手もその音に感想を返す。送り手への連絡や返伝は約束しない。':
+          'アプリが用意する伝言ボタン以外で伝言を頼まない。')+
         (prompt.context.handoffTo?
-          '今の選択で子どもが伝言を預かる。textは届ける本人の言葉だけ。例「風の音が城の門みたいだったぞ。」。宛先や「会ったら伝えて」のような指示は画面上の選択で済んでいる。':'')+
+          '今の選択で子どもが伝言を預かる。textには、相手に届いてほしい一文をかぎ括弧で囲んで書く。例「風の音が城の門みたいだったぞ。」。子どもに対する返事や宛先は書かない。':'')+
         '必ずJSONオブジェクトだけを返す。mode=choicesならtextを省略し、choicesを2件、各16字以内。'+
         'mode=openingならcontext.sourceKind（meet/story/reflection/relay/ambient/review-reaction）とtaskを優先し、'+
         '台帳のnpcLineをコピーせず、本人の新しい反応とchoicesを2件作る。'+

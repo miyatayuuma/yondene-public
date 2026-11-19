@@ -31,7 +31,7 @@ function ambientFocus(characterId,visitNumber){
 const safeEnd=(id,comma=false)=>ACTION_WRITING_IDS.has(id)?
   '（ねこはしっぽをゆっくりふった。）':GOODBYE[id]||(comma?'また、森で会おうね。':'また森で会おうね。');
 const WRONG_FIRST_PERSON=FOREST_WRONG_FIRST_PERSON;
-export const FOREST_PROMPT_VERSION='forest-scene-generation-v39-profile2';
+export const FOREST_PROMPT_VERSION='forest-scene-generation-v40-profile2';
 const PROMPT_VERSION=FOREST_PROMPT_VERSION;
 const clean=value=>typeof value==='string'?value.trim().replace(/\s+/gu,' '):'';
 // Older stored relays can contain the sender's instruction around the quote.
@@ -39,7 +39,8 @@ function relayPayload(text){
   if(!text)return '';
   const quoted=/[「『]([^」』]+)[」』][ 　]*(?:って|と)[、 　]*(?:伝え|つたえ)/u.exec(text);
   const indirect=/(?:^|[。！？!?])([^。！？!?]+?)って[、 　]*(?:伝え|つたえ)/u.exec(text);
-  return (quoted?.[1]??indirect?.[1]??text).trim();
+  const standalone=/^[「『]([^」』]+)[」』]$/u.exec(text.trim());
+  return (quoted?.[1]??indirect?.[1]??standalone?.[1]??text).trim();
 }
 
 function readJson(storage,key,fallback){
@@ -141,7 +142,8 @@ export function promptFor({characterId,mode,chosenLabel='',history=[],closing=fa
     ...(focus?{ambientFocus:focus}:{}),
     ...(twinNames?{speakers:[{slot:1,name:twinNames.firstName},{slot:2,name:twinNames.secondName}]}:{}),
     ...(handoffTo?{handoffTo:FOREST_DISPLAY_NAMES[handoffTo]}:{}),
-    ...(sourceKind==='relay'&&relayMessage?{relayMessage:relayPayload(relayMessage)}:{}),
+    ...(sourceKind==='relay'&&relayMessage?{relayMessage:relayPayload(relayMessage),
+      ...(FOREST_DISPLAY_NAMES[situation?.fromNpc]?{relayFrom:FOREST_DISPLAY_NAMES[situation.fromNpc]}:{})}:{}),
     chosenLabel:clean(chosenLabel).slice(0,24),...(situation?{situation}:{}),
     recentTurns:history.slice(-4),...(topic?{topic}:{}),
     ...(reviewSpotlight?{readerReflection:Object.fromEntries(
@@ -504,7 +506,7 @@ export function createForestLiveDialogueDirector({base,generate,storage=null,
         return !twinNames&&authored?.text?scripted(authored,characterId):finish(characterId);
       }
       const message=relayPayload(generated.text);
-      if(forestUnsupportedAction(message)){
+      if(forestUnsupportedAction(message)||/(?:預け|あずけ)ておこう/u.test(message.replace(/[ 　]/gu,''))){
         base.setRelayMessage?.({from:characterId,to:current.relayChoice.relayTo,text:current.text});
         record({event:'script-fallback',characterId,reason:'relay-message-missing',
           sourceKind:current.sourceKind,promptVersion:PROMPT_VERSION});

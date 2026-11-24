@@ -30,9 +30,9 @@ const approvedBinaries=new Set([
 ]);
 const textFile=/\.(?:md|mjs|js|json|webmanifest|html|css|svg|gs|yml|yaml|toml|txt|py|sh|rules)$/iu;
 const forbiddenPath=/(^|\/)(?:private|reading-shelf|\.firebase|\.env(?:\.[^/]*)?|\.secrets?|credentials?)(\/|$)|(^|\/)(?:service[-_]?account[^/]*\.json|[^/]+\.(?:pem|p12|pfx|key|keystore|sqlite|db|csv|tsv|xlsx?|pdf|zip|tar|gz|log))$/iu;
-const privateLink=/(?:docs\.google\.com\/spreadsheets\/d\/|script\.google\.com\/macros\/s\/)[A-Za-z0-9_-]{15,}/iu;
+const privateLink=/(?:docs\.google\.com\/(?:spreadsheets|document|presentation|forms|drawings)\/d\/|drive\.google\.com\/(?:file\/d\/|(?:drive\/(?:u\/\d+\/)?)?folders\/|(?:open|uc)\?(?:[^#\s"'<>]*&)?id=)|script\.google\.com\/(?:macros\/s\/|(?:home\/)?projects\/))[A-Za-z0-9_-]{15,}/iu;
 const privateKey=/-----BEGIN (?:RSA |EC |OPENSSH |ENCRYPTED )?PRIVATE KEY-----|["']private_key["']\s*:\s*["']-----BEGIN/iu;
-const accessToken=/\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{25,}|sk-[A-Za-z0-9_-]{20,}|ya29\.[A-Za-z0-9_-]{25,})\b/u;
+const accessToken=/\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{25,}|sk-[A-Za-z0-9_-]{20,}|ya29\.[A-Za-z0-9_-]{25,}|cf(?:ut|at)_[A-Za-z0-9_-]{20,}|GOCSPX-[A-Za-z0-9_-]{20,})\b/u;
 const hardcodedPrivateFileId=/(?:const|let|var)\s+[A-Z0-9_]*(?:MANIFEST|SHEET|DRIVE|FOLDER|SPRITE)[A-Z0-9_]*_ID\s*=\s*["'][A-Za-z0-9_-]{20,}["']/iu;
 const longCredential=/(?:password|passwd|access[_-]?token|refresh[_-]?token|client[_-]?secret)\s*[:=]\s*["'][A-Za-z0-9_+/=.:-]{24,}["']/iu;
 const email=/\b[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b/gu;
@@ -50,7 +50,7 @@ for(const path of files){
   if(privateKey.test(source)||accessToken.test(source)||longCredential.test(source))
     errors.push('potential private credential in: '+path);
   if(privateLink.test(source))
-    errors.push('private Sheets / GAS URL in: '+path);
+    errors.push('private Google Workspace URL in: '+path);
   if(hardcodedPrivateFileId.test(source))
     errors.push('hard-coded private resource ID in: '+path);
   // Firebase's browser apiKey is a public client identifier. Other Google

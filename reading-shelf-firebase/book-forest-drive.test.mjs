@@ -1,0 +1,142 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {FOREST_SPRITE_NAMES,validateForestSpriteManifest,loadPrivateForestSprites,authorizeForestDrive,findPrivateForestManifestId} from './book-forest-drive.mjs';
+
+const TEST_MANIFEST_REF='synthetic_private_manifest_001';
+const TEST_FOLDER_REF='synthetic_private_folder_001';
+const assets=Object.fromEntries(FOREST_SPRITE_NAMES.map((name,i)=>[name,'abcDEFGHIJKLMNO_'+String(i).padStart(10,'0')]));
+const manifest={schemaVersion:1,columns:2,rows:2,frameSize:64,frameDurationMs:250,assets};
+
+test('only declared private Drive pixel sprites are accepted',()=>{
+  assert.equal(validateForestSpriteManifest(manifest),assets);
+  assert.equal(validateForestSpriteManifest({...manifest,schemaVersion:2,frameSize:627}),assets);
+  assert.throws(()=>validateForestSpriteManifest({...manifest,assets:{...assets,evil:'1234567890123456789012'}}));
+  assert.throws(()=>validateForestSpriteManifest({...manifest,frameSize:32}));
+  assert.throws(()=>validateForestSpriteManifest({...manifest,schemaVersion:2,frameSize:64}));
+});
+
+test('optional Zukkoke sprites are accepted without changing the legacy 11-image manifest',async()=>{
+  const extended={...manifest,assets:{...assets,
+    hachibee:'abcdefghijklmnopqrstuv01',
+    hakase:'abcdefghijklmnopqrstuv02',
+    mochan:'abcdefghijklmnopqrstuv03'}};
+  assert.equal(Object.keys(validateForestSpriteManifest(manifest)).length,11);
+  assert.equal(Object.keys(validateForestSpriteManifest(extended)).length,14);
+  assert.throws(()=>validateForestSpriteManifest({...extended,assets:{...extended.assets,
+    invalid:'abcdefghijklmnopqrstuv04'}}));
+  let calls=0;
+  const loaded=await loadPrivateForestSprites('test-token',{resolveManifestId:async()=>TEST_MANIFEST_REF,fetchImpl:async()=>{
+    calls++;return calls===1?{ok:true,json:async()=>extended}:
+      {ok:true,blob:async()=>({size:100,type:'image/png'})};
+  },decodeImage:async()=>({width:128,height:128,close(){}})});
+  assert.equal(calls,15);
+  assert.deepEqual(Object.keys(loaded.images).sort(),Object.keys(extended.assets).sort());
+  loaded.dispose();
+});
+
+test('fetches only the manifest and its validated PNGs via bearer headers',async()=>{
+  const calls=[],decoded=[];
+  const fetchImpl=async(url,options)=>{
+    calls.push({url,options});
+    if(calls.length===1)return {ok:true,json:async()=>manifest};
+    return {ok:true,blob:async()=>({size:2000,type:'image/png'})};
+  };
+  const decodeImage=async()=>{const image={width:128,height:128,close:()=>decoded.push(true)};return image};
+  const result=await loadPrivateForestSprites('opaque-test-token',{resolveManifestId:async()=>TEST_MANIFEST_REF,fetchImpl,decodeImage});
+  assert.equal(Object.keys(result.images).length,11);
+  assert.equal(calls.length,12);
+  for(const call of calls){
+    assert.ok(call.url.startsWith('https://www.googleapis.com/drive/v3/files/'));
+    assert.ok(!call.url.includes('opaque-test-token'));
+    assert.equal(call.options.headers.Authorization,'Bearer opaque-test-token');
+  }
+  result.dispose();
+  assert.equal(decoded.length,11);
+});
+
+test('accepts full-resolution 2-by-2 image sheets from the private Drive manifest',async()=>{
+  let calls=0;
+  const fetchImpl=async()=>{
+    calls++;
+    return calls===1?{ok:true,json:async()=>({...manifest,schemaVersion:2,frameSize:627})}:
+      {ok:true,blob:async()=>({size:1000000,type:'image/png'})};
+  };
+  const result=await loadPrivateForestSprites('test-token',{resolveManifestId:async()=>TEST_MANIFEST_REF,
+    fetchImpl,decodeImage:async()=>({width:1254,height:1254,close(){}})
+  });
+  assert.equal(Object.keys(result.images).length,11);
+  result.dispose();
+});
+
+test('uses the signed-in Firebase account as the Drive authorization hint',async()=>{
+  class Provider{
+    static credentialFromResult(){return {accessToken:'one-time-drive-token'}}
+    addScope(scope){this.scope=scope}
+    setCustomParameters(params){this.params=params}
+  }
+  const user={email:'owner@example.com'};
+  const token=await authorizeForestDrive({user,GoogleAuthProvider:Provider,
+    reauthenticateWithPopup:async(account,provider)=>{
+      assert.equal(account,user);
+      assert.deepEqual(provider.params,{login_hint:user.email});
+      return {};
+    }
+  });
+  assert.equal(token,'one-time-drive-token');
+});
+
+test('offers only fully validated Drive assets for optional device caching',async()=>{
+  let count=0,payload;
+  const result=await loadPrivateForestSprites('short-lived-token',{resolveManifestId:async()=>TEST_MANIFEST_REF,
+    fetchImpl:async()=>{
+      count++;
+      return count===1?{ok:true,json:async()=>manifest}:{ok:true,blob:async()=>new Blob(['image'],{type:'image/png'})};
+    },
+    decodeImage:async()=>({width:128,height:128,close(){}}),
+    onValidatedAssets:async(m,blobs)=>{payload={manifest:m,blobs}}
+  });
+  assert.equal(payload.manifest,manifest);
+  assert.equal(Object.keys(payload.blobs).length,FOREST_SPRITE_NAMES.length);
+  result.dispose();
+});
+
+test('discovers a unique manifest only after authenticated private folder lookup',async()=>{
+  const calls=[];
+  const fetchImpl=async(url,options)=>{
+    const parsed=new URL(url),query=parsed.searchParams.get('q');
+    calls.push({url:parsed,query,options});
+    assert.equal(parsed.pathname,'/drive/v3/files');
+    assert.equal(options.headers.Authorization,'Bearer short-lived-token');
+    assert.equal(options.cache,'no-store');
+    assert.equal(parsed.searchParams.get('pageSize'),'100');
+    if(query.includes('application/vnd.google-apps.folder')){
+      assert.match(query,/name = '箱庭ドット絵（非公開）'/u);
+      return {ok:true,json:async()=>({files:[{
+        id:TEST_FOLDER_REF,name:'箱庭ドット絵（非公開）',
+        mimeType:'application/vnd.google-apps.folder'}]})};
+    }
+    assert.ok(query.includes("name = 'manifest.json'"));
+    assert.ok(query.includes("'"+TEST_FOLDER_REF+"' in parents"));
+    return {ok:true,json:async()=>({files:[{
+      id:TEST_MANIFEST_REF,name:'manifest.json',mimeType:'application/json'}]})};
+  };
+  const id=await findPrivateForestManifestId('short-lived-token',{fetchImpl});
+  assert.equal(id,TEST_MANIFEST_REF);
+  assert.equal(calls.length,2);
+  assert.ok(calls.every(call=>!call.url.href.includes('short-lived-token')));
+});
+
+test('missing, duplicate or paginated private manifest discovery fails closed',async()=>{
+  const folder={id:TEST_FOLDER_REF,name:'箱庭ドット絵（非公開）',
+    mimeType:'application/vnd.google-apps.folder'};
+  const file={id:TEST_MANIFEST_REF,name:'manifest.json',mimeType:'application/json'};
+  const lookup=files=>async url=>{
+    const query=new URL(url).searchParams.get('q')||'';
+    return {ok:true,json:async()=>({files:query.includes("mimeType = 'application/vnd.google-apps.folder'")?[folder]:files})};
+  };
+  await assert.rejects(findPrivateForestManifestId('token',{fetchImpl:lookup([])}),/一意/u);
+  await assert.rejects(findPrivateForestManifestId('token',{fetchImpl:lookup([file,file])}),/一意/u);
+  await assert.rejects(findPrivateForestManifestId('token',{fetchImpl:async()=>({
+    ok:false,status:403})}),/権限/u);
+  await assert.rejects(findPrivateForestManifestId(''),/認証/u);
+});

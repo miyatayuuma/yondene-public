@@ -1,0 +1,11 @@
+node_modules/
+.firebase/
+firebase-debug.log
+.env
+.env.*
+*.pem
+*.p12
+reading-shelf/
+/scripts/forest-voice-lab.html
+/gas/ForestPersonaProbe.gs
+firestore-debug.log

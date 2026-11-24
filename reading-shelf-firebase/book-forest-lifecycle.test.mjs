@@ -1,0 +1,310 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import * as THREE from './vendor/three/three.module.js';
+import {mountBookForest} from './book-forest.mjs';
+
+class Element {
+  constructor(tag){this.tagName=tag;this.children=[];this.style={};this.attributes={};this.dataset={};this.listeners={};this.className='';this.hidden=false;this.clientWidth=412;this.clientHeight=915;this.textContent='';}
+  get textContent(){return this.children.map(node=>node.textContent).join('')+this._textContent}
+  set textContent(text){this.children=[];this._textContent=text}
+  prepend(...nodes){this.children.unshift(...nodes)}
+  append(...nodes){this.children.push(...nodes)} replaceChildren(...nodes){this.children=nodes}
+  remove(){this.removed=true} setAttribute(k,v){this.attributes[k]=v} focus(){} setPointerCapture(){}
+  addEventListener(k,fn){(this.listeners[k]??=[]).push(fn)}
+  getBoundingClientRect(){return {left:0,top:0,width:112,height:112}}
+  getContext(){return {getImageData(){return {data:new Uint8ClampedArray(64*64*4)}},imageSmoothingEnabled:false,clearRect(){},drawImage(){draws++},fillRect(){},createRadialGradient(){return {addColorStop(){}}},beginPath(){},ellipse(){},fill(){},stroke(){},moveTo(){},lineTo(){},fillText(){}}}
+  click(){this.onclick?.({})}
+}
+let draws=0,callbacks=new Map(),id=0;
+function environment(){
+  const listeners={},windowListeners={};callbacks=new Map();id=0;draws=0;
+  const document={body:new Element('body'),hidden:false,createElement:tag=>new Element(tag),
+    addEventListener(k,fn){(listeners[k]??=[]).push(fn)},removeEventListener(k,fn){listeners[k]=(listeners[k]||[]).filter(f=>f!==fn)}};
+  document.body.classList={add(){},remove(){}};
+  globalThis.document=document;globalThis.window={devicePixelRatio:1,addEventListener(k,fn){(windowListeners[k]??=[]).push(fn)},removeEventListener(k,fn){windowListeners[k]=(windowListeners[k]||[]).filter(f=>f!==fn)}};
+  globalThis.devicePixelRatio=1;globalThis.localStorage={getItem(){return null},setItem(){}};
+  globalThis.ResizeObserver=class {observe(){} disconnect(){}};
+  globalThis.requestAnimationFrame=cb=>{const key=++id;callbacks.set(key,cb);return key};globalThis.cancelAnimationFrame=key=>callbacks.delete(key);
+  return {document,listeners,windowListeners,send(type,code){for(const fn of listeners[type]||[])fn({code,preventDefault(){},repeat:false})},
+    tick(now){const [key,fn]=callbacks.entries().next().value;callbacks.delete(key);fn(now)}};
+}
+function find(el,klass){if(el.className===klass)return el;for(const child of el.children||[]){const hit=find(child,klass);if(hit)return hit}}
+function fakeWorld(){
+  const renderer={info:{render:{calls:1,triangles:10}},setSize(){},setPixelRatio(v){this.ratio=v},getPixelRatio(){return this.ratio||1},render(){},dispose(){this.disposed=true}};
+  return {THREE,renderer,scene:new THREE.Scene(),camera:new THREE.PerspectiveCamera(),treeObstacles:[],animate(){},setMonth(){},dispose(){renderer.dispose()}};
+}
+const images=Object.fromEntries(['king','cat','kiki','jiji','skipper','twins','zorori','ishishi','noshishi','player_cat'].map(id=>[id,{width:128,height:128}]));
+function fakeSpeechEngine(){
+  let finish=null;
+  const calls=[];
+  return {calls,supported:()=>true,isSpeaking:()=>Boolean(finish),
+    speak(args){calls.push(args);return new Promise(resolve=>finish=resolve)},
+    stop(){if(!finish)return;const resolve=finish;finish=null;resolve({status:'cancelled'})},
+    complete(){if(!finish)return;const resolve=finish;finish=null;resolve({status:'finished'})}};
+}
+
+test('camera does not orbit or zoom for occluders; manual rotation remains available',async()=>{
+  const env=environment(),world=fakeWorld();
+  // Every camera ray is obstructed. This must not alter the selected view.
+  world.field={blocked:()=>true};
+  let api;
+  const ready=new Promise(resolve=>{
+    mountBookForest({familyId:'camera-manual',privateSprites:{images},
+      debug:{avatar:'player_cat',month:4,createScene:async()=>world,
+        onReady(value){api=value;resolve()}}});
+  });
+  await ready;
+  const x=-22,z=27,angle=.4,pitch=.37,dist=30;
+  api.setView({x,z,yaw:angle,pitch});
+  const approximate=(actual,expected)=>assert.ok(Math.abs(actual-expected)<1e-5,`${actual} != ${expected}`);
+  approximate(api.getState().cameraDistance,dist);
+  approximate(world.camera.position.x-x,-Math.sin(angle)*dist*Math.cos(pitch));
+  approximate(world.camera.position.z-z,Math.cos(angle)*dist*Math.cos(pitch));
+  let now=performance.now()+100;
+  env.tick(now);
+  for(let i=0;i<20;i++)env.tick(now+=50);
+  approximate(api.getState().cameraDistance,dist);
+  approximate(world.camera.position.x-x,-Math.sin(angle)*dist*Math.cos(pitch));
+  approximate(world.camera.position.z-z,Math.cos(angle)*dist*Math.cos(pitch));
+  // Explicit user rotation still works, without an obstacle-driven correction.
+  const before=world.camera.position.x;
+  env.send('keydown','KeyQ');env.tick(now+=50);env.send('keyup','KeyQ');
+  assert.ok(world.camera.position.x<before,'manual rotation changes the camera bearing');
+  approximate(api.getState().cameraDistance,dist);
+  find(env.document.body,'bookForestClose').click();
+});
+
+test('idle sprites stop; talking freezes movement and notifies the independent adapter',async()=>{
+  const env=environment(),world=fakeWorld(),events=[];let api;
+  const ready=new Promise(resolve=>{
+    mountBookForest({familyId:'test',privateSprites:{images},dialogue:{start(info){events.push(['start',info]);return {text:'こんにちは',choices:[]}},end(info){events.push(['end',info])}},
+      debug:{avatar:'player_cat',month:4,createScene:async()=>world,onReady(value){api=value;resolve()}}});
+  });
+  await ready;let now=performance.now()+50;env.tick(now);
+  const idleDraws=draws;env.tick(now+=500);assert.equal(draws,idleDraws,'stationary actors should not advance frames');
+  api.setView({x:-22,z:17,yaw:0});env.tick(now+=300);
+  const chatButton=find(env.document.body,'bookForestChat');assert.equal(chatButton.hidden,false);
+  chatButton.click();await Promise.resolve();assert.equal(api.getState().chatOpen,true);
+  assert.deepEqual(events[0],['start',{characterId:'king',displayName:'王さま'}]);
+  const before=api.getState();env.send('keydown','KeyW');env.tick(now+=300);const during=api.getState();
+  assert.equal(during.x,before.x);assert.equal(during.z,before.z);
+  find(env.document.body,'bookForestDismiss').click();assert.deepEqual(events[1],['end',{characterId:'king',displayName:'王さま'}]);
+  env.send('keydown','KeyW');env.tick(now+=350);assert.notEqual(api.getState().z,before.z);
+  assert.ok(draws>idleDraws,'walking advances only the player sprite');
+  find(env.document.body,'bookForestClose').click();
+  assert.equal(world.renderer.disposed,true);assert.equal(callbacks.size,0);
+  assert.equal((env.listeners.keydown||[]).length,0);assert.equal((env.windowListeners.blur||[]).length,0);
+});
+
+test('a scene that finishes loading after exit is disposed and never starts a loop',async()=>{
+  const env=environment(),world=fakeWorld();let finish;
+  const pending=new Promise(resolve=>finish=resolve);
+  const dispose=mountBookForest({familyId:'test',debug:{avatar:'player_cat',createScene:()=>pending}});
+  dispose();finish(world);await Promise.resolve();await Promise.resolve();
+  assert.equal(world.renderer.disposed,true);assert.equal(callbacks.size,0);
+});
+
+test('each twin is separately approachable with the same private sprite and dialogue context',async()=>{
+  const env=environment(),events=[];let api;
+  const ready=new Promise(resolve=>{
+    mountBookForest({familyId:'twins-test',privateSprites:{images},dialogue:{start(info){events.push(info);return {text:'やあ',choices:[]}}},
+      debug:{avatar:'player_cat',month:4,createScene:async()=>fakeWorld(),onReady(value){api=value;resolve()}}});
+  });
+  await ready;
+  assert.equal(api.characters.length,10);
+  const first=api.characters.find(c=>c.id==='twins'),second=api.characters.find(c=>c.id==='twins_second');
+  assert.equal(first.spriteId,'twins');assert.equal(second.spriteId,'twins');
+  assert.equal(first.scale,.8);assert.equal(second.scale,.8);
+  api.setView({x:second.x,z:second.z});
+  let now=performance.now()+50;env.tick(now);
+  assert.equal(api.getState().nearby,'twins_second');
+  const button=find(env.document.body,'bookForestChat');assert.equal(button.hidden,false);
+  button.click();await Promise.resolve();
+  assert.deepEqual(events[0],{characterId:'twins',displayName:'ふたご'});
+  const before=api.getState().npcs.find(c=>c.id==='twins_second');
+  for(let i=0;i<200;i++)env.tick(now+=50);
+  const after=api.getState().npcs.find(c=>c.id==='twins_second');
+  assert.deepEqual([after.x,after.z],[before.x,before.z],'talking sibling stays put');
+  find(env.document.body,'bookForestClose').click();
+});
+
+test('twin conversation displays alternating names, autoplays, pauses in background, and stops on close',async()=>{
+  const originalSet=globalThis.setTimeout,originalClear=globalThis.clearTimeout;
+  const timers=new Map();let timerId=0,closeForest=()=>{};
+  globalThis.setTimeout=(fn)=>{const id=++timerId;timers.set(id,fn);return id};
+  globalThis.clearTimeout=id=>timers.delete(id);
+  try{
+    const env=environment();let api,turn=0;
+    const ready=new Promise(resolve=>{
+      closeForest=mountBookForest({familyId:'twins-voice',privateSprites:{images},
+        dialogue:{start:()=>({mode:'twins',speakerName:'ふたご',speakerSlot:0,
+          nextSpeakerName:'テストA',nextSpeakerSlot:1,text:'だれか来た！',autoNext:true,autoDelayMs:3500,choices:[]}),
+          advance:()=>({mode:'twins',speakerName:++turn%2?'テストA':'テストB',
+            speakerSlot:turn%2?1:2,text:'おしゃべりしよう。',autoNext:turn<2,
+            conversationComplete:turn>=2,
+            nextSpeakerName:turn<2?'テストB':null,nextSpeakerSlot:turn<2?2:null,
+            autoDelayMs:3500,choices:[]}),end(){}},
+        debug:{avatar:'player_cat',month:4,createScene:async()=>fakeWorld(),
+          onReady(value){api=value;resolve()}}});
+    });
+    await ready;api.setView({x:56,z:33});env.tick(performance.now()+100);
+    const chatPanel=find(env.document.body,'bookForestConversation');chatPanel.scrollHeight=410;
+    find(env.document.body,'bookForestChat').click();await Promise.resolve();
+    const history=find(env.document.body,'bookForestTwinHistory');
+    const waiting=find(env.document.body,'bookForestTwinWaiting');
+    const dismiss=find(env.document.body,'bookForestDismiss');
+    assert.equal(dismiss.hidden,false,'the child can interrupt a twin exchange');
+    assert.equal(history.children[0].children[0].textContent,'ふたご');
+    assert.equal(waiting.hidden,false,'animated dots indicate more twin dialogue is coming');
+    assert.equal(waiting.children[0].textContent,'テストA','next speaker is visible immediately');
+    assert.equal(waiting.children[1].children.length,3,'three animated dots occupy next speaker message');
+    assert.equal(waiting.dataset.speaker,'1');
+    assert.equal(chatPanel.scrollTop,410,'new speaker preview is scrolled into view');
+    assert.equal(timers.size,1);
+    chatPanel.scrollHeight=520;
+    const callback=[...timers.values()][0];await callback();
+    assert.equal(history.children.length,2);
+    assert.equal(history.children[1].children[0].textContent,'テストA');
+    assert.equal(waiting.children[0].textContent,'テストB','dots switch to the next twin after speaking');
+    assert.equal(waiting.dataset.speaker,'2');
+    assert.equal(chatPanel.scrollTop,520,'next preview remains visible when dialogue grows');
+    assert.equal(timers.size,1);
+    env.document.hidden=true;
+    for(const fn of env.listeners.visibilitychange||[])fn();
+    assert.equal(timers.size,0,'background conversation must pause');
+    assert.equal(waiting.hidden,true,'background pause hides the waiting indicator');
+    env.document.hidden=false;
+    for(const fn of env.listeners.visibilitychange||[])fn();
+    assert.equal(timers.size,1,'foreground conversation can resume');
+    assert.equal(waiting.hidden,false);
+    const finalCallback=[...timers.values()][0];await finalCallback();
+    assert.equal(history.children.length,3);
+    assert.equal(waiting.hidden,true,'scene finishes without starting another scene');
+    assert.equal(timers.size,0,'no further auto playback after one scene');
+    assert.equal(dismiss.hidden,false,'close button appears only after the scene ends');
+    assert.equal(dismiss.textContent,'またね');
+    dismiss.click();
+    assert.equal(timers.size,0,'closing the conversation cancels speech timers');
+    assert.equal(waiting.hidden,true,'closing the conversation hides the waiting indicator');
+  }finally{closeForest();globalThis.setTimeout=originalSet;globalThis.clearTimeout=originalClear}
+});
+
+test('only the text block starts one line of speech; tapping again stops and closing cancels',async()=>{
+  const env=environment(),speechEngine=fakeSpeechEngine();let api;
+  globalThis.localStorage.getItem=key=>key==='yondene-forest-voice-lab-v1'
+    ?JSON.stringify({king:{rate:1.8,pitch:.77,volume:.9,voiceURI:'ja-custom'}}):null;
+  const ready=new Promise(resolve=>{
+    mountBookForest({familyId:'speech-king',privateSprites:{images},
+      dialogue:{start:()=>({text:'橋の向こうを見よう。',choices:[]}),end(){}},
+      debug:{speechEngine,avatar:'player_cat',month:4,createScene:async()=>fakeWorld(),onReady(value){api=value;resolve()}}});
+  });
+  await ready;api.setView({x:-22,z:17});env.tick(performance.now()+100);
+  find(env.document.body,'bookForestChat').click();await Promise.resolve();
+  const panel=find(env.document.body,'bookForestConversation');
+  const speaker=find(env.document.body,'bookForestSpeaker');
+  const line=find(env.document.body,'bookForestMessage');
+  assert.equal(panel.onclick,undefined,'the surrounding dialogue card does not start TTS');
+  assert.equal(speaker.onclick,undefined,'the character name does not start TTS');
+  assert.equal(line.dataset.voiceEnabled,'true');
+  assert.equal(line.attributes.role,'button');
+  assert.equal(line.tabIndex,0,'keyboard activation is available');
+  line.click();
+  assert.equal(speechEngine.calls.length,1);
+  assert.deepEqual([speechEngine.calls[0].characterId,speechEngine.calls[0].text],['king','橋の向こうを見よう。']);
+  assert.deepEqual(speechEngine.calls[0].profile,{rate:1.8,pitch:.77,volume:.9,voiceURI:'ja-custom'},
+    'the forest uses previously accepted voice-lab parameters on the same origin');
+  assert.equal(line.dataset.speaking,'true');
+  line.click();await Promise.resolve();
+  assert.equal(speechEngine.isSpeaking(),false,'same line toggles speech off');
+  assert.equal(line.dataset.speaking,'false');
+  line.click();assert.equal(speechEngine.calls.length,2);
+  find(env.document.body,'bookForestDismiss').click();
+  assert.equal(speechEngine.isSpeaking(),false,'closing a conversation stops TTS');
+  find(env.document.body,'bookForestClose').click();
+});
+
+test('cat receives no speech target, regardless of dialogue text',async()=>{
+  const env=environment(),speechEngine=fakeSpeechEngine();let api;
+  const ready=new Promise(resolve=>{
+    mountBookForest({familyId:'silent-cat',privateSprites:{images},
+      dialogue:{start:()=>({text:'にゃあ',choices:[]})},
+      debug:{speechEngine,avatar:'player_cat',month:4,createScene:async()=>fakeWorld(),onReady(value){api=value;resolve()}}});
+  });
+  await ready;api.setView({x:-49,z:23});env.tick(performance.now()+100);
+  find(env.document.body,'bookForestChat').click();await Promise.resolve();
+  const line=find(env.document.body,'bookForestMessage');
+  assert.equal(line.textContent,'にゃあ');
+  assert.equal(line.dataset.voiceEnabled,'false');
+  assert.equal(line.onclick,null);
+  assert.equal(speechEngine.calls.length,0);
+  find(env.document.body,'bookForestClose').click();
+});
+
+test('twins pause automatic advance while reading a selected line and resume after speech ends',async()=>{
+  const originalSet=globalThis.setTimeout,originalClear=globalThis.clearTimeout;
+  const timers=new Map();let timerId=0,closeForest=()=>{};
+  globalThis.setTimeout=fn=>{const id=++timerId;timers.set(id,fn);return id};
+  globalThis.clearTimeout=id=>timers.delete(id);
+  try{
+    const env=environment(),speechEngine=fakeSpeechEngine();let api,turn=0;
+    const ready=new Promise(resolve=>{
+      closeForest=mountBookForest({familyId:'speech-twins',privateSprites:{images},
+        dialogue:{start:()=>({mode:'twins',speakerName:'アケビ',speakerSlot:1,text:'あそぼう。',autoNext:true,autoDelayMs:3000,choices:[]}),
+          advance:()=>({mode:'twins',speakerName:'スグリ',speakerSlot:2,text:'いいよ。',autoNext:false,conversationComplete:true,choices:[],turn:++turn}),end(){}},
+        debug:{speechEngine,avatar:'player_cat',month:4,createScene:async()=>fakeWorld(),onReady(value){api=value;resolve()}}});
+    });
+    await ready;api.setView({x:52,z:30});env.tick(performance.now()+100);
+    find(env.document.body,'bookForestChat').click();await Promise.resolve();
+    const history=find(env.document.body,'bookForestTwinHistory');
+    const first=history.children[0].children[1];
+    assert.equal(first.dataset.voiceEnabled,'true');
+    assert.equal(history.children[0].onclick,undefined,'tapping the bubble padding does not start speech');
+    assert.equal(timers.size,1);
+    first.click();assert.equal(timers.size,0,'voice playback pauses next-twin timer');
+    assert.equal(speechEngine.calls.length,1);
+    assert.equal(speechEngine.calls[0].characterId,'twins_first');
+    speechEngine.complete();await Promise.resolve();await Promise.resolve();
+    assert.equal(timers.size,1,'next-twin timer resumes after speech ends');
+    const callback=[...timers.values()][0];await callback();
+    const second=history.children[1].children[1];
+    second.click();assert.equal(speechEngine.calls.length,2);
+    assert.equal(speechEngine.calls[1].characterId,'twins_first','both twins share the same voice identity');
+    find(env.document.body,'bookForestClose').click();
+    assert.equal(speechEngine.isSpeaking(),false);
+  }finally{closeForest();globalThis.setTimeout=originalSet;globalThis.clearTimeout=originalClear}
+});
+
+test('cat shows written dialogue in the bubble without speaking or a 3D mark',async()=>{
+  const env=environment(),world=fakeWorld(),speech=fakeSpeechEngine();let api;
+  const ready=new Promise(resolve=>{
+    mountBookForest({familyId:'silent-cat-writing',privateSprites:{images},
+      dialogue:{
+        start:async()=>({text:'こっちだよ。木の下を見て。',delivery:'written',
+          choices:[{id:'cat-more',label:'みてみる'}]}),
+        select:async()=>({text:'（ねこはしっぽをふった。）',delivery:'gesture',choices:[],conversationComplete:true}),
+        end(){}
+      },
+      debug:{avatar:'player_cat',month:4,createScene:async()=>world,
+        speechEngine:speech,onReady(value){api=value;resolve()}}});
+  });
+  await ready;
+  api.setView({x:-49,z:23});
+  env.tick(performance.now()+150);
+  const talk=find(env.document.body,'bookForestChat');
+  assert.equal(talk.hidden,false);
+  talk.click();await Promise.resolve();await Promise.resolve();
+  assert.equal(find(env.document.body,'bookForestMessage').dataset.voiceEnabled,'false');
+  assert.equal(find(env.document.body,'bookForestWritingNote').textContent,'（ねこは字を書いて見せた。）');
+  assert.match(find(env.document.body,'bookForestMessage').textContent,/こっちだよ。木の下を見て。$/u);
+  assert.equal(world.scene.children.filter(object=>object.name==='forest-cat-writing').length,0);
+  assert.equal(speech.calls.length,0);
+  const response=find(env.document.body,'bookForestReplies').children[0];
+  response.click();await Promise.resolve();await Promise.resolve();
+  assert.equal(find(env.document.body,'bookForestWritingNote'),undefined);
+  assert.equal(find(env.document.body,'bookForestMessage').textContent,'（ねこはしっぽをふった。）');
+  assert.equal(world.scene.children.filter(object=>object.name==='forest-cat-writing').length,0);
+  assert.equal(speech.calls.length,0);
+  find(env.document.body,'bookForestDismiss').click();
+  assert.equal(world.scene.children.filter(object=>object.name==='forest-cat-writing').length,0);
+  find(env.document.body,'bookForestClose').click();
+});
